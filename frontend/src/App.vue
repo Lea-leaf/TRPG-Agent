@@ -1,14 +1,32 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
+const SESSION_STORAGE_KEY = 'trpg-chat-session-id'
+
+const getStoredSessionId = (): string | null => {
+  const value = localStorage.getItem(SESSION_STORAGE_KEY)
+  return value && value.trim() ? value : null
+}
+
+const setStoredSessionId = (sessionId: string) => {
+  localStorage.setItem(SESSION_STORAGE_KEY, sessionId)
+}
+
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
 }
 
+type ChatResponsePayload = {
+  reply?: string
+  plan?: string | null
+  session_id?: string
+}
+
 const inputText = ref('')
 const isSending = ref(false)
 const errorText = ref('')
+const sessionId = ref<string | null>(getStoredSessionId())
 const messages = ref<ChatMessage[]>([
   { role: 'assistant', content: '你好，我是 TRPG 助手。你可以直接开始提问。' }
 ])
@@ -26,14 +44,18 @@ const sendMessage = async () => {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify({ message: text, session_id: sessionId.value })
     })
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
 
-    const data = await response.json()
+    const data = (await response.json()) as ChatResponsePayload
+    if (data.session_id && data.session_id !== sessionId.value) {
+      sessionId.value = data.session_id
+      setStoredSessionId(data.session_id)
+    }
     const reply = String(data.reply ?? '').trim() || '模型没有返回内容。'
     messages.value.push({ role: 'assistant', content: reply })
   } catch (error) {

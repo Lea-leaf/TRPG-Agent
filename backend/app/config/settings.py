@@ -27,6 +27,10 @@ class Settings(BaseSettings):
         default=20.0,
         validation_alias=AliasChoices("TRPG_LLM_TIMEOUT_SECONDS", "OPENAI_TIMEOUT"),
     )
+    memory_db_path: str = Field(
+        default="data/context_memory.sqlite3",
+        validation_alias=AliasChoices("TRPG_MEMORY_DB_PATH", "MEMORY_DB_PATH"),
+    )
 
     model_config = SettingsConfigDict(env_prefix="TRPG_", env_file=".env", extra="ignore")
 
