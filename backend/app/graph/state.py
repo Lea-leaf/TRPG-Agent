@@ -1,25 +1,38 @@
 # backend/app/graph/state.py
-from typing import Literal, Optional, TypedDict
+from typing import Annotated, Literal, Optional, TypedDict
+
+from langchain_core.messages import AnyMessage
+from langgraph.graph.message import add_messages
 
 
 # 角色六维能力值（通常用于检定基础值）
-class AbilityBlock(TypedDict, total=False):
-    str: int  # 力量
-    dex: int  # 敏捷
-    con: int  # 体质
-    int: int  # 智力
-    wis: int  # 感知
-    cha: int  # 魅力
+AbilityBlock = TypedDict(
+    "AbilityBlock",
+    {
+        "str": int,
+        "dex": int,
+        "con": int,
+        "int": int,
+        "wis": int,
+        "cha": int,
+    },
+    total=False,
+)
 
 
 # 六维对应修正值（通常由能力值推导）
-class ModifierBlock(TypedDict, total=False):
-    str: int  # 力量修正
-    dex: int  # 敏捷修正
-    con: int  # 体质修正
-    int: int  # 智力修正
-    wis: int  # 感知修正
-    cha: int  # 魅力修正
+ModifierBlock = TypedDict(
+    "ModifierBlock",
+    {
+        "str": int,
+        "dex": int,
+        "con": int,
+        "int": int,
+        "wis": int,
+        "cha": int,
+    },
+    total=False,
+)
 
 
 # 玩家常驻状态（可在探索/战斗阶段复用）
@@ -68,14 +81,13 @@ class CombatantState(TypedDict, total=False):
 
 # 整个 LangGraph 在节点间传递的共享状态
 class GraphState(TypedDict, total=False):
-    # --- 现有流程字段 ---
-    messages: list[dict]           # 对话历史（供模型上下文使用）
-    user_input: str                # 当前回合输入
-    plan: str                      # planner 节点产出的中间计划
-    output: str                    # executor 节点产出的最终回复
+    # --- 核心对话流程字段 ---
+    messages: Annotated[list[AnyMessage], add_messages]
+    output: str
 
-    # --- V1 新增 ---
     session_id: str                # 会话唯一标识
+
+    # --- 扩展领域字段（当前 chat 主链路未启用） ---
     phase: Literal["exploration", "combat", "resolution"]
     turn_index: int                # 当前回合序号
 

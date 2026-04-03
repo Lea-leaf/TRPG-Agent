@@ -1,44 +1,47 @@
 """Chat API router."""
 
-from uuid import uuid4
+import sqlite3
 
 from fastapi import HTTPException
 from fastapi import APIRouter
+from fastapi import status
 
 from app.api.schemas import ChatRequest, ChatResponse
-from app.config.settings import settings
-from app.graph.builder import build_graph
-from app.memory.checkpointer import Checkpointer
+from app.services.chat_session_service import get_chat_session_service
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-GRAPH = build_graph()
-CHECKPOINTER = Checkpointer(settings.memory_db_path)
+CHAT_SESSION_SERVICE = get_chat_session_service()
 
 
 @router.post("", response_model=ChatResponse)
 async def chat(payload: ChatRequest) -> ChatResponse:
     try:
-        session_id = payload.session_id or str(uuid4())
-        saved_state = CHECKPOINTER.load(session_id) or {}
-        messages = saved_state.get("messages", [])
-        if not isinstance(messages, list):
-            messages = []
-
-        result = GRAPH.invoke(
-            {
-                "session_id": session_id,
-                "user_input": payload.message,
-                "messages": messages,
-            }
+        result = CHAT_SESSION_SERVICE.process_turn(
+            message=payload.message,
+            session_id=payload.session_id,
         )
-        CHECKPOINTER.save(session_id, {"messages": result.get("messages", [])})
 
         return ChatResponse(
-            reply=result.get("output", ""),
+            reply=result.get("reply", ""),
             plan=result.get("plan"),
-            session_id=session_id,
+            session_id=result.get("session_id", ""),
         )
+    except sqlite3.Error as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Conversation memory storage is unavailable.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

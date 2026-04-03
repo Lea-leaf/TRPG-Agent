@@ -1,31 +1,35 @@
 """Conditional routes and edge rules."""
 
-from app.graph.constants import END_NODE, EXECUTOR_NODE, PLANNER_NODE, ROUTER_NODE, TOOL_NODE
+from langchain_core.messages import AIMessage
+
+from app.graph.constants import ASSISTANT_NODE, END_NODE, ROUTER_NODE, TOOL_NODE
 from app.graph.state import GraphState
 
 
 def route_from_router(state: GraphState) -> str:
-    user_input = str(state.get("user_input", "")).strip()
-    if not user_input:
+    messages = state.get("messages", [])
+    if not messages:
         return END_NODE
-    return PLANNER_NODE
+    return ASSISTANT_NODE
 
 
-def route_from_planner(state: GraphState) -> str:
-    return EXECUTOR_NODE
+def route_from_assistant(state: GraphState) -> str:
+    messages = state.get("messages", [])
+    if not messages:
+        return END_NODE
 
-
-def route_from_executor(state: GraphState) -> str:
+    last_message = messages[-1]
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
+        return TOOL_NODE
     return END_NODE
 
 
 def route_from_tool(state: GraphState) -> str:
-    return EXECUTOR_NODE
+    return ASSISTANT_NODE
 
 
 ROUTE_OPTIONS = {
-    PLANNER_NODE: PLANNER_NODE,
-    EXECUTOR_NODE: EXECUTOR_NODE,
+    ASSISTANT_NODE: ASSISTANT_NODE,
     TOOL_NODE: TOOL_NODE,
     END_NODE: END_NODE,
 }

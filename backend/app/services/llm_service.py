@@ -1,7 +1,8 @@
-"""LLM service using OpenAI-compatible chat completion API."""
+"""LLM service with LangChain ChatOpenAI and native tool-calling support."""
 
 from openai import APITimeoutError, APIConnectionError
-from openai import OpenAI
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from app.config.settings import settings
 
@@ -21,24 +22,26 @@ class LLMService:
         if base_url and base_url.strip():
             client_kwargs["base_url"] = base_url.strip()
 
-        self._client = OpenAI(
+        self._client = ChatOpenAI(
             **client_kwargs,
+            model=settings.llm_model,
+            temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
             max_retries=0,
         )
 
-    def generate(self, prompt: str) -> str:
+    def invoke_with_tools(
+        self,
+        messages: list[BaseMessage],
+        tools: list,
+        system_prompt: str,
+    ) -> AIMessage:
         try:
-            response = self._client.chat.completions.create(
-                model=settings.llm_model,
-                temperature=settings.llm_temperature,
-                messages=[
-                    {"role": "system", "content": "You are a helpful TRPG assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            content = response.choices[0].message.content or ""
-            return content.strip()
+            runnable = self._client.bind_tools(tools)
+            response = runnable.invoke([SystemMessage(content=system_prompt), *messages])
+            if isinstance(response, AIMessage):
+                return response
+            return AIMessage(content=str(getattr(response, "content", "") or ""))
         except APITimeoutError as exc:
             raise RuntimeError(
                 f"LLM request timed out after {settings.llm_timeout_seconds}s. "

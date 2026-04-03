@@ -43,3 +43,6 @@ node_modules/
 # 各包管理器的锁文件
 package-lock.json
 yarn.lock
+backend/data/context_memory.sqlite3
+backend/data/context_memory.sqlite3-shm
+backend/data/context_memory.sqlite3-wal
