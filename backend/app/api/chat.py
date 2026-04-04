@@ -20,12 +20,14 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         result = CHAT_SESSION_SERVICE.process_turn(
             message=payload.message,
             session_id=payload.session_id,
+            resume_action=payload.resume_action,
         )
 
         return ChatResponse(
             reply=result.get("reply", ""),
             plan=result.get("plan"),
             session_id=result.get("session_id", ""),
+            pending_action=result.get("pending_action"),
         )
     except sqlite3.Error as exc:
         raise HTTPException(

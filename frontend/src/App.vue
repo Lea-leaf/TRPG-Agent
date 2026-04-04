@@ -17,34 +17,57 @@ type ChatMessage = {
   content: string
 }
 
+type PendingAction = {
+  type: string
+  reason?: string
+  formula?: string
+}
+
 type ChatResponsePayload = {
   reply?: string
   plan?: string | null
   session_id?: string
+  pending_action?: PendingAction | null
 }
 
 const inputText = ref('')
 const isSending = ref(false)
 const errorText = ref('')
 const sessionId = ref<string | null>(getStoredSessionId())
+const pendingAction = ref<PendingAction | null>(null)
 const messages = ref<ChatMessage[]>([
   { role: 'assistant', content: '你好，我是 TRPG 助手。你可以直接开始提问。' }
 ])
 
-const sendMessage = async () => {
+const sendMessage = async (action?: string | Event) => {
+  const isActionStr = typeof action === 'string'
+  const actionValue = isActionStr ? action : undefined
   const text = inputText.value.trim()
-  if (!text || isSending.value) return
+  
+  // 只在没有 action 且没有 text 时拦截
+  if (!isActionStr && !text) return
+  if (isSending.value) return
 
   errorText.value = ''
-  messages.value.push({ role: 'user', content: text })
-  inputText.value = ''
+  
+  if (!isActionStr && text) {
+    messages.value.push({ role: 'user', content: text })
+    inputText.value = ''
+  } else if (isActionStr && actionValue === 'confirmed' && pendingAction.value) {
+    messages.value.push({ role: 'user', content: `[掷骰确认: ${pendingAction.value.reason || '无'}]` })
+  }
+
   isSending.value = true
 
   try {
+    const payload = isActionStr 
+      ? { session_id: sessionId.value, resume_action: actionValue }
+      : { message: text, session_id: sessionId.value }
+      
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, session_id: sessionId.value })
+      body: JSON.stringify(payload)
     })
 
     if (!response.ok) {
@@ -56,8 +79,15 @@ const sendMessage = async () => {
       sessionId.value = data.session_id
       setStoredSessionId(data.session_id)
     }
-    const reply = String(data.reply ?? '').trim() || '模型没有返回内容。'
-    messages.value.push({ role: 'assistant', content: reply })
+    
+    pendingAction.value = data.pending_action || null
+    
+    const reply = String(data.reply ?? '').trim()
+    if (reply) {
+      messages.value.push({ role: 'assistant', content: reply })
+    } else if (!pendingAction.value && !reply) {
+      messages.value.push({ role: 'assistant', content: '模型没有返回内容。' })
+    }
   } catch (error) {
     errorText.value = '发送失败，请检查后端服务和模型配置。'
     console.error(error)
@@ -87,14 +117,22 @@ const sendMessage = async () => {
 
       <p v-if="errorText" class="error-text">{{ errorText }}</p>
 
-      <form class="input-row" @submit.prevent="sendMessage">
+      <div v-if="pendingAction?.type === 'dice_roll'" class="action-panel">
+        <p><strong>动作挂起：判断需要掷骰</strong></p>
+        <p>原因：{{ pendingAction.reason }} ({{ pendingAction.formula }})</p>
+        <button class="roll-btn" @click="sendMessage('confirmed')" :disabled="isSending">
+          确认掷骰
+        </button>
+      </div>
+
+      <form class="input-row" @submit.prevent="sendMessage()">
         <input
           v-model="inputText"
           type="text"
           placeholder="输入内容并回车发送..."
-          :disabled="isSending"
+          :disabled="isSending || pendingAction !== null"
         />
-        <button type="submit" :disabled="isSending || !inputText.trim()">
+        <button type="submit" :disabled="isSending || (!inputText.trim() && !pendingAction)">
           {{ isSending ? '发送中...' : '发送' }}
         </button>
       </form>
@@ -182,6 +220,36 @@ const sendMessage = async () => {
 }
 
 .input-row button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.action-panel {
+  margin-top: 10px;
+  padding: 12px;
+  background: rgba(255, 165, 0, 0.15);
+  border: 1px solid #ffaf40;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.action-panel p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.roll-btn {
+  margin-top: 8px;
+  padding: 8px 24px;
+  background: #ffaf40;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.roll-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

@@ -6,12 +6,14 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="User input message")
+    message: Optional[str] = Field(default=None, description="User input message")
     session_id: Optional[str] = Field(default=None, description="Conversation session id")
+    resume_action: Optional[str] = Field(default=None, description="Resume action for interrupted graph (e.g. 'roll_dice')")
 
 
 class ChatResponse(BaseModel):
     reply: str
     plan: Optional[str] = None
     session_id: str
+    pending_action: Optional[dict] = Field(default=None, description="Action required from the user before continuing")
 
