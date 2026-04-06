@@ -1,0 +1,13 @@
+{
+  "name": "trpg-agent",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently \"cd frontend && pnpm dev\" \"cd backend && .venv\\Scripts\\python.exe -m uvicorn app.main:app\"",
+    "dev:frontend": "cd frontend && pnpm dev",
+    "dev:backend": "cd backend && .venv\\Scripts\\python.exe -m uvicorn app.main:app"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
