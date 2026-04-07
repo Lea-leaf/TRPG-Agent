@@ -1,6 +1,10 @@
-export type ChatMessage = {
+// frontend/src/Services_/chatService.ts
+export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  timestamp?: string | number
+  avatar?: string      // 头像 URL（可选）
+  displayName?: string // 显示名称（可选）
 }
 
 export type PendingAction = {
@@ -36,3 +40,4 @@ export const chatService = {
     return await response.json()
   }
 }
+
