@@ -13,6 +13,8 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command, interrupt
 
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
+from app.calculation.bestiary import spawn_combatants
+from app.graph.state import CombatState
 
 
 @tool
@@ -138,7 +140,58 @@ def load_character_profile(
     )
 
 
+@tool
+def spawn_monsters(
+    monster_index: str,
+    count: int = 1,
+    faction: str = "enemy",
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None
+) -> Command:
+    """
+    根据怪物图鉴生成战斗单位实例并加入当前战场环境。遇到类似“这里有几只地精”等场景指令时调用此工具。
+    
+    Args:
+        monster_index: 怪物图鉴上的 index (如 "goblin")。必须输入其英文代号。
+        count: 生成该单位的数量。默认为 1。
+        faction: 阵营，通常为 "enemy", "ally" 或 "neutral"。默认 "enemy"。
+    """
+    try:
+        new_combatants = spawn_combatants(monster_index, count, faction)
+    except Exception as e:
+        return f"生成战斗单位失败: {str(e)}"
+        
+    import json
+    
+    # 取出现有战斗状态，如没有则创建新的初始状态
+    current_combat_state = state.get("combat") or {
+        "round": 0,
+        "participants": {},
+        "initiative_order": [],
+        "current_actor_id": ""
+    }
+
+    # 将新生成的怪物附加到现有的 participants 中
+    for c in new_combatants:
+        current_combat_state["participants"][c["id"]] = c
+
+    # 提取新生成怪物的名字列表
+    names = [c["name"] for c in new_combatants]
+
+    # 返回更新后的状态
+    return Command(
+        update={
+            "combat": current_combat_state,  # 仅更新 participants
+            "messages": [
+                ToolMessage(
+                    content=f"成功在战场中生成了 {count} 只 {monster_index}，ID/名字分别为: {', '.join(names)}",
+                    tool_call_id=tool_call_id
+                )
+            ]
+        }
+    )
+
 @lru_cache(maxsize=1)
 def get_tools() -> list[BaseTool]:
-    return [weather, request_dice_roll, load_character_profile]
+    return [weather, request_dice_roll, load_character_profile, spawn_monsters]
 

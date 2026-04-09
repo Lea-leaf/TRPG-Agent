@@ -75,7 +75,23 @@ class CombatantState(TypedDict, total=False):
     hp: int
     max_hp: int
     ac: int
+    initiative: int
+    speed: int
     conditions: list[str]
+
+    # 动作资源
+    action_available: bool                   # 标准动作
+    bonus_action_available: bool             # 附赠动作
+    reaction_available: bool                 # 反应
+    movement_left: int                       # 剩余移动力（尺）
+
+
+# 战斗对局整体状态（扁平化动作经济管理）
+class CombatState(TypedDict, total=False):
+    round: int                               # 当前回合数
+    participants: dict[str, CombatantState]  # 参战方字典，使用 id 作为键
+    initiative_order: list[str]              # 行动顺序 (按 id)
+    current_actor_id: str                    # 当前回合活跃的单位 id
 
 
 # 整个 LangGraph 在节点间传递的共享状态
@@ -89,7 +105,6 @@ class GraphState(TypedDict, total=False):
 
     # --- 扩展领域字段（当前 chat 主链路未启用） ---
     phase: Literal["exploration", "combat", "resolution"]
-    turn_index: int                # 当前回合序号
 
     scene_summary: str             # 场景摘要，减少长上下文重复
     player: PlayerState
@@ -97,8 +112,6 @@ class GraphState(TypedDict, total=False):
     pending_check: Optional[CheckState]      # 等待掷骰解析的检定
     last_roll: Optional[RollResultState]     # 最近一次检定/攻击结果
 
-    in_combat: bool
-    round: int
-    combatants: list[CombatantState]
+    combat: Optional[CombatState]  # 战斗上下级聚合
 
     event_log: list[dict]          # 记录关键事件，便于回放/调试
