@@ -19,6 +19,12 @@ class CombatEffects(BaseModel):
     prevents_actions: bool = False
     # 无法执行反应
     prevents_reactions: bool = False
+    # 对指定属性的豁免具有劣势（如 Restrained → ["dex"]）
+    save_disadvantage: list[str] = Field(default_factory=list)
+    # 无法移动（如 Restrained / Grappled）
+    prevents_movement: bool = False
+    # 受击即消耗（如 曳光弹造优标记 / 魅惑状态被攻击解除）
+    consume_on_attacked: bool = False
 
 
 class ConditionDef(BaseModel):

@@ -148,6 +148,7 @@ def modify_character_state(
         hp_changes.append({"id": target.get("id", target_id), "name": target_name, "old_hp": old_hp, "new_hp": new_hp, "max_hp": max_hp})
         lines.append(f"  {target_name} HP 设为 {new_hp}")
     if "ac" in changes:
+        target["base_ac"] = int(changes["ac"])
         target["ac"] = int(changes["ac"])
         lines.append(f"  {target_name} AC → {target['ac']}")
     if "speed" in changes:
@@ -165,10 +166,6 @@ def modify_character_state(
         raw = changes["add_condition"]
         new_cond = {"id": raw} if isinstance(raw, str) else dict(raw)
         cond_id = new_cond["id"]
-        
-        # 向魅惑状态装配受击即消耗特征
-        if cond_id == "charmed":
-            new_cond.setdefault("extra", {})["consume_on_attacked"] = True
             
         if not any(c.get("id") == cond_id for c in conds):
             conds.append(new_cond)
