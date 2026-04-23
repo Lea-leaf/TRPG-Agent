@@ -1,29 +1,23 @@
 <!-- frontend/src/components/Chat/ChatMessage.vue -->
 <template>
-<!-- 加载状态消息（中世纪旋转符文版） -->
-<div v-if="message.type === 'loading'" class="message-wrapper assistant loading">
-  <div class="avatar">
-    <div class="avatar-placeholder">{{ avatarIcon }}</div>
-  </div>
-  <div class="message-content-wrapper">
-    <div class="message-header">
-      <span class="display-name">{{ displayName }}</span>
-    </div>
+  <!-- 1. loading 消息：无头像，只显示动画 -->
+  <div v-if="message.type === 'loading'" class="message-wrapper assistant loading no-avatar">
     <div class="message-bubble loading-bubble medieval">
       <div class="rune-spinner">◈</div>
       <span class="loading-text">预言正在编织...</span>
     </div>
   </div>
-</div>
 
-
-  <!-- 调试消息 -->
-  <div v-if="message.type === 'tool'" v-show="debugMode" class="tool-message-wrapper">
-    <div class="tool-badge">TOOL</div>
-    <pre class="tool-content">{{ message.content }}</pre>
+  <!-- 2. tool 消息：仅调试模式显示，且不会落入普通分支 -->
+  <div v-else-if="message.type === 'tool'">
+    <div v-if="debugMode" class="tool-message-wrapper">
+      <div class="tool-badge">TOOL</div>
+      <pre class="tool-content">{{ message.content }}</pre>
+    </div>
+    <!-- debugMode=false 时，什么都不渲染 -->
   </div>
 
-  <!-- 普通消息 -->
+  <!-- 3. 普通消息（包括 text、combat_action 等） -->
   <div v-else :class="['message-wrapper', message.role]">
     <div class="avatar">
       <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" />
@@ -48,7 +42,6 @@
     </div>
   </div>
 </template>
-
 <script setup lang="ts">
 import { computed, inject, watch, onUnmounted ,reactive} from 'vue'
 import { marked } from 'marked'

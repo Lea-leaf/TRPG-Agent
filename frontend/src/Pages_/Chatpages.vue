@@ -1,5 +1,4 @@
 <!-- frontend/src/Pages_/ChatPage.vue -->
-<!-- frontend/src/Pages_/ChatPage.vue -->
 <template>
   <div class="chat-page" ref="containerRef">
     <!-- 左侧聊天区 -->
@@ -140,6 +139,8 @@ const {
   setMessages,
   toggleDebugMode,
   isStreaming,
+  startLoading,
+  stopLoading,
 } = useChatMessages()
 
 // 通过 provide 向子组件注入 debugMode
@@ -149,10 +150,8 @@ provide('debugMode', debugMode)
 watch(combatState, (hasCombat) => {
   if (characterPanelRef.value) {
     if (hasCombat) {
-      // 战斗开始/进行中 → 切换到血条视图
       characterPanelRef.value.setViewMode('hp')
     } else {
-      // 战斗结束 → 切换回角色详情视图
       characterPanelRef.value.setViewMode('character')
     }
   }
@@ -183,7 +182,9 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   setSending,
   clearError,
   pendingAction,
-  handleDiceRollAnim
+  handleDiceRollAnim,
+  startLoading,
+  stopLoading
 )
 
 const showNextTurnBtn = computed(() => {

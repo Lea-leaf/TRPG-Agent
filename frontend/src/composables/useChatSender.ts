@@ -1,3 +1,4 @@
+// frontend/src/composables/useChatSender.ts
 import { ChatApiError, chatService } from '../Services_/chatService'
 import type { HpChange, ReactionResponse } from '../Services_/chatService'
 import type { Ref } from 'vue'
@@ -28,7 +29,9 @@ export function useChatSender(
   setSending: (sending: boolean) => void,
   clearError: () => void,
   pendingActionRef: Ref<any>,
-  onDiceRollAnimation?: (rawRoll: number) => Promise<void>
+  onDiceRollAnimation?: (rawRoll: number) => Promise<void>,
+  startLoading?: () => void,
+  stopLoading?: () => void
 ) {
   const streamRequest = async (params: {
     session_id: string | null
@@ -37,14 +40,34 @@ export function useChatSender(
     reaction_response?: ReactionResponse
   }) => {
     clearError()
-    setSending(true)   // isStreaming = true
+    setSending(true)
+
+    // 开始显示 loading 动画
+    if (startLoading) startLoading()
+
+    let loadingStopped = false
+    const stopLoadingOnce = () => {
+      if (!loadingStopped && stopLoading) {
+        loadingStopped = true
+        stopLoading()
+      }
+    }
 
     try {
       await chatService.sendMessageStream(params, {
-        onAssistantMessage: (content) => addAssistantMessage(content, true),
-        onCombatAction: (content, hpChanges) => addCombatMessage(content, hpChanges),
-        onToolMessage: (content) => addToolMessage(content),
-        onDiceRoll: async (rawRoll) => {
+        onAssistantMessage: (content) => {
+          stopLoadingOnce()
+          addAssistantMessage(content, true)
+        },
+        onCombatAction: (content, hpChanges) => {
+          stopLoadingOnce()
+          addCombatMessage(content, hpChanges)
+        },
+        onToolMessage: (content) => {
+          stopLoadingOnce()
+          addToolMessage(content)
+        },
+        onDiceRoll: async (rawRoll, finalTotal) => {
           if (onDiceRollAnimation) {
             await onDiceRollAnimation(rawRoll)
           }
@@ -53,19 +76,25 @@ export function useChatSender(
           if (player !== undefined) setPlayerState(player)
           if (combat !== undefined) setCombatState(combat)
         },
-        onPendingAction: (action) => setPendingAction(action),
+        onPendingAction: (action) => {
+          stopLoadingOnce()
+          setPendingAction(action)
+        },
         onDone: (sid) => {
+          stopLoadingOnce()
           if (sid) updateSessionId(sid)
-          setSending(false)   // 流式正常结束，关闭状态
+          setSending(false)
         },
         onError: (msg) => {
+          stopLoadingOnce()
           setError(msg)
-          setSending(false)   // 出错关闭
+          setSending(false)
         },
       })
     } catch (error) {
+      stopLoadingOnce()
       setError(buildUserError(error))
-      setSending(false)       // 请求级异常关闭
+      setSending(false)
       console.error(error)
     }
   }
@@ -89,7 +118,6 @@ export function useChatSender(
   }
 
   const respondToReaction = async (choice: { spell_id: string; slot_level: number } | null) => {
-    // null / 无 spell_id 表示放弃反应
     const payload = choice ?? { spell_id: null }
     await streamRequest({ session_id: sessionId.value, reaction_response: payload })
   }
