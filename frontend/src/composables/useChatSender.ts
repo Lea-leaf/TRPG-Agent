@@ -1,3 +1,4 @@
+// frontend/src/composables/useChatSender.ts
 import { ChatApiError, chatService } from '../Services_/chatService'
 import type { HpChange, ReactionResponse } from '../Services_/chatService'
 import type { Ref } from 'vue'
@@ -28,7 +29,9 @@ export function useChatSender(
   setSending: (sending: boolean) => void,
   clearError: () => void,
   pendingActionRef: Ref<any>,
-  onDiceRollAnimation?: (rawRoll: number) => Promise<void>
+  onDiceRollAnimation?: (rawRoll: number) => Promise<void>,
+  startLoading?: () => void,
+  stopLoading?: () => void
 ) {
   const streamRequest = async (params: {
     session_id: string | null
@@ -37,14 +40,38 @@ export function useChatSender(
     reaction_response?: ReactionResponse
   }) => {
     clearError()
-    setSending(true)   // isStreaming = true
+    setSending(true)
+
+    if (startLoading) startLoading()
+
+    let loadingStopped = false
+    let assistantLoadingStopped = false   // 新增：标记文本消息是否已停止 loading
+    const stopLoadingOnce = () => {
+      if (!loadingStopped && stopLoading) {
+        loadingStopped = true
+        stopLoading()
+      }
+    }
 
     try {
       await chatService.sendMessageStream(params, {
-        onAssistantMessage: (content) => addAssistantMessage(content, true),
-        onCombatAction: (content, hpChanges) => addCombatMessage(content, hpChanges),
-        onToolMessage: (content) => addToolMessage(content),
-        onDiceRoll: async (rawRoll) => {
+        onAssistantMessage: (content) => {
+          // 第一次收到文本内容时立即停止 loading
+          if (!assistantLoadingStopped) {
+            assistantLoadingStopped = true
+            stopLoadingOnce()
+          }
+          addAssistantMessage(content, true)
+        },
+        onCombatAction: (content, hpChanges) => {
+          stopLoadingOnce() // 战斗消息立即停止 loading
+          addCombatMessage(content, hpChanges)
+        },
+        onToolMessage: (content) => {
+          stopLoadingOnce() // 工具消息立即停止 loading
+          addToolMessage(content)
+        },
+        onDiceRoll: async (rawRoll, finalTotal) => {
           if (onDiceRollAnimation) {
             await onDiceRollAnimation(rawRoll)
           }
@@ -53,19 +80,25 @@ export function useChatSender(
           if (player !== undefined) setPlayerState(player)
           if (combat !== undefined) setCombatState(combat)
         },
-        onPendingAction: (action) => setPendingAction(action),
+        onPendingAction: (action) => {
+          stopLoadingOnce()
+          setPendingAction(action)
+        },
         onDone: (sid) => {
+          stopLoadingOnce() // 兜底：防止 loading 一直显示（如空消息时）
           if (sid) updateSessionId(sid)
-          setSending(false)   // 流式正常结束，关闭状态
+          setSending(false)
         },
         onError: (msg) => {
+          stopLoadingOnce()
           setError(msg)
-          setSending(false)   // 出错关闭
+          setSending(false)
         },
       })
     } catch (error) {
+      stopLoadingOnce()
       setError(buildUserError(error))
-      setSending(false)       // 请求级异常关闭
+      setSending(false)
       console.error(error)
     }
   }
@@ -89,7 +122,6 @@ export function useChatSender(
   }
 
   const respondToReaction = async (choice: { spell_id: string; slot_level: number } | null) => {
-    // null / 无 spell_id 表示放弃反应
     const payload = choice ?? { spell_id: null }
     await streamRequest({ session_id: sessionId.value, reaction_response: payload })
   }

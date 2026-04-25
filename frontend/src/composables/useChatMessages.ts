@@ -11,7 +11,7 @@ const createMessage = (
   role,
   content,
   timestamp: Date.now(),
-  isHistory: false,   // 新消息默认不是历史
+  isHistory: false,
   ...extras,
 })
 
@@ -28,12 +28,42 @@ export function useChatMessages() {
   const debugMode = ref(false)
 
   let currentStreamingMessageId: string | null = null
+  let loadingMessageId: string | null = null
 
+  // ========== Loading 管理 ==========
+  const startLoading = () => {
+    // 先移除已有的 loading 消息
+    stopLoading()
+    const loadingMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      type: 'loading',
+      isHistory: false,
+    }
+    messages.value.push(loadingMsg)
+    loadingMessageId = loadingMsg.id
+  }
+
+  const stopLoading = () => {
+    if (loadingMessageId) {
+      const index = messages.value.findIndex(m => m.id === loadingMessageId)
+      if (index !== -1) {
+        messages.value.splice(index, 1)
+      }
+      loadingMessageId = null
+    }
+  }
+
+  // ========== 消息添加 ==========
   const addUserMessage = (content: string) => {
+    stopLoading()  // 用户发送新消息时清除可能残留的 loading
     messages.value.push(createMessage('user', content))
   }
 
   const addAssistantMessage = (content: string, isStreamingChunk: boolean = false) => {
+ 
     if (!content.trim() && !isStreamingChunk) return
     
     if (isStreamingChunk && currentStreamingMessageId) {
@@ -81,6 +111,7 @@ export function useChatMessages() {
     currentStreamingMessageId = null
   }
 
+  // ========== 状态设置 ==========
   const setPendingAction = (action: PendingAction | null) => {
     pendingAction.value = action
   }
@@ -113,11 +144,12 @@ export function useChatMessages() {
   }
 
   const setMessages = (msgs: ChatMessage[]) => {
+    stopLoading()  // 清除 loading
     messages.value = msgs.map((msg) => ({
       ...msg,
       id: msg.id || crypto.randomUUID(),
       timestamp: msg.timestamp ?? Date.now(),
-      isHistory: true,   // 历史消息标记为 true
+      isHistory: true,
     }))
     currentStreamingMessageId = null
   }
@@ -148,5 +180,7 @@ export function useChatMessages() {
     setCombatState,
     setMessages,
     toggleDebugMode,
+    startLoading,
+    stopLoading,
   }
 }
