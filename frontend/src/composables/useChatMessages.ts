@@ -15,9 +15,11 @@ const createMessage = (
   ...extras,
 })
 
+const createWelcomeMessage = () => createMessage('assistant', '你好，我是 TRPG 助手。你可以直接开始提问。')
+
 export function useChatMessages() {
   const messages = ref<ChatMessage[]>([
-    createMessage('assistant', '你好，我是 TRPG 助手。你可以直接开始提问。')
+    createWelcomeMessage()
   ])
   const pendingAction = ref<PendingAction | null>(null)
   const errorText = ref('')
@@ -164,6 +166,20 @@ export function useChatMessages() {
     currentStreamingMessageId = null
   }
 
+  const resetChatState = () => {
+    stopLoading()
+    messages.value = [createWelcomeMessage()]
+    pendingAction.value = null
+    errorText.value = ''
+    isSending.value = false
+    isStreaming.value = false
+    playerState.value = null
+    combatState.value = null
+    spaceState.value = null
+    sceneUnitsState.value = null
+    currentStreamingMessageId = null
+  }
+
   const toggleDebugMode = () => {
     debugMode.value = !debugMode.value
   }
@@ -193,6 +209,7 @@ export function useChatMessages() {
     setSpaceState,
     setSceneUnitsState,
     setMessages,
+    resetChatState,
     toggleDebugMode,
     startLoading,
     stopLoading,

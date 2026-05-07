@@ -8,6 +8,22 @@
           <h1>TRPG 助手</h1>
           <div class="header-actions">
             <button
+              class="session-action-btn"
+              :disabled="isSending"
+              @click="startNewSession"
+              title="创建新会话"
+            >
+              <Plus :size="16" />
+            </button>
+            <button
+              class="session-action-btn danger"
+              :disabled="isSending || !sessionId"
+              @click="deleteCurrentSession"
+              title="删除当前会话"
+            >
+              <Trash2 :size="16" />
+            </button>
+            <button
               class="debug-toggle"
               :class="{ active: debugMode }"
               @click="toggleDebugMode"
@@ -95,6 +111,7 @@
 
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { Plus, Trash2 } from 'lucide-vue-next'
 import ChatMessage from '../components/Chat/ChatMessage.vue'
 import ChatInput from '../components/Chat/ChatInput.vue'
 import ActionPanel from '../components/Chat/ActionPanel.vue'
@@ -104,6 +121,7 @@ import { useChatSession } from '../composables/useChatSession'
 import { useChatMessages } from '../composables/useChatMessages'
 import { useChatSender } from '../composables/useChatSender'
 import { chatService } from '../Services_/chatService'
+import { createSession, deleteSession as deleteSessionApi } from '../Services_/sessionService'
 
 import '../styles_/Chatpages.css'
 
@@ -118,7 +136,7 @@ const showToggleBtn = ref(false)
 const isDragging = ref(false)
 
 // 聊天逻辑
-const { sessionId, updateSessionId } = useChatSession()
+const { sessionId, updateSessionId, clearSessionId } = useChatSession()
 const {
   messages,
   pendingAction,
@@ -143,8 +161,8 @@ const {
   setSending,
   clearError,
   setMessages,
+  resetChatState,
   toggleDebugMode,
-  isStreaming,
   startLoading,
   stopLoading,
 } = useChatMessages()
@@ -225,31 +243,66 @@ const scrollToBottom = () => {
 // 监听消息变化自动滚动
 watch(messages, scrollToBottom, { deep: true })
 
+const hydrateCurrentSession = async () => {
+  if (!sessionId.value) return
+
+  try {
+    const history = await chatService.fetchHistory(sessionId.value)
+    const shouldHydrateMessages = messages.value.length === 1
+      && messages.value[0]?.role === 'assistant'
+      && messages.value[0]?.content === '你好，我是 TRPG 助手。你可以直接开始提问。'
+
+    if (history.messages.length > 0 && shouldHydrateMessages) {
+      setMessages(history.messages.map(m => ({
+        id: crypto.randomUUID(),
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: Date.now(),
+      })))
+    }
+    if (history.player) setPlayerState(history.player)
+    if (history.combat) setCombatState(history.combat)
+    if ((history as any).space) setSpaceState((history as any).space)
+    if ((history as any).scene_units) setSceneUnitsState((history as any).scene_units)
+  } catch {
+    clearSessionId()
+  }
+}
+
+const startNewSession = async () => {
+  try {
+    const session = await createSession()
+    updateSessionId(session.id)
+    resetChatState()
+    clearError()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '创建会话失败')
+  }
+}
+
+const deleteCurrentSession = async () => {
+  if (!sessionId.value || !confirm('确定要删除当前会话吗？相关记忆和 trace 会一起清理。')) return
+
+  try {
+    await deleteSessionApi(sessionId.value)
+    clearSessionId()
+    resetChatState()
+    clearError()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '删除会话失败')
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('mousemove', handleMouseMove)
-  if (sessionId.value) {
-    try {
-      const history = await chatService.fetchHistory(sessionId.value)
-      const shouldHydrateMessages = messages.value.length === 1
-        && messages.value[0]?.role === 'assistant'
-        && messages.value[0]?.content === '你好，我是 TRPG 助手。你可以直接开始提问。'
 
-      if (history.messages.length > 0 && shouldHydrateMessages) {
-        setMessages(history.messages.map(m => ({
-          id: crypto.randomUUID(),
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-          timestamp: Date.now(),
-        })))
-      }
-      if (history.player) setPlayerState(history.player)
-      if (history.combat) setCombatState(history.combat)
-      if ((history as any).space) setSpaceState((history as any).space)
-      if ((history as any).scene_units) setSceneUnitsState((history as any).scene_units)
-    } catch {
-      // 忽略错误
-    }
+  const pendingSessionId = sessionStorage.getItem('pending_session_id')
+  if (pendingSessionId) {
+    updateSessionId(pendingSessionId)
+    sessionStorage.removeItem('pending_session_id')
   }
+
+  await hydrateCurrentSession()
 })
 
 onUnmounted(() => {

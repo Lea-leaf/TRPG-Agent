@@ -14,7 +14,9 @@ from app.services.tools.combat_tools import (  # noqa: F401
     attack_action,
     clear_dead_units,
     end_combat,
+    help_action,
     next_turn,
+    spawn_ally,
     spawn_monsters,
     start_combat,
 )

@@ -322,6 +322,299 @@ class TestStartCombatPlayerJoin:
         assert "combat" not in result.update
 
 
+class TestAllySystem:
+    """友方单位复用角色型规则，但由 Agent 控制行动。"""
+
+    def test_spawn_ally_adds_character_like_scene_unit(self):
+        """友方法师生成后应带武器、法术资源和反应资源。"""
+        from app.services.tool_service import spawn_ally
+
+        result = _invoke_tool(
+            spawn_ally,
+            tool_input={
+                "profile_id": "apprentice_wizard",
+                "name": "伊莲",
+                "unit_id": "ally_wizard",
+                "state": {},
+            },
+        )
+
+        ally = result.update["scene_units"]["ally_wizard"]
+        assert ally["name"] == "伊莲"
+        assert ally["side"] == "ally"
+        assert ally["resources"]["spell_slot_lv1"] == 3
+        assert "magic_missile" in ally["known_spells"]
+        assert ally["reaction_available"] is True
+        dagger = next(a for a in ally["attacks"] if a["name"] == "Dagger")
+        assert dagger["attack_bonus"] == 4
+        assert dagger["damage_dice"] == "1d4+2"
+        assert dagger["normal_range_feet"] == 20
+
+    def test_start_combat_prepares_ally_and_keeps_resources(self):
+        """友方从场景入战后留在 participants，并保留角色资源。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import start_combat
+
+        ally = get_ally_profile("apprentice_wizard")
+        goblin = _make_goblin()
+        state = {
+            "scene_units": {"apprentice_wizard": ally, "goblin_1": goblin},
+            "space": _make_space_state(["apprentice_wizard", "goblin_1"]),
+        }
+
+        result = _invoke_tool(
+            start_combat,
+            tool_input={"combatant_ids": ["apprentice_wizard", "goblin_1"], "state": state},
+        )
+
+        combat = result.update["combat"]
+        prepared = combat["participants"]["apprentice_wizard"]
+        assert prepared["side"] == "ally"
+        assert prepared["resources"]["spell_slot_lv1"] == 3
+        assert "Dagger" in [attack["name"] for attack in prepared["attacks"]]
+        assert "apprentice_wizard" in combat["initiative_order"]
+
+    def test_ally_wizard_casts_spell_and_consumes_slot(self):
+        """战斗中的友方可以作为 caster_id 施法并消耗自己的法术位。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import cast_spell
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
+        goblin = _make_goblin()
+        state = {
+            "combat": _make_combat_state({"apprentice_wizard": ally, "goblin_1": goblin}, current_actor_id="apprentice_wizard"),
+            "space": _make_space_state(["apprentice_wizard", "goblin_1"]),
+        }
+
+        with patch("app.spells.magic_missile.d20.roll", return_value=d20.roll("2")):
+            result = _invoke_tool(
+                cast_spell,
+                tool_input={
+                    "caster_id": "apprentice_wizard",
+                    "spell_id": "magic_missile",
+                    "target_ids": ["goblin_1"],
+                    "slot_level": 1,
+                    "state": state,
+                },
+            )
+
+        updated_ally = result.update["combat"]["participants"]["apprentice_wizard"]
+        updated_goblin = result.update["combat"]["participants"]["goblin_1"]
+        assert updated_ally["resources"]["spell_slot_lv1"] == 2
+        assert updated_ally["action_available"] is False
+        assert updated_goblin["hp"] < goblin["hp"]
+
+    def test_ally_healer_can_restore_player(self):
+        """友方治疗者能治疗玩家目标，并写回双方状态。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import cast_spell
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "hp": 0, "death_save_failures": 2}
+        ally = prepare_character_for_combat(get_ally_profile("acolyte_healer"), side="ally")
+        state = {
+            "player": player,
+            "combat": _make_combat_state({"acolyte_healer": ally, "温良": player}, current_actor_id="acolyte_healer", player_dict=player),
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "战斗地图", "width": 100, "height": 100, "grid_size": 5}},
+                "placements": {
+                    "acolyte_healer": {"unit_id": "acolyte_healer", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "温良": {"unit_id": "温良", "map_id": "map_1", "position": {"x": 5, "y": 0}},
+                },
+            },
+        }
+
+        with patch("app.spells.cure_wounds.d20.roll", return_value=d20.roll("8")):
+            result = _invoke_tool(
+                cast_spell,
+                tool_input={
+                    "caster_id": "acolyte_healer",
+                    "spell_id": "cure_wounds",
+                    "target_ids": ["温良"],
+                    "slot_level": 1,
+                    "state": state,
+                },
+            )
+
+        assert result.update["player"]["hp"] > 0
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["combat"]["participants"]["acolyte_healer"]["resources"]["spell_slot_lv1"] == 2
+
+    def test_ally_auto_uses_shield_reaction_when_hit(self):
+        """敌人命中非玩家友方时，友方反应由规则层自动执行。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import attack_action
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
+        goblin = _make_goblin()
+        state = {
+            "combat": _make_combat_state({"goblin_1": goblin, "apprentice_wizard": ally}, current_actor_id="goblin_1"),
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "战斗地图", "width": 100, "height": 100, "grid_size": 5}},
+                "placements": {
+                    "goblin_1": {"unit_id": "goblin_1", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "apprentice_wizard": {"unit_id": "apprentice_wizard", "map_id": "map_1", "position": {"x": 5, "y": 0}},
+                },
+            },
+        }
+
+        with patch("app.services.tools._helpers.d20.roll", return_value=d20.roll("16")):
+            result = _invoke_tool(
+                attack_action,
+                tool_input={
+                    "attacker_id": "goblin_1",
+                    "target_id": "apprentice_wizard",
+                    "attack_name": "Scimitar",
+                    "state": state,
+                },
+            )
+
+        updated_ally = result.update["combat"]["participants"]["apprentice_wizard"]
+        assert updated_ally["resources"]["spell_slot_lv1"] == 2
+        assert updated_ally["reaction_available"] is False
+        assert updated_ally["hp"] == ally["hp"]
+        assert "护盾术" in result.update["messages"][0].content
+
+    def test_ally_enters_death_save_state_when_dropped_to_zero(self):
+        """友方倒地后进入死亡豁免流程，不被当作普通怪物尸体。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import attack_action
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
+        ally["hp"] = 1
+        ally["resources"]["spell_slot_lv1"] = 0
+        goblin = _make_goblin()
+        state = {
+            "combat": _make_combat_state({"goblin_1": goblin, "apprentice_wizard": ally}, current_actor_id="goblin_1"),
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "战斗地图", "width": 100, "height": 100, "grid_size": 5}},
+                "placements": {
+                    "goblin_1": {"unit_id": "goblin_1", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "apprentice_wizard": {"unit_id": "apprentice_wizard", "map_id": "map_1", "position": {"x": 5, "y": 0}},
+                },
+            },
+        }
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=[d20.roll("16"), d20.roll("4")]):
+            result = _invoke_tool(
+                attack_action,
+                tool_input={
+                    "attacker_id": "goblin_1",
+                    "target_id": "apprentice_wizard",
+                    "attack_name": "Scimitar",
+                    "state": state,
+                },
+            )
+
+        updated_ally = result.update["combat"]["participants"]["apprentice_wizard"]
+        assert updated_ally["hp"] == 0
+        assert updated_ally["death_save_successes"] == 0
+        assert updated_ally["death_save_failures"] == 0
+        assert updated_ally["is_stable"] is False
+        assert "死亡豁免 0 成功 / 0 失败" in result.update["messages"][0].content
+
+    def test_help_action_stabilizes_dying_ally(self):
+        """援助动作按 DC 10 Medicine 急救稳定 0 HP 友方。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import help_action
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        target = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
+        target["hp"] = 0
+        target["death_save_failures"] = 2
+        state = {
+            "combat": _make_combat_state(
+                {"fighter_companion": actor, "apprentice_wizard": target},
+                current_actor_id="fighter_companion",
+            ),
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "战斗地图", "width": 100, "height": 100, "grid_size": 5}},
+                "placements": {
+                    "fighter_companion": {"unit_id": "fighter_companion", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "apprentice_wizard": {"unit_id": "apprentice_wizard", "map_id": "map_1", "position": {"x": 5, "y": 0}},
+                },
+            },
+        }
+
+        with patch("app.services.tools.combat_tools.d20.roll", return_value=d20.roll("10")):
+            result = _invoke_tool(
+                help_action,
+                tool_input={
+                    "actor_id": "fighter_companion",
+                    "target_id": "apprentice_wizard",
+                    "state": state,
+                },
+            )
+
+        updated_actor = result.update["combat"]["participants"]["fighter_companion"]
+        updated_target = result.update["combat"]["participants"]["apprentice_wizard"]
+        assert updated_actor["action_available"] is False
+        assert updated_target["hp"] == 0
+        assert updated_target["is_stable"] is True
+        assert updated_target["death_save_failures"] == 0
+        assert "伤势稳定" in result.update["messages"][0].content
+
+    def test_help_action_requires_touch_distance(self):
+        """急救稳定需要接触目标，不能隔空援助。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import help_action
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        target = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
+        target["hp"] = 0
+        state = {
+            "combat": _make_combat_state(
+                {"fighter_companion": actor, "apprentice_wizard": target},
+                current_actor_id="fighter_companion",
+            ),
+            "space": _make_space_state(["fighter_companion", "apprentice_wizard"]),
+        }
+
+        result = _invoke_tool(
+            help_action,
+            tool_input={
+                "actor_id": "fighter_companion",
+                "target_id": "apprentice_wizard",
+                "state": state,
+            },
+        )
+
+        assert "距离不足" in result.update["messages"][0].content
+
+    def test_end_combat_keeps_fallen_ally_revivable(self):
+        """战斗结束时倒地友方回到场景单位池，不进入可清理尸体档案。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import end_combat
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        ally["hp"] = 0
+        ally["death_save_failures"] = 1
+        goblin = _make_goblin()
+        goblin["hp"] = 0
+        state = {
+            "combat": _make_combat_state({"fighter_companion": ally, "goblin_1": goblin}, current_actor_id="fighter_companion"),
+            "scene_units": {"fighter_companion": ally, "goblin_1": goblin},
+            "space": _make_space_state(["fighter_companion", "goblin_1"]),
+        }
+
+        result = _invoke_tool(end_combat, tool_input={"state": state})
+
+        assert "fighter_companion" in result.update["scene_units"]
+        assert result.update["scene_units"]["fighter_companion"]["hp"] == 0
+        assert "fighter_companion" not in result.update["dead_units"]
+        assert "goblin_1" in result.update["dead_units"]
+
+
 # ── Phase 3: attack_action 校验与动作消耗 ────────────────────────
 
 

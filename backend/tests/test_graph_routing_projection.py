@@ -430,6 +430,66 @@ def test_combat_brief_includes_conditions_attacks_and_scene_stakes():
     assert "Scimitar" in brief
 
 
+def test_combat_brief_separates_ally_from_enemy_side():
+    combat = _combat_state("ally_wizard")
+    combat["initiative_order"] = ["ally_wizard", "goblin_1", "player_hero"]
+    combat["participants"]["ally_wizard"] = {
+        "id": "ally_wizard",
+        "name": "伊莲",
+        "side": "ally",
+        "hp": 12,
+        "max_hp": 12,
+        "ac": 12,
+        "resources": {"spell_slot_lv1": 1},
+        "resource_caps": {"spell_slot_lv1": 3},
+        "known_spells": ["magic_missile", "shield"],
+        "reaction_available": True,
+        "attacks": [{"name": "Dagger"}],
+    }
+    state = {
+        "phase": "combat",
+        "combat": combat,
+        "player": _player_state(),
+    }
+
+    brief = _build_combat_brief(state)
+    directive = _build_combat_turn_directive(state)
+
+    assert "友方侧: 伊莲" in brief
+    assert "对立侧: Goblin" in brief
+    assert "spell_slot_lv1=1/3" in brief
+    assert "shield" in brief
+    assert "当前是友方单位 伊莲" in directive
+    assert "友方单位 ID" in directive
+
+
+def test_fallen_ally_turn_directive_requires_death_save():
+    combat = _combat_state("ally_wizard")
+    combat["initiative_order"] = ["ally_wizard", "goblin_1", "player_hero"]
+    combat["participants"]["ally_wizard"] = {
+        "id": "ally_wizard",
+        "name": "伊莲",
+        "side": "ally",
+        "hp": 0,
+        "max_hp": 12,
+        "ac": 12,
+        "death_save_successes": 1,
+        "death_save_failures": 0,
+        "is_stable": False,
+        "is_dead": False,
+    }
+    state = {
+        "phase": "combat",
+        "combat": combat,
+        "player": _player_state(),
+    }
+
+    directive = _build_combat_turn_directive(state)
+
+    assert "必须进行死亡豁免" in directive
+    assert "target_id=该友方ID" in directive
+
+
 def test_combat_turn_directive_switches_between_monster_and_player_turns():
     monster_state = {
         "phase": "combat",

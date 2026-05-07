@@ -18,6 +18,7 @@ from app.memory.checkpointer import close_checkpointer, get_checkpointer
 from app.memory.episodic_store import EpisodicStore
 from app.memory.ingestion import MemoryIngestionPipeline
 from app.services.llm_service import LLMService
+from app.services.session_store import purge_chat_session_data, touch_chat_session
 from app.services.tools._helpers import compute_ac
 from app.utils.agent_trace import trace_chat_error, trace_chat_request, trace_chat_result
 from app.utils.logger import logger
@@ -143,6 +144,7 @@ class ChatSessionService:
             pending_action=pending_action,
             new_message_count=len(new_messages),
         )
+        await touch_chat_session(session_id=current_session_id, message=message, reply=reply)
         self._schedule_memory_ingestion(
             session_id=current_session_id,
             old_snapshot=old_snapshot,
@@ -567,6 +569,7 @@ class ChatSessionService:
             pending_action=pending,
             new_message_count=len(new_messages),
         )
+        await touch_chat_session(session_id=current_session_id, message=message, reply=reply)
         yield self._sse_event("pending_action", pending)
 
         self._schedule_memory_ingestion(
@@ -638,6 +641,14 @@ class ChatSessionService:
             "adventure": adventure_data,
         }
 
+    async def delete_session(self, session_id: str) -> dict[str, int]:
+        """删除会话前等待该会话后台记忆写入结束，避免清理后又写回旧摘要。"""
+        task = self._memory_tasks.pop(session_id, None)
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+
+        return await purge_chat_session_data(session_id)
+
 
 async def get_chat_session_service() -> ChatSessionService:
     """在首个请求到达时初始化图与异步 checkpointer。"""
@@ -659,6 +670,13 @@ async def get_chat_session_service() -> ChatSessionService:
             episodic_store=episodic_store,
         )
         return _CHAT_SESSION_SERVICE
+
+
+async def delete_chat_session(session_id: str) -> dict[str, int]:
+    """删除会话时只在已有服务中等待后台任务，避免为纯清理操作初始化完整图。"""
+    if _CHAT_SESSION_SERVICE is not None:
+        return await _CHAT_SESSION_SERVICE.delete_session(session_id)
+    return await purge_chat_session_data(session_id)
 
 
 async def close_chat_session_service() -> None:
