@@ -10,8 +10,10 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from app.allies.profiles import get_ally_profile
 from app.calculation.bestiary import spawn_combatants
 from app.space.geometry import build_space_state
+from app.space.geometry import validate_unit_distance as validate_space_unit_distance
 from app.services.tools._helpers import (
     advance_turn,
     apply_hp_change,
@@ -26,11 +28,13 @@ from app.services.tools._helpers import (
     get_all_combatants,
     get_combatant,
     prepare_player_for_combat,
+    prepare_character_for_combat,
     roll_attack_hit,
     tracks_death_saves,
     validate_attack_distance,
 )
 from app.services.tools.reactions import get_available_reactions
+from app.services.tools.spell_tools import apply_automatic_hit_reaction
 
 
 def _message_count(state: dict | None) -> int:
@@ -124,6 +128,49 @@ def _roll_initiative(unit: dict, *, surprised: bool) -> tuple[int, str]:
 
 
 @tool
+def spawn_ally(
+    profile_id: str,
+    name: str | None = None,
+    unit_id: str | None = None,
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+) -> Command:
+    """根据友方角色模板生成受 Agent 控制的友方单位，并加入场景单位池。
+    友方使用角色型规则：武器、法术位、已知法术、职业特性与反应资源都写在单位状态里。
+    参数示例：{"profile_id": "apprentice_wizard", "name": "伊莲"}。
+
+    Args:
+        profile_id: 友方模板 ID，例如 "sildar"、"apprentice_wizard"、"acolyte_healer"。
+        name: 可选显示名；不传则使用模板默认名。
+        unit_id: 可选单位 ID；不传则按模板 ID 自动生成稳定 ID。
+    """
+    try:
+        ally = get_ally_profile(profile_id)
+    except ValueError as exc:
+        return Command(update={"messages": [ToolMessage(content=str(exc), tool_call_id=tool_call_id)]})
+
+    if name:
+        ally["name"] = name
+    ally["id"] = unit_id or ally.get("id") or profile_id
+    ally["side"] = "ally"
+    prepare_character_for_combat(ally, side="ally", fallback_id=ally["id"])
+
+    scene_units: dict = state.get("scene_units") or {}
+    scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else {}
+    scene_raw[ally["id"]] = ally
+
+    return Command(update={
+        "scene_units": scene_raw,
+        "messages": [
+            ToolMessage(
+                content=f"友方 {ally['name']} [ID: {ally['id']}] 已加入场景。",
+                tool_call_id=tool_call_id,
+            )
+        ],
+    })
+
+
+@tool
 def spawn_monsters(
     monster_index: str,
     count: int = 1,
@@ -168,6 +215,92 @@ def spawn_monsters(
             ]
         }
     )
+
+
+@tool
+def help_action(
+    actor_id: str,
+    target_id: str,
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+) -> Command:
+    """执行援助动作。当前接入桌面规则中的急救稳定：对 0 HP 生物进行 DC 10 WIS(Medicine) 检定。
+    成功会让目标稳定在 0 HP，不恢复 HP；要让目标重新站起来仍需治疗或复活类状态调整。
+    参数示例：{"actor_id": "fighter_companion", "target_id": "温良"}。
+
+    Args:
+        actor_id: 执行援助的单位 ID，必须是当前回合行动者。
+        target_id: 要急救稳定的 0 HP 单位 ID。
+    """
+    combat_raw = state.get("combat")
+    if not combat_raw:
+        return Command(update={"messages": [ToolMessage(content="[援助失败] 当前不在战斗中。", tool_call_id=tool_call_id)]})
+
+    combat_dict = combat_raw.model_dump() if hasattr(combat_raw, "model_dump") else dict(combat_raw)
+    player_raw = state.get("player")
+    player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
+
+    actor = get_combatant(combat_dict, player_dict, actor_id)
+    target = get_combatant(combat_dict, player_dict, target_id)
+    resolved_actor_id = canonical_combatant_id(actor, actor_id)
+    resolved_target_id = canonical_combatant_id(target, target_id)
+
+    def _reject(msg: str) -> Command:
+        return Command(update={"messages": [ToolMessage(content=f"[援助失败] {msg}", tool_call_id=tool_call_id)]})
+
+    if not actor:
+        return _reject(f"找不到行动者 '{actor_id}'。")
+    if not target:
+        return _reject(f"找不到目标 '{target_id}'。")
+    if combat_dict.get("current_actor_id") != resolved_actor_id:
+        return _reject(f"现在不是 {actor.get('name', actor_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
+    if actor.get("hp", 0) <= 0:
+        return _reject(f"{actor.get('name', actor_id)} 已经倒下，无法执行援助。")
+    if not actor.get("action_available", True):
+        return _reject(f"{actor.get('name', actor_id)} 本回合的动作已用尽。")
+    if target.get("hp", 0) > 0:
+        return _reject(f"{target.get('name', target_id)} 仍有 HP，不需要急救稳定。")
+    if target.get("is_dead"):
+        return _reject(f"{target.get('name', target_id)} 已死亡，急救无法稳定；需要复活类能力。")
+    if target.get("is_stable"):
+        return _reject(f"{target.get('name', target_id)} 已经伤势稳定。")
+    if distance_error := validate_space_unit_distance(
+        state.get("space"),
+        resolved_actor_id,
+        resolved_target_id,
+        5,
+        action_label="援助急救",
+    ):
+        return _reject(distance_error)
+
+    wis_mod = int(actor.get("modifiers", {}).get("wis", 0) or 0)
+    prof = int(actor.get("proficiency_bonus", 2) or 2)
+    proficient = "medicine" in {str(item).lower() for item in actor.get("skill_proficiencies", [])}
+    bonus = wis_mod + (prof if proficient else 0)
+    result = d20.roll(f"1d20{bonus:+d}")
+    actor["action_available"] = False
+
+    lines = [
+        f"{actor.get('name', actor_id)} 使用援助动作急救 {target.get('name', target_id)}。",
+        f"WIS(Medicine) DC 10: {result}（{'含熟练' if proficient else '无熟练'}）",
+    ]
+    if result.total >= 10:
+        target["hp"] = 0
+        target["death_save_successes"] = 0
+        target["death_save_failures"] = 0
+        target["is_stable"] = True
+        target["is_dead"] = False
+        lines.append(f"{target.get('name', target_id)} 伤势稳定，保持 0 HP。")
+    else:
+        lines.append(f"{target.get('name', target_id)} 未能稳定，死亡豁免状态不变。")
+
+    update: dict = {
+        "combat": combat_dict,
+        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    }
+    if player_dict:
+        update["player"] = player_dict
+    return Command(update=update)
 
 
 @tool
@@ -218,6 +351,11 @@ def start_combat(
 
     if not participants and not player_dict:
         return "没有参战者，请先生成怪物或加载角色卡。"
+
+    for uid, unit in list(participants.items()):
+        if unit.get("side") == "ally" or unit.get("unit_kind") == "character":
+            prepare_character_for_combat(unit, side=unit.get("side", "ally"), fallback_id=uid)
+            participants[uid] = unit
 
     # 为所有参战单位投先攻（含玩家）
     all_units: dict[str, dict] = dict(participants)
@@ -343,6 +481,7 @@ def attack_action(
         return _reject(distance_error)
 
     roll_info = roll_attack_hit(attacker, target, attack_name, advantage, state)
+    auto_reaction_lines = apply_automatic_hit_reaction(target, attacker, roll_info, state)
 
     if (
         player_dict
@@ -382,6 +521,7 @@ def attack_action(
             )
 
     lines, _, hp_change, _ = apply_attack_damage(attacker, target, roll_info)
+    lines = auto_reaction_lines + lines
 
     attack_roll_payload = build_attack_roll_event_payload(roll_info)
 
@@ -482,10 +622,13 @@ def end_combat(
                 fallen_names.append(player_dict.get("name", "player"))
             clear_player_combat_fields(player_dict)
 
-        # 处理 NPC（仅存于 participants）
+        # 处理非玩家单位；友方不会因倒地被清理，便于后续治疗或复活。
         for uid, p in participants.items():
             name = p.get("name", uid)
-            if p.get("hp", 0) > 0:
+            if p.get("side") == "ally":
+                alive_names.append(name)
+                scene_raw[uid] = p
+            elif p.get("hp", 0) > 0:
                 alive_names.append(name)
                 scene_raw[uid] = p
             else:

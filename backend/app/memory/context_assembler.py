@@ -72,6 +72,13 @@ class ContextAssembler:
             if turn_directive:
                 system_prompt += f"\n\n[当前回合指令]\n{turn_directive}"
 
+        if mode == NARRATIVE_AGENT_MODE and needs_opening_fighter_companion(state):
+            system_prompt += (
+                "\n\n[开局友方准则]\n"
+                "当前玩家已加载但尚无友方单位。应在合理的开局叙事中主动创建一名战士友方，"
+                "使用友方创建能力生成 fighter_companion；创建后再继续推进冒险。"
+            )
+
         external_blocks = self._external_context_provider.get_context_blocks(state=state, mode=mode)
         if external_blocks:
             system_prompt += "\n\n[扩展上下文]\n" + "\n\n".join(block for block in external_blocks if block)
@@ -114,14 +121,17 @@ class ContextAssembler:
                     f"HP:{combatant.get('hp')}/{combatant.get('max_hp')} AC:{display_ac} "
                     f"conditions=[{format_conditions(combatant)}] resources=[{format_resources(combatant)}] "
                     f"death_saves={format_death_save_status(combatant)} surprised={bool(combatant.get('surprised'))} "
-                    f"actions=[{actions_desc}]{marker}"
+                    f"reaction={format_reaction_status(combatant)} magic=[{format_magic(combatant)}] "
+                    f"actions=[{actions_desc}] behavior=[{format_behavior_profile(combatant)}]{marker}"
                 )
             sections.append("[当前战斗状态]\n" + "\n".join(combat_lines))
 
         scene_data = dump_mapping_state(state.get("scene_units"))
         if scene_data:
             scene_lines = [
-                f"  {uid}: {unit.get('name', uid)} (side={unit.get('side')}, HP:{unit.get('hp')}/{unit.get('max_hp')})"
+                f"  {uid}: {unit.get('name', uid)} (side={unit.get('side')}, "
+                f"HP:{unit.get('hp')}/{unit.get('max_hp')}, resources=[{format_resources(unit)}], "
+                f"magic=[{format_magic(unit)}], behavior=[{format_behavior_profile(unit)}])"
                 for uid, unit in scene_data.items()
             ]
             sections.append("[场景单位池（可用 start_combat 指定参战）]\n" + "\n".join(scene_lines))
@@ -182,7 +192,9 @@ class ContextAssembler:
             lines.append(f"当前局势/战斗 stakes: {scene_summary}")
 
         player_side: list[str] = []
+        ally_side: list[str] = []
         enemy_side: list[str] = []
+        other_side: list[str] = []
         for uid, combatant in participants.items():
             display_ac = compute_ac(combatant) if isinstance(combatant, dict) else combatant.get('ac')
             status = (
@@ -190,17 +202,26 @@ class ContextAssembler:
                 f"AC:{display_ac}, conditions:{format_conditions(combatant)}, "
                 f"resources:{format_resources(combatant)}, death_saves:{format_death_save_status(combatant)}, "
                 f"surprised:{bool(combatant.get('surprised'))}, "
+                f"reaction:{format_reaction_status(combatant)}, magic:{format_magic(combatant)}, "
                 f"actions:{format_actions(combatant)}]"
             )
             if combatant.get("side") == "player":
                 player_side.append(status)
-            else:
+            elif combatant.get("side") == "ally":
+                ally_side.append(status)
+            elif combatant.get("side") == "enemy":
                 enemy_side.append(status)
+            else:
+                other_side.append(status)
 
         if player_side:
             lines.append("玩家侧: " + "；".join(player_side))
+        if ally_side:
+            lines.append("友方侧: " + "；".join(ally_side))
         if enemy_side:
             lines.append("对立侧: " + "；".join(enemy_side))
+        if other_side:
+            lines.append("中立/其他: " + "；".join(other_side))
 
         return "\n".join(lines)
 
@@ -241,6 +262,32 @@ class ContextAssembler:
                 "根据玩家最新意图调用合适工具；若本回合已无合理动作，调用 next_turn 结束当前行动者回合。"
             )
 
+        if current_actor.get("side") == "ally":
+            if current_actor.get("hp", 0) <= 0:
+                if current_actor.get("is_dead"):
+                    return (
+                        f"当前是友方单位 {current_name} [ID:{current_id}] 的回合，但该单位已经死亡。"
+                        "不要执行攻击或施法；若剧情允许复活，使用合适的治疗/复活能力，否则结束当前行动者回合。"
+                    )
+                if current_actor.get("is_stable"):
+                    return (
+                        f"当前是友方单位 {current_name} [ID:{current_id}] 的回合，该单位 0 HP 且伤势稳定。"
+                        "不要执行攻击或施法；如无外部救援，结束当前行动者回合。"
+                    )
+                return (
+                    f"当前是友方单位 {current_name} [ID:{current_id}] 的回合，该单位 0 HP，必须进行死亡豁免。"
+                    "先调用 request_dice_roll(reason=\"死亡豁免\", formula=\"1d20\")，"
+                    "再用 modify_character_state(action=\"record_death_save\", target_id=该友方ID, payload={\"roll_total\": 掷骰raw_roll}) 写回结果；"
+                    "不要执行攻击、施法或主动移动。"
+                )
+            return (
+                f"当前是友方单位 {current_name} [ID:{current_id}] 的回合，由你根据战场事实控制。"
+                f"行为倾向: {format_behavior_profile(current_actor)}。"
+                f"资源: {format_resources(current_actor)}；法术: {format_magic(current_actor)}；反应: {format_reaction_status(current_actor)}。"
+                "选择武器、法术、移动或其他能力时，以该友方单位 ID 作为行动者/施法者，而不是玩家；"
+                "当你判断该单位本回合可做且应做的事情都完成后，结束当前行动者回合。"
+            )
+
         return (
             f"当前是怪物/NPC {current_name} [ID:{current_id}] 的回合。"
             "你必须立刻为其选择一个可执行动作并调用工具，不要等待用户继续发话；"
@@ -249,6 +296,21 @@ class ContextAssembler:
             "不要只用文字宣告换人；当你判断该单位本回合可做且应做的事情都完成后，"
             "必须调用 next_turn 结束当前行动者回合。"
         )
+
+
+def needs_opening_fighter_companion(state: GraphState) -> bool:
+    """开局默认带一名战士友方；只在玩家已加载且尚无友方时提示创建。"""
+    if state_value_to_dict(state.get("player")) is None:
+        return False
+    for unit in dump_mapping_state(state.get("scene_units")).values():
+        if unit.get("side") == "ally":
+            return False
+    combat_dict = state_value_to_dict(state.get("combat"))
+    if combat_dict:
+        for unit in combat_dict.get("participants", {}).values():
+            if unit.get("side") == "ally":
+                return False
+    return True
 
 
 def trim_model_messages(messages: list[BaseMessage], mode: str) -> list[BaseMessage]:
@@ -480,6 +542,46 @@ def format_resources(combatant: dict[str, Any]) -> str:
         value = resources.get(key)
         parts.append(f"{key}={value}/{cap}" if cap is not None else f"{key}={value}")
     return ", ".join(parts)
+
+
+def format_magic(combatant: dict[str, Any]) -> str:
+    """把施法相关事实压成稳定短句，避免友方法术资源被旧消息覆盖。"""
+    known_spells = combatant.get("known_spells", []) or []
+    known_cantrips = combatant.get("known_cantrips", []) or []
+    parts: list[str] = []
+    if known_spells:
+        parts.append("spells=" + ",".join(str(spell_id) for spell_id in known_spells))
+    if known_cantrips:
+        parts.append("cantrips=" + ",".join(str(spell_id) for spell_id in known_cantrips))
+    return "; ".join(parts) if parts else "无"
+
+
+def format_reaction_status(combatant: dict[str, Any]) -> str:
+    """明确反应是否可用，并列出可见的反应法术/动作。"""
+    status = "可用" if combatant.get("reaction_available", False) else "已用/不可用"
+    reaction_labels: list[str] = []
+
+    try:
+        from app.spells import get_spell_def
+        for spell_id in combatant.get("known_spells", []) or []:
+            spell_def = get_spell_def(str(spell_id))
+            if spell_def and spell_def.get("casting_time") == "reaction":
+                reaction_labels.append(str(spell_id))
+    except Exception:
+        reaction_labels = []
+
+    for action in combatant.get("actions", []) or []:
+        if action.get("action_type") == "reaction" or action.get("kind") == "reaction":
+            reaction_labels.append(f"{action.get('name', '?')}({action.get('id', '?')})")
+
+    if reaction_labels:
+        return f"{status}: " + ",".join(dict.fromkeys(reaction_labels))
+    return status
+
+
+def format_behavior_profile(combatant: dict[str, Any]) -> str:
+    """友方行为偏好只作为决策线索，不替代当前战场事实。"""
+    return str(combatant.get("behavior_profile") or "无")
 
 
 def format_death_save_status(combatant: dict[str, Any]) -> str:

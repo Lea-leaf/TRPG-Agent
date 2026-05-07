@@ -23,3 +23,26 @@ class ChatResponse(BaseModel):
     combat: Optional[dict] = Field(default=None, description="Combat state")
     space: Optional[dict] = Field(default=None, description="Planar space state")
     adventure: Optional[AdventureState] = Field(default=None, description="Adventure module progress")
+
+
+class CreateSessionRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Optional session title")
+
+
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    preview: str = ""
+    messageCount: int
+    createdAt: int
+    lastMessageAt: int
+
+
+class SessionListResponse(BaseModel):
+    sessions: list[SessionResponse]
+
+
+class SessionDeleteResponse(BaseModel):
+    session_id: str
+    deletedRows: int
+    deletedTraceFiles: int

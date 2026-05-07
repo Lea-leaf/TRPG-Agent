@@ -123,7 +123,7 @@ def tracks_death_saves(unit: dict | None) -> bool:
     """只有玩家或已带死亡豁免字段的重要单位进入死亡豁免流程。"""
     if not unit:
         return False
-    return unit.get("side") == "player" or any(
+    return unit.get("side") in {"player", "ally"} or any(
         key in unit
         for key in ("death_save_successes", "death_save_failures", "is_stable", "is_dead")
     )
@@ -328,14 +328,13 @@ def _apply_zero_hp_damage_hooks(
     lines.append(f"  [不死坚韧] CON 豁免 DC {dc}: {roll_text}，成功，HP 保持为 1。")
 
 
-def prepare_player_for_combat(player_dict: dict) -> dict:
-    """在 player_dict 上直接叠加战斗字段（原地修改），替代旧的 build_player_combatant。
-    不再创建独立的 CombatantState 副本，从而消除数据双写问题。"""
-    modifiers = player_dict.get("modifiers", {})
-    prof = 2  # 1 级角色标准熟练加值
+def prepare_character_for_combat(unit_dict: dict, *, side: str, fallback_id: str | None = None) -> dict:
+    """把玩家或友方这类角色型单位叠加成可参战状态，共享武器与动作经济规则。"""
+    modifiers = unit_dict.get("modifiers", {})
+    prof = int(unit_dict.get("proficiency_bonus", 2) or 2)
 
     attacks: list[dict] = []
-    for raw_weapon in player_dict.get("weapons", []):
+    for raw_weapon in unit_dict.get("weapons", []):
         w = resolve_weapon_data(raw_weapon)
         props = w.get("properties", [])
         if "finesse" in props:
@@ -364,19 +363,55 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
             long_range_feet=w.get("long_range_feet"),
         ).model_dump())
 
-    player_id, player_name = get_player_identity(player_dict)
-    player_dict["id"] = player_id
-    player_dict["name"] = player_name
-    player_dict["side"] = "player"
-    player_dict["proficiency_bonus"] = prof
-    player_dict["attacks"] = attacks
-    player_dict["action_available"] = True
-    player_dict["bonus_action_available"] = True
-    player_dict["reaction_available"] = True
-    player_dict["speed"] = 30
-    player_dict["movement_left"] = 30
-    sync_ac_state(player_dict)
-    return player_dict
+    unit_id = str(unit_dict.get("id") or fallback_id or unit_dict.get("name") or side).strip()
+    unit_name = str(unit_dict.get("name") or unit_id).strip()
+    unit_dict["id"] = unit_id
+    unit_dict["name"] = unit_name
+    unit_dict["side"] = side
+    unit_dict["proficiency_bonus"] = prof
+    unit_dict["attacks"] = attacks
+    if "multiattack" in unit_dict.get("class_features", []) and attacks:
+        # 友方职业特性只补最小结构化动作，让既有怪物动作执行器负责多段攻击。
+        first_attack = attacks[0]
+        action_id = _slugify_action_id(first_attack["name"])
+        unit_dict["actions"] = [
+            {
+                "id": action_id,
+                "name": first_attack["name"],
+                "kind": "attack",
+                "attack_bonus": first_attack["attack_bonus"],
+                "damage": [{
+                    "dice": first_attack["damage_dice"],
+                    "damage_type": first_attack["damage_type"],
+                }],
+                "reach_feet": first_attack.get("reach_feet"),
+                "normal_range_feet": first_attack.get("normal_range_feet"),
+                "long_range_feet": first_attack.get("long_range_feet"),
+            },
+            {
+                "id": "multiattack",
+                "name": "Multiattack",
+                "kind": "multiattack",
+                "sequence": [action_id, action_id],
+            },
+        ]
+    unit_dict["action_available"] = True
+    unit_dict["bonus_action_available"] = True
+    unit_dict["reaction_available"] = True
+    unit_dict.setdefault("death_save_successes", 0)
+    unit_dict.setdefault("death_save_failures", 0)
+    unit_dict.setdefault("is_stable", False)
+    unit_dict.setdefault("is_dead", False)
+    unit_dict["speed"] = int(unit_dict.get("speed", 30) or 30)
+    unit_dict["movement_left"] = unit_dict["speed"]
+    sync_ac_state(unit_dict)
+    return unit_dict
+
+
+def prepare_player_for_combat(player_dict: dict) -> dict:
+    """在 player_dict 上直接叠加战斗字段，保持玩家不复制进 participants。"""
+    player_id, _ = get_player_identity(player_dict)
+    return prepare_character_for_combat(player_dict, side="player", fallback_id=player_id)
 
 
 def _append_dice_modifier(dice: str, modifier: int) -> str:
@@ -386,6 +421,11 @@ def _append_dice_modifier(dice: str, modifier: int) -> str:
     if modifier > 0:
         return f"{dice}+{modifier}"
     return f"{dice}{modifier}"
+
+
+def _slugify_action_id(value: str) -> str:
+    """把武器名转为结构化动作 ID，供 use_monster_action 稳定调用。"""
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def clear_player_combat_fields(player_dict: dict) -> dict:

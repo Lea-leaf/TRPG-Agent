@@ -68,10 +68,10 @@
       <div v-else class="empty-state">
         <div class="empty-icon">📭</div>
         <p>{{ searchKeyword ? '未找到匹配的冒险记录' : '暂无历史对话' }}</p>
-        <p class="empty-hint" v-if="!searchKeyword">去“聊天助手”开启新的征程吧！</p>
-        <button class="primary-btn" @click="goToChat">
+        <p class="empty-hint" v-if="!searchKeyword">创建一个新会话，开启新的征程吧！</p>
+        <button class="primary-btn" @click="startSession">
           <MessageCircle :size="18" />
-          前往聊天
+          新建会话
         </button>
       </div>
     </div>
@@ -81,7 +81,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { Search, MessageCircle, Trash2 } from 'lucide-vue-next'
-import { listSessions, deleteSession as deleteSessionApi, type ChatSession } from '../Services_/sessionService'
+import { createSession, listSessions, deleteSession as deleteSessionApi, type ChatSession } from '../Services_/sessionService'
 
 const emit = defineEmits<{
   navigate: [tabId: string, params?: Record<string, any>]
@@ -155,8 +155,13 @@ const deleteSession = async (sessionId: string) => {
   }
 }
 
-const goToChat = () => {
-  emit('navigate', 'chat')
+const startSession = async () => {
+  try {
+    const session = await createSession()
+    emit('navigate', 'chat', { session_id: session.id })
+  } catch (error) {
+    console.error('创建会话失败:', error)
+  }
 }
 </script>
 

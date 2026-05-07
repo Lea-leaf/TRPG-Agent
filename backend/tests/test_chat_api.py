@@ -47,6 +47,10 @@ class _FakeSessionService:
             "combat": {"round": 2},
         }
 
+    async def delete_session(self, session_id: str) -> dict:
+        self.calls.append({"deleted_session_id": session_id})
+        return {"deletedRows": 3, "deletedTraceFiles": 1}
+
 
 class _RuntimeFailSessionService:
     async def process_turn(
@@ -145,6 +149,22 @@ class ChatApiTests(unittest.TestCase):
         self.assertEqual("哥布林被你逼退了半步。", data["messages"][1]["content"])
         self.assertEqual("demo-history", fake.calls[-1]["history_session_id"])
         self.assertEqual(5, fake.calls[-1]["history_limit"])
+
+    def test_session_endpoints_create_list_and_delete_sessions(self):
+        fake = _FakeSessionService()
+        with patch("app.api.sessions.delete_chat_session", side_effect=fake.delete_session):
+            with patch("app.api.sessions.create_chat_session", return_value={"id": "new-session", "title": "新的冒险", "preview": "", "messageCount": 0, "createdAt": 1, "lastMessageAt": 1}):
+                with patch("app.api.sessions.list_chat_sessions", return_value=[{"id": "new-session", "title": "新的冒险", "preview": "", "messageCount": 0, "createdAt": 1, "lastMessageAt": 1}]):
+                    client = TestClient(app)
+                    create_resp = client.post("/api/sessions", json={})
+                    list_resp = client.get("/api/sessions")
+                    delete_resp = client.delete("/api/sessions/new-session")
+
+        self.assertEqual(201, create_resp.status_code)
+        self.assertEqual("new-session", create_resp.json()["id"])
+        self.assertEqual(["new-session"], [item["id"] for item in list_resp.json()["sessions"]])
+        self.assertEqual({"session_id": "new-session", "deletedRows": 3, "deletedTraceFiles": 1}, delete_resp.json())
+        self.assertEqual("new-session", fake.calls[-1]["deleted_session_id"])
 
 
 if __name__ == "__main__":

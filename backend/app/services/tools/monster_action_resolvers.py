@@ -199,6 +199,8 @@ def resolve_monster_attack_from_roll(
 
     lines: list[str] = list(roll_info["lines"])
     hp_changes: list[dict] = []
+    from app.services.tools.spell_tools import apply_automatic_hit_reaction
+    lines = apply_automatic_hit_reaction(target, actor, roll_info, state) + lines
     if roll_info["hit"]:
         damage_result = _apply_action_damage(actor, target, action.damage, roll_info["crit"], state)
         lines.extend(damage_result["lines"])

@@ -55,6 +55,30 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("玩家刚进入地牢。", assembled.system_prompt)
         self.assertNotIn("这是旧摘要", assembled.system_prompt)
 
+    def test_opening_prompt_requests_fighter_companion_when_missing(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="开始冒险。")],
+            "player": {"id": "player_hero", "name": "英雄", "side": "player"},
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("[开局友方准则]", assembled.system_prompt)
+        self.assertIn("fighter_companion", assembled.system_prompt)
+
+    def test_opening_prompt_skips_when_ally_exists(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="开始冒险。")],
+            "player": {"id": "player_hero", "name": "英雄", "side": "player"},
+            "scene_units": {"fighter_companion": {"id": "fighter_companion", "name": "米拉", "side": "ally"}},
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertNotIn("[开局友方准则]", assembled.system_prompt)
+
     def test_assemble_trims_without_starting_from_tool_message(self):
         assembler = ContextAssembler()
         messages = [HumanMessage(content="旧消息")]
@@ -229,6 +253,46 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("actions:Scimitar(scimitar, attack)", assembled.system_prompt)
         self.assertIn("actions=[Scimitar(scimitar, attack)", assembled.hud_text)
         self.assertNotIn("attacks:[", assembled.system_prompt)
+
+    def test_combat_context_separates_allies_and_projects_resources(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="继续战斗。")],
+            "player": {"id": "player_hero", "name": "英雄", "side": "player", "hp": 10, "max_hp": 12, "ac": 16},
+            "combat": {
+                "round": 1,
+                "current_actor_id": "apprentice_wizard",
+                "initiative_order": ["apprentice_wizard", "goblin_1", "player_hero"],
+                "participants": {
+                    "apprentice_wizard": {
+                        "id": "apprentice_wizard",
+                        "name": "伊莲",
+                        "side": "ally",
+                        "hp": 12,
+                        "max_hp": 12,
+                        "ac": 12,
+                        "resources": {"spell_slot_lv1": 2},
+                        "resource_caps": {"spell_slot_lv1": 3},
+                        "known_spells": ["magic_missile", "shield"],
+                        "known_cantrips": ["fire_bolt"],
+                        "reaction_available": True,
+                        "attacks": [{"name": "Dagger"}],
+                        "behavior_profile": "保持距离并保护玩家。",
+                    },
+                    "goblin_1": {"name": "Goblin", "side": "enemy", "hp": 7, "max_hp": 7, "ac": 15},
+                },
+            },
+        }
+
+        assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
+
+        self.assertIn("友方侧: 伊莲", assembled.system_prompt)
+        self.assertIn("对立侧: Goblin", assembled.system_prompt)
+        self.assertIn("spell_slot_lv1=2/3", assembled.system_prompt)
+        self.assertIn("magic_missile", assembled.hud_text)
+        self.assertIn("reaction=可用: shield", assembled.hud_text)
+        self.assertIn("当前是友方单位 伊莲", assembled.system_prompt)
+        self.assertIn("以该友方单位 ID 作为行动者/施法者", assembled.system_prompt)
 
     def test_hud_includes_planar_space_summary(self):
         assembler = ContextAssembler()

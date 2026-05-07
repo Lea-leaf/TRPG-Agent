@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.chat import router as chat_router
+from app.api.sessions import router as sessions_router
 from app.services.chat_session_service import close_chat_session_service
 
 
@@ -19,6 +20,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="TRPG Agent Backend", lifespan=lifespan)
 app.include_router(chat_router)
+app.include_router(sessions_router)
 
 
 @app.get("/healthz")
