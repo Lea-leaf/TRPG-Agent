@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Annotated, Literal
 
 from langchain_core.messages import ToolMessage
@@ -14,7 +15,15 @@ from app.calculation.abilities import ability_to_modifier
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
 from app.conditions import remove_condition_by_id, upsert_condition
 from app.services.skills import load_skill_content
-from app.services.tools._helpers import apply_hp_change, compute_ac, get_combatant, sync_ac_state, sync_movement_state
+from app.services.tools._helpers import (
+    apply_hp_change,
+    compute_ac,
+    get_combatant,
+    get_player_identity,
+    is_player_reference,
+    sync_ac_state,
+    sync_movement_state,
+)
 
 
 _STATE_CHANGE_KEYS = frozenset({
@@ -54,27 +63,34 @@ def _get_resource_caps(target: dict, player_dict: dict | None = None) -> dict[st
 @tool
 def load_character_profile(
     role_class: str,
-    tool_call_id: Annotated[str, InjectedToolCallId]
+    character_name: str = "",
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command | str:
-    """根据给定的职业（如'战士'、'法师'、'游荡者'）读取并加载该角色的预设属性卡。
+    """根据玩家姓名与职业读取并加载角色预设属性卡。
     此工具会自动把角色的血量(HP)、护甲(AC)和各项能力值/修正值写入游戏的主状态中。
-    在需要与角色互动前使用此工具为玩家初始化。
+    在需要与角色互动前使用此工具为玩家初始化；角色 ID 就是 character_name，支持中文。
+    参数示例：{"character_name": "温良", "role_class": "法师"}。
 
     Args:
-        role_class: 需要加载的角色职业名称。当前支持："战士", "法师", "游荡者"。
+        role_class: 角色职业名称；当前支持 "战士"、"法师"、"游荡者" 等预设职业。
+        character_name: 玩家告诉你的角色姓名，例如 "温良"；未提供时临时使用职业名作为名字。
     """
     key = role_class.strip()
     if key not in PREDEFINED_CHARACTERS:
         return f"未找到对应职业 '{key}'。支持的预设职业为：{', '.join(PREDEFINED_CHARACTERS.keys())}。"
 
-    profile = PREDEFINED_CHARACTERS[key]
+    profile = deepcopy(PREDEFINED_CHARACTERS[key])
+    profile["role_class"] = key
+    profile["name"] = character_name.strip() or key
+    profile["id"] = profile["name"]
+    profile["side"] = "player"
 
     return Command(
         update={
             "player": profile,
             "messages": [
                 ToolMessage(
-                    content=f"已成功加载角色卡：{key}。\n属性如下：{json.dumps(profile, ensure_ascii=False, indent=2)}",
+                    content=f"已成功加载角色卡：{profile['name']}（职业：{key}，ID：{profile['id']}）。\n属性如下：{json.dumps(profile, ensure_ascii=False, indent=2)}",
                     tool_call_id=tool_call_id
                 )
             ]
@@ -105,13 +121,18 @@ def modify_character_state(
     不要用它重放攻击、施法、怪物动作工具刚刚结算过的结果。
     如不确定 action、changes 或 payload 的写法，先用 action="help" 查看状态说明；
     成长流程用 action="help", payload={"topic": "progression"} 查看完整说明。
+    参数示例：
+    - 扣血：{"target_id": "温良", "action": "update", "changes": {"hp_delta": -3}, "reason": "陷阱伤害"}
+    - 恢复资源：{"target_id": "player", "action": "update", "changes": {"resource_delta": {"spell_slot_1": 1}}, "reason": "短休恢复"}
+    - 加状态：{"action": "apply_condition", "payload": {"target_id": "goblin_1", "condition_id": "prone", "duration": 1}}
+    - 获得经验：{"action": "grant_xp", "payload": {"amount": 75, "reason": "击败地精伏击"}}
 
     Args:
-        target_id: 目标单位 ID，或 "player" 表示当前玩家。
-        changes: action="update" 时的状态变更字典。
-        action: 状态调整动作；用 "help" 获取完整说明。
-        payload: 非 update 动作的参数。
-        reason: 修改原因。
+        target_id: 目标单位 ID；玩家角色的 ID 就是玩家名字，也兼容 "player" 表示当前玩家。
+        changes: action="update" 时的状态变更字典，常用 hp_delta、set_hp、resource_delta、set_resource、add_condition、remove_condition。
+        action: 状态调整动作；常用 "update"、"apply_condition"、"remove_condition"、"grant_xp"、"level_up"。
+        payload: 非 update 动作的参数；不要把 update 的 changes 字段塞到 payload。
+        reason: 修改原因，会进入工具结果，便于回合记录。
     """
     payload = payload or {}
 
@@ -177,8 +198,8 @@ def modify_character_state(
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if target_id == "player" and player_dict:
-        target_id = f"player_{player_dict.get('name', 'player')}"
+    if is_player_reference(player_dict, target_id):
+        target_id, _ = get_player_identity(player_dict)
 
     # 在战斗参与者 / 场景单位 / 玩家中查找目标
     combat_raw = state.get("combat")
@@ -206,7 +227,7 @@ def modify_character_state(
             target_source = "scene"
 
     # 非战斗状态下直接查找玩家
-    if not target and player_dict and target_id == f"player_{player_dict.get('name', 'player')}":
+    if not target and is_player_reference(player_dict, target_id):
         target = player_dict
         target_source = "player"
 
@@ -314,17 +335,17 @@ def inspect_unit(
     返回 HP、AC、能力值、攻击列表、法术位、状态效果等全部信息。
 
     Args:
-        target_id: 目标单位 ID（如 "player_预设-法师"、"goblin_1"），或 "player" 表示当前玩家。
+        target_id: 目标单位 ID；玩家角色的 ID 就是玩家名字，也兼容 "player" 表示当前玩家。
     """
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if target_id == "player":
+    if is_player_reference(player_dict, target_id):
         if not player_dict:
             return Command(update={"messages": [
                 ToolMessage(content="玩家尚未加载角色卡。", tool_call_id=tool_call_id)
             ]})
-        target_id = f"player_{player_dict.get('name', 'player')}"
+        target_id, _ = get_player_identity(player_dict)
 
     # 按优先级搜索：战斗参战者（含玩家）→ 场景单位 → 死亡单位 → 玩家本体
     result = None
@@ -356,7 +377,7 @@ def inspect_unit(
                     source = "死亡单位"
                     break
 
-    if not result and player_dict and target_id == f"player_{player_dict.get('name', 'player')}":
+    if not result and is_player_reference(player_dict, target_id):
         result = player_dict
         source = "玩家角色"
 

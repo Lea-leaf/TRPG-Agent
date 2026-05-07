@@ -9,12 +9,16 @@ from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.adventures.models import AdventureState
+from app.adventures.store import get_adventure_store
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
 from app.graph.state import GraphState
 from app.services.tools._helpers import compute_ac
 
 
 COMBAT_ARCHIVE_MESSAGE_PREFIX = "[系统:战斗归档]"
+NARRATIVE_VISIBLE_MESSAGE_LIMIT = 40
+COMBAT_VISIBLE_MESSAGE_LIMIT = 25
 
 
 class ExternalContextProvider(Protocol):
@@ -76,6 +80,8 @@ class ContextAssembler:
 
     def build_hud_text(self, state: GraphState) -> str:
         sections: list[str] = []
+
+        sections.append("[当前冒险状态]\n" + format_adventure_summary(state_value_to_dict(state.get("adventure"))))
 
         player_dict = state_value_to_dict(state.get("player"))
         if player_dict:
@@ -220,7 +226,7 @@ class ContextAssembler:
 
 
 def trim_model_messages(messages: list[BaseMessage], mode: str) -> list[BaseMessage]:
-    keep_count = 50 if mode == NARRATIVE_AGENT_MODE else 32
+    keep_count = NARRATIVE_VISIBLE_MESSAGE_LIMIT if mode == NARRATIVE_AGENT_MODE else COMBAT_VISIBLE_MESSAGE_LIMIT
     if len(messages) <= keep_count:
         return list(messages)
 
@@ -488,9 +494,42 @@ def format_space_summary(space: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_adventure_summary(adventure: dict[str, Any] | None) -> str:
+    """把冒险状态压缩进 HUD，避免模型每轮都重读完整节点。"""
+    adventure_dict = AdventureState.model_validate(adventure or {}).model_dump()
+    try:
+        node = get_adventure_store().get_node(adventure_dict["active_node_id"])
+        node_title = node.title
+        exit_labels = [f"{item.id}: {item.label}" for item in node.exits]
+    except Exception:
+        node_title = adventure_dict["active_node_id"]
+        exit_labels = []
+
+    lines = [
+        f"模组: {adventure_dict['module_id']}",
+        f"当前节点: {node_title} [ID:{adventure_dict['active_node_id']}]",
+        f"已知线索: {adventure_dict.get('known_clue_ids') or []}",
+        f"已完成事件: {adventure_dict.get('completed_event_ids') or []}",
+        f"已解锁节点: {adventure_dict.get('unlocked_node_ids') or []}",
+    ]
+    if exit_labels:
+        lines.append("当前节点出口: " + "；".join(exit_labels))
+    lines.append("若本轮涉及剧情事实、线索或推进，先调用冒险工具读取或更新节点状态。")
+    return "\n".join(lines)
+
+
 def summarize_tool_message(message: ToolMessage) -> str:
     tool_name = getattr(message, "name", "") or "tool"
     raw_text = message_content_to_text(message.content).strip()
+
+    if tool_name == "load_adventure_node":
+        return summarize_adventure_node_tool(raw_text)
+    if tool_name == "search_adventure_nodes":
+        return f"[工具:{tool_name}] {compact_text(raw_text, 3000)}"
+    if tool_name == "inspect_adventure_state" and raw_text.startswith("# 冒险模组主持技能"):
+        return f"[工具:{tool_name}] {compact_text(raw_text, 800)}"
+    if tool_name in {"inspect_adventure_state", "switch_adventure_node", "reveal_adventure_clue", "mark_adventure_event", "advance_adventure"}:
+        return f"[工具:{tool_name}] {compact_text(raw_text, 1800)}"
 
     if (
         tool_name in {"consult_rules_handbook", "load_skill"}
@@ -522,6 +561,40 @@ def summarize_tool_message(message: ToolMessage) -> str:
     if len(summary) > 180:
         summary = summary[:177] + "..."
     return f"[工具:{tool_name}] {summary}"
+
+
+def summarize_adventure_node_tool(raw_text: str) -> str:
+    """冒险节点是剧情事实源，保留给模型足够原文与结构化主持材料。"""
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return f"[工具:load_adventure_node] {compact_text(raw_text, 8000)}"
+
+    node = payload.get("node", {}) if isinstance(payload, dict) else {}
+    projected = {
+        "node": {
+            "id": node.get("id"),
+            "title": node.get("title"),
+            "kind": node.get("kind"),
+            "source_pages": node.get("source_pages"),
+            "source_excerpt": node.get("source_excerpt"),
+            "source_text": compact_text(str(node.get("source_text", "")), 6000),
+            "subsections": node.get("subsections", []),
+            "dm_summary": node.get("dm_summary"),
+            "player_visible_intro": node.get("player_visible_intro"),
+            "secrets": node.get("secrets", []),
+            "checks": node.get("checks", []),
+            "encounters": node.get("encounters", []),
+            "rewards": node.get("rewards", []),
+            "clues": node.get("clues", []),
+            "events": node.get("events", []),
+            "dm_guidance": node.get("dm_guidance", {}),
+            "candidate_exits": node.get("candidate_exits", []),
+        },
+        "available_exits": payload.get("available_exits", []),
+        "adventure_state": payload.get("adventure_state", {}),
+    }
+    return "[工具:load_adventure_node] " + compact_text(json.dumps(projected, ensure_ascii=False), 10000)
 
 
 def compact_text(text: str, limit: int) -> str:

@@ -6,7 +6,7 @@ from app.graph.state import PlayerState
 # 使用硬编码字典用于基础测试和快速起步，对应 state.PlayerState 结构
 PREDEFINED_CHARACTERS: Dict[str, dict] = {
     "战士": {
-        "name": "预设-战士",
+        "name": "战士",
         "role_class": "战士",
         "level": 1,
         "hp": 12,
@@ -45,7 +45,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "法师": {
-        "name": "预设-法师",
+        "name": "法师",
         "role_class": "法师",
         "level": 1,
         "hp": 8,
@@ -83,7 +83,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "游荡者": {
-        "name": "预设-游荡者",
+        "name": "游荡者",
         "role_class": "游荡者",
         "level": 1,
         "hp": 10,
@@ -118,7 +118,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "牧师": {
-        "name": "预设-牧师",
+        "name": "牧师",
         "role_class": "牧师",
         "level": 1,
         "hp": 10,
@@ -153,7 +153,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "术士": {
-        "name": "预设-术士",
+        "name": "术士",
         "role_class": "术士",
         "level": 1,
         "hp": 8,
@@ -188,7 +188,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "游侠": {
-        "name": "预设-游侠",
+        "name": "游侠",
         "role_class": "游侠",
         "level": 1,
         "hp": 12,
@@ -224,7 +224,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "武僧": {
-        "name": "预设-武僧",
+        "name": "武僧",
         "role_class": "武僧",
         "level": 1,
         "hp": 10,
@@ -258,7 +258,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "圣武士": {
-        "name": "预设-圣武士",
+        "name": "圣武士",
         "role_class": "圣武士",
         "level": 1,
         "hp": 12,
@@ -293,7 +293,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "邪术师": {
-        "name": "预设-邪术师",
+        "name": "邪术师",
         "role_class": "邪术师",
         "level": 1,
         "hp": 9,
@@ -328,7 +328,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "德鲁伊": {
-        "name": "预设-德鲁伊",
+        "name": "德鲁伊",
         "role_class": "德鲁伊",
         "level": 1,
         "hp": 10,
@@ -363,7 +363,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "吟游诗人": {
-        "name": "预设-吟游诗人",
+        "name": "吟游诗人",
         "role_class": "吟游诗人",
         "level": 1,
         "hp": 9,
@@ -398,7 +398,7 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
     "野蛮人": {
-        "name": "预设-野蛮人",
+        "name": "野蛮人",
         "role_class": "野蛮人",
         "level": 1,
         "hp": 15,
@@ -433,3 +433,4 @@ PREDEFINED_CHARACTERS: Dict[str, dict] = {
         ],
     },
 }
+

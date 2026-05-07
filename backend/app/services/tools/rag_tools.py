@@ -289,11 +289,11 @@ def _score_doc_for_query(content: str, sub_category: str, query_tokens: set[str]
 class ConsultRulesInput(BaseModel):
     query: str = Field(
         ...,
-        description="需要查询的D&D 5E规则、机制或环境判定的自然语言问题。",
+        description="需要查询的D&D 5E规则、机制或环境判定的自然语言问题。例如：'树后能提供什么掩护？'、'倒地状态如何影响攻击？'。",
     )
     filter_category: Optional[Literal["conditions", "adventuring", "combat"]] = Field(
         default=None,
-        description="可选的强过滤分类，仅允许 conditions、adventuring 或 combat。",
+        description="可选强过滤分类，仅允许 conditions、adventuring 或 combat。例如掩护/攻击用 combat，状态用 conditions，旅行/坠落用 adventuring。",
     )
 
 @tool("consult_rules_handbook", args_schema=ConsultRulesInput)
@@ -304,6 +304,7 @@ def consult_rules_handbook(
     """
     用于查询 D&D 5E 的基础规则、机制等。
     对于环境是否支持隐蔽、坠落规则、风味判定，必须且只能先调用此工具。
+    参数示例：{"query": "树后能提供什么掩护？", "filter_category": "combat"}。
     """
     global _hybrid_retriever
 

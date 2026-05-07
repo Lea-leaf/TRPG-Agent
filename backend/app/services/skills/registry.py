@@ -38,6 +38,12 @@ _SKILLS: tuple[SkillSpec, ...] = (
         description="说明地图创建、切换、单位落点、战斗移动、测距和范围查询流程。",
         path=_SKILL_ROOT / "space_management" / "SKILL.md",
     ),
+    SkillSpec(
+        skill_id="adventure_module",
+        name="冒险模组主持",
+        description="说明 PDF 冒险节点读取、线索记录、事件记录和剧情书签推进流程。",
+        path=_SKILL_ROOT / "adventure_module" / "SKILL.md",
+    ),
 )
 
 

@@ -77,8 +77,8 @@ def test_place_unit_resolves_player_alias_without_creating_player_node():
         create_plane_map,
         tool_input={"name": "荒野小径", "width": 80, "height": 60, "state": {}},
     ).update["space"]
-    player = _make_unit("player_预设-法师", side="player")
-    player["name"] = "预设-法师"
+    player = _make_unit("温良", side="player")
+    player["name"] = "温良"
 
     result = _invoke_tool(
         manage_space,
@@ -91,7 +91,7 @@ def test_place_unit_resolves_player_alias_without_creating_player_node():
 
     placements = result.update["space"]["placements"]
     assert "PLAYER" not in placements
-    assert placements["player_预设-法师"]["position"] == {"x": 15.0, "y": 20.0}
+    assert placements["温良"]["position"] == {"x": 15.0, "y": 20.0}
 
 
 def test_place_unit_rejects_unknown_unit_when_units_are_known():
@@ -99,8 +99,8 @@ def test_place_unit_rejects_unknown_unit_when_units_are_known():
         create_plane_map,
         tool_input={"name": "荒野小径", "width": 80, "height": 60, "state": {}},
     ).update["space"]
-    player = _make_unit("player_预设-法师", side="player")
-    player["name"] = "预设-法师"
+    player = _make_unit("温良", side="player")
+    player["name"] = "温良"
 
     result = _invoke_tool(
         manage_space,

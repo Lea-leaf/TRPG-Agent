@@ -44,7 +44,11 @@ def _make_combat_state(
     """构建 CombatState Pydantic 实例。
     新模型中玩家不在 participants 里，需要在 initiative_order 中包含玩家 ID。"""
     # 从 participants 中过滤掉玩家条目（适配新模型）
-    npc_participants = {k: v for k, v in participants.items() if not k.startswith("player_")}
+    player_id = player_dict.get("id") if player_dict else None
+    npc_participants = {
+        k: v for k, v in participants.items()
+        if k != player_id and v.get("side") != "player"
+    }
     all_ids = list(participants.keys())
     return CombatState(
         round=round_num,
@@ -84,6 +88,22 @@ def _invoke_tool(tool_func, *, tool_input: dict) -> object:
     return tool_func.invoke(tool_call)
 
 
+def test_load_character_profile_uses_custom_name_as_player_id():
+    """加载角色时玩家名字就是稳定单位 ID，职业只保存在 role_class。"""
+    from app.services.tool_service import load_character_profile
+
+    result = _invoke_tool(
+        load_character_profile,
+        tool_input={"character_name": "温良", "role_class": "法师"},
+    )
+
+    player = result.update["player"]
+    assert player["id"] == "温良"
+    assert player["name"] == "温良"
+    assert player["role_class"] == "法师"
+    assert "预设" not in result.update["messages"][0].content
+
+
 # ── Phase 1: _build_player_combatant 测试 ──────────────────────
 
 
@@ -94,7 +114,8 @@ class TestBuildPlayerCombatant:
         """战士→长剑: attack_bonus = prof(2) + STR mod(3) = 5"""
         result = _make_player_combatant("战士")
 
-        assert result["id"] == "player_预设-战士"
+        assert result["id"] == "战士"
+        assert result["name"] == "战士"
         assert result["side"] == "player"
         assert result["hp"] == 12
         assert result["ac"] == 16
@@ -128,6 +149,16 @@ class TestBuildPlayerCombatant:
         prepare_player_for_combat(player)
         assert player["attacks"] == []
 
+    def test_custom_chinese_name_is_stable_player_id(self):
+        """玩家中文名直接作为单位 ID，职业仍保留为 role_class。"""
+        player = dict(PREDEFINED_CHARACTERS["法师"])
+        player["name"] = "温良"
+        prepare_player_for_combat(player)
+
+        assert player["id"] == "温良"
+        assert player["name"] == "温良"
+        assert player["role_class"] == "法师"
+
     def test_all_predefined_have_weapons(self):
         """所有预设职业都应有至少一把武器"""
         for class_name, profile in PREDEFINED_CHARACTERS.items():
@@ -146,17 +177,17 @@ class TestStartCombatPlayerJoin:
 
     def test_player_added_to_initiative(self):
         """玩家角色卡存在时，start_combat 后 initiative_order 应包含玩家 ID"""
-        player = PREDEFINED_CHARACTERS["战士"]
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良"}
         goblin = _make_goblin()
-        state = {"player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["player_预设-战士", "goblin_1"])}
+        state = {"player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["温良", "goblin_1"])}
         result = self._invoke_start_combat(state)
 
         combat_update = result.update["combat"]
-        assert "player_预设-战士" in combat_update["initiative_order"]
+        assert "温良" in combat_update["initiative_order"]
         # 玩家不在 participants 中（新模型）
-        assert "player_预设-战士" not in combat_update["participants"]
+        assert "温良" not in combat_update["participants"]
         # 玩家战斗字段叠加在 player 上
-        assert result.update["player"]["id"] == "player_预设-战士"
+        assert result.update["player"]["id"] == "温良"
         assert result.update["player"]["side"] == "player"
 
     def test_active_combat_archive_start_includes_start_tool_call(self):
@@ -244,10 +275,12 @@ class TestAttackActionValidation:
         """构建含玩家+怪物的标准战斗状态（新模型：玩家在 player 字段）"""
         player_c = _make_player_combatant("战士")
         player_c["action_available"] = player_action_available
+        if current_actor_id == "player_预设-战士":
+            current_actor_id = player_c["id"]
 
         goblin = _make_goblin()
         combat = _make_combat_state(
-            {"player_预设-战士": player_c, "goblin_1": goblin},
+            {player_c["id"]: player_c, "goblin_1": goblin},
             current_actor_id=current_actor_id,
             player_dict=player_c,
         )
@@ -329,7 +362,7 @@ class TestAttackActionValidation:
 
         assert isinstance(result, Command)
         assert result.update["pending_reaction"]["attacker_id"] == "goblin_1"
-        assert result.update["pending_reaction"]["target_id"] == "player_预设-战士"
+        assert result.update["pending_reaction"]["target_id"] == "战士"
         assert result.update["pending_reaction"]["attack_roll"]["hit_total"] == 16
         assert result.update["reaction_choice"] is None
         assert result.update["messages"][0].additional_kwargs["hidden_from_ui"] is True
@@ -1073,7 +1106,7 @@ class TestLostMineSpellCoverage:
             },
         )
 
-        assert result.update["space"]["placements"]["player_预设-法师"]["position"] == {"x": 20.0, "y": 0.0}
+        assert result.update["space"]["placements"]["法师"]["position"] == {"x": 20.0, "y": 0.0}
         assert result.update["player"]["resources"]["spell_slot_lv2"] == 0
 
     def test_blur_condition_gives_attackers_disadvantage(self):

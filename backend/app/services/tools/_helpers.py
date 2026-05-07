@@ -40,6 +40,81 @@ COMBAT_OVERLAY_KEYS = frozenset({
 })
 
 
+def get_player_identity(player_dict: dict | None) -> tuple[str, str]:
+    """把玩家的真实名字收敛成稳定 id；中文名直接作为 id 使用。"""
+    if not player_dict:
+        return "player", "玩家"
+
+    player_id = str(player_dict.get("id") or player_dict.get("name") or "player").strip() or "player"
+    player_name = str(player_dict.get("name") or player_id).strip() or player_id
+    return player_id, player_name
+
+
+def player_reference_aliases(player_dict: dict | None) -> set[str]:
+    """集中列出玩家可接受引用，兼容历史 player_预设-职业 存档。"""
+    if not player_dict:
+        return set()
+
+    player_id, player_name = get_player_identity(player_dict)
+    role_class = str(player_dict.get("role_class") or "").strip()
+    aliases = {
+        "player",
+        "玩家",
+        "当前玩家",
+        player_id,
+        player_name,
+        f"player_{player_name}",
+        f"player_{player_id}",
+    }
+    if role_class:
+        aliases.update({
+            role_class,
+            f"player_{role_class}",
+            f"player_预设-{role_class}",
+        })
+    return {alias for alias in aliases if alias}
+
+
+def is_player_reference(player_dict: dict | None, value: str | None) -> bool:
+    """兼容玩家、名字、稳定 id 与旧 player_名字 写法，避免模型猜 ID 时失败。"""
+    if not player_dict or value is None:
+        return False
+
+    text = str(value).strip()
+    return text in player_reference_aliases(player_dict)
+
+
+def canonicalize_player_space(raw_space: dict | None, player_dict: dict | None) -> dict | None:
+    """把旧玩家落点别名迁移到稳定玩家 id，避免空间/战斗 ID 漂移。"""
+    if not raw_space or not player_dict:
+        return raw_space
+
+    player_id, _ = get_player_identity(player_dict)
+    aliases = player_reference_aliases(player_dict) - {player_id}
+    placements = raw_space.get("placements") if isinstance(raw_space, dict) else None
+    if not isinstance(placements, dict) or player_id in placements:
+        return raw_space
+
+    for alias in aliases:
+        if alias not in placements:
+            continue
+        canonical_space = dict(raw_space)
+        canonical_placements = dict(placements)
+        placement = canonical_placements.pop(alias)
+        placement_dict = placement.model_dump() if hasattr(placement, "model_dump") else dict(placement)
+        placement_dict["unit_id"] = player_id
+        canonical_placements[player_id] = placement_dict
+        canonical_space["placements"] = canonical_placements
+        return canonical_space
+
+    return raw_space
+
+
+def canonical_combatant_id(unit: dict | None, fallback: str) -> str:
+    """从解析后的单位取真实 id，工具参数别名只在入口层存在。"""
+    return str(unit.get("id") or fallback) if unit else fallback
+
+
 def apply_hp_change(target: dict, delta: int) -> dict:
     """对目标施加 HP 变化（正数=治疗, 负数=伤害），返回 hp_change 记录。原地修改 target['hp']。"""
     old_hp = target.get("hp", 0)
@@ -199,8 +274,9 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
             long_range_feet=range_tuple[1] if range_tuple else None,
         ).model_dump())
 
-    name = player_dict.get("name", "player")
-    player_dict["id"] = f"player_{name}"
+    player_id, player_name = get_player_identity(player_dict)
+    player_dict["id"] = player_id
+    player_dict["name"] = player_name
     player_dict["side"] = "player"
     player_dict["proficiency_bonus"] = prof
     player_dict["attacks"] = attacks
@@ -224,7 +300,7 @@ def get_combatant(
     combat_dict: dict, player_dict: dict | None, combatant_id: str
 ) -> dict | None:
     """统一获取参战者字典。玩家从 player_dict 返回，NPC 从 combat.participants 返回。"""
-    if player_dict and combatant_id == player_dict.get("id"):
+    if is_player_reference(player_dict, combatant_id):
         return player_dict
     return combat_dict.get("participants", {}).get(combatant_id)
 

@@ -1,0 +1,450 @@
+[
+  {
+    "id": "lost_mine_start",
+    "module_id": "lost_mine",
+    "title": "第1部分：地精箭头 - 护送补给",
+    "kind": "scene",
+    "page_start": 6,
+    "page_end": 6,
+    "source_excerpt": "冒险开始，玩家们驾驶着一辆满载补给的货车从无冬城前往凡达林。",
+    "dm_summary": "玩家受雇护送一车补给前往凡达林。当前重点是建立旅途、委托人与目的地，并把玩家自然带向三猪小径上的第一处异常。",
+    "player_visible_intro": "你们驾驶着满载补给的货车离开无冬城，沿大路南下，又转入通往凡达林的三猪小径。离目的地还有半天路程，路旁林影渐密，车轮压过泥土与碎石。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [],
+    "events": [],
+    "exits": [
+      {
+        "id": "continue_to_ambush",
+        "label": "继续沿三猪小径前进",
+        "next_node_id": "goblin_ambush",
+        "description": "玩家继续赶路，进入地精伏击场景。"
+      }
+    ]
+  },
+  {
+    "id": "goblin_ambush",
+    "module_id": "lost_mine",
+    "title": "地精伏击",
+    "kind": "encounter",
+    "page_start": 6,
+    "page_end": 8,
+    "parent_id": "lost_mine_start",
+    "source_excerpt": "还有半天路程到达凡达林时，他们遭遇了克拉摩部族的地精劫掠者。",
+    "dm_summary": "道路上的异常引出克拉摩地精伏击。主持时先让玩家有机会观察、调查或接近，若触发冲突，再建立战斗地图并生成地精。",
+    "player_visible_intro": "前方道路被异样的静默压住，货车的马匹开始不安地踏步。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [
+      {
+        "id": "goblin_ambush_goblins",
+        "monster_slug": "goblin",
+        "count": 4,
+        "trigger": "玩家进入伏击范围或主动搜索道路异常。"
+      }
+    ],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "goblin_trail",
+        "label": "地精踪迹",
+        "description": "玩家调查伏击现场后，可以发现通向克拉摩窝点的踪迹。"
+      }
+    ],
+    "events": ["goblin_ambush_resolved"],
+    "exits": [
+      {
+        "id": "follow_goblin_trail",
+        "label": "追踪地精踪迹",
+        "next_node_id": "cragmaw_hideout_entrance",
+        "requires": ["goblin_trail"],
+        "description": "玩家找到并选择追踪地精留下的路线。"
+      },
+      {
+        "id": "continue_to_phandalin",
+        "label": "继续前往凡达林",
+        "next_node_id": "phandalin_arrival",
+        "description": "玩家暂不追踪地精，继续完成补给护送。"
+      }
+    ]
+  },
+  {
+    "id": "cragmaw_hideout_entrance",
+    "module_id": "lost_mine",
+    "title": "克拉摩窝点入口",
+    "kind": "location",
+    "page_start": 7,
+    "page_end": 8,
+    "parent_id": "goblin_ambush",
+    "source_excerpt": "俘虏地精还可能被说服而给玩家带路，一路避开陷阱直达克拉摩窝点。",
+    "dm_summary": "玩家抵达克拉摩窝点外侧。这里应进入洞穴探索、陷阱与守卫处理。",
+    "player_visible_intro": "地精留下的痕迹把你们带向林中溪谷，一处隐蔽洞口藏在灌木和岩石后。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [],
+    "events": [],
+    "exits": [
+      {
+        "id": "enter_cragmaw_hideout",
+        "label": "进入克拉摩窝点",
+        "next_node_id": "cragmaw_hideout",
+        "description": "玩家沿地精踪迹抵达洞口，并开始探索克拉摩窝点。"
+      },
+      {
+        "id": "continue_to_phandalin_after_hideout",
+        "label": "窝点事件后前往凡达林",
+        "next_node_id": "phandalin",
+        "description": "玩家解决窝点威胁、救出修达或决定暂时离开后，前往凡达林推进城镇阶段。"
+      }
+    ]
+  },
+  {
+    "id": "phandalin_arrival",
+    "module_id": "lost_mine",
+    "title": "抵达凡达林",
+    "kind": "scene",
+    "page_start": 7,
+    "page_end": 7,
+    "parent_id": "goblin_ambush",
+    "source_excerpt": "玩家也有可能错过地精踪迹，或者打算直接前往凡达林。这时直接跳到第2部分“凡达林”。",
+    "dm_summary": "玩家抵达凡达林，但甘德伦未按时到达的事实会把主线压力重新推回地精袭击。",
+    "player_visible_intro": "凡达林的屋顶出现在路尽头。补给车终于抵达，但委托人却没有如约在镇上等候。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [],
+    "events": [],
+    "exits": [
+      {
+        "id": "enter_phandalin",
+        "label": "进入凡达林镇内活动",
+        "next_node_id": "phandalin",
+        "description": "玩家抵达凡达林，开始城镇探索、交付补给并接触当地 NPC。"
+      }
+    ]
+  },
+  {
+    "id": "cragmaw_hideout",
+    "module_id": "lost_mine",
+    "title": "克拉摩窝点",
+    "kind": "location",
+    "page_start": 7,
+    "page_end": 12,
+    "source_excerpt": "克拉摩部族的地精建立了这个窝点，是为了更轻松地对通过三猪小径前往凡达林的旅人实施伏击和抢劫。",
+    "dm_summary": "玩家探索克拉摩窝点，可能救出修达·霍温特、夺回补给，并获得克拉摩堡和凡达林后续线索。",
+    "player_visible_intro": "溪流从隐蔽洞口流出，灌木和岩石遮住了克拉摩窝点的入口。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "sildar_rescued",
+        "label": "修达获救",
+        "description": "玩家救出修达·霍温特后，他会希望尽快前往凡达林，并提供后续主线信息。"
+      },
+      {
+        "id": "cragmaw_castle_lead",
+        "label": "克拉摩堡线索",
+        "description": "玩家得知甘德伦或其装备被送往克拉摩堡，主线目标指向克拉摩堡。"
+      }
+    ],
+    "events": [],
+    "exits": [
+      {
+        "id": "go_to_phandalin",
+        "label": "前往凡达林",
+        "next_node_id": "phandalin",
+        "description": "玩家离开克拉摩窝点，前往凡达林进入城镇阶段。"
+      },
+      {
+        "id": "follow_cragmaw_castle_lead",
+        "label": "追查克拉摩堡",
+        "next_node_id": "cragmaw_castle",
+        "requires": ["cragmaw_castle_lead"],
+        "description": "玩家掌握甘德伦或克拉摩部族去向后，追查克拉摩堡。"
+      }
+    ]
+  },
+  {
+    "id": "phandalin",
+    "module_id": "lost_mine",
+    "title": "第2 部分：凡达林",
+    "kind": "stage",
+    "page_start": 13,
+    "page_end": 13,
+    "source_excerpt": "现在的凡达林镇重建在古老城镇的废墟之上。",
+    "dm_summary": "凡达林是模组的城镇枢纽，玩家会交付补给、接触镇民、获知红标帮威胁，并得到第3部分各支线线索。",
+    "player_visible_intro": "凡达林镇坐落在古老废墟之上，新建的屋舍、泥土街道和来往商旅让这里显得忙碌又不安。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "redbrand_threat",
+        "label": "红标帮威胁",
+        "description": "玩家从镇民处获知红标帮正在压迫凡达林。"
+      },
+      {
+        "id": "sildar_cragmaw_castle",
+        "label": "克拉摩堡目标",
+        "description": "修达或其他线索指出需要寻找克拉摩堡以营救甘德伦。"
+      },
+      {
+        "id": "side_quests_unlocked",
+        "label": "凡达林支线线索",
+        "description": "玩家通过镇中 NPC 获得蜘蛛之网阶段的若干支线目标。"
+      }
+    ],
+    "events": [],
+    "exits": [
+      {
+        "id": "confront_redbrands",
+        "label": "处理红标帮恶霸",
+        "next_node_id": "redbrand_ruffians",
+        "requires": ["redbrand_threat"],
+        "description": "玩家掌握红标帮威胁并决定正面处理镇上的恶霸。"
+      },
+      {
+        "id": "investigate_redbrand_hideout",
+        "label": "调查红标帮窝点",
+        "next_node_id": "redbrand_hideout",
+        "requires": ["redbrand_threat"],
+        "description": "玩家决定调查崔森德庄园或红标帮大本营。"
+      },
+      {
+        "id": "pursue_spiders_web",
+        "label": "追查蜘蛛之网线索",
+        "next_node_id": "spiders_web",
+        "requires": ["side_quests_unlocked"],
+        "description": "玩家离开凡达林，处理镇中 NPC 提供的周边支线和主线线索。"
+      },
+      {
+        "id": "seek_cragmaw_castle",
+        "label": "寻找克拉摩堡",
+        "next_node_id": "cragmaw_castle",
+        "requires": ["sildar_cragmaw_castle"],
+        "description": "玩家掌握克拉摩堡方向后，前往营救甘德伦并寻找地图。"
+      }
+    ]
+  },
+  {
+    "id": "redbrand_ruffians",
+    "module_id": "lost_mine",
+    "title": "红标帮恶霸",
+    "kind": "encounter",
+    "page_start": 18,
+    "page_end": 18,
+    "source_excerpt": "冒险者停留在凡达林差不多一天左右后，他们必然会与红标帮帮匪发生冲突。",
+    "dm_summary": "红标帮恶霸在镇中挑衅玩家，冲突会把剧情推向红标帮窝点。",
+    "player_visible_intro": "几个穿着肮脏红斗篷的恶棍堵在路边，带着不怀好意的笑容打量你们。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "redbrand_hideout_lead",
+        "label": "红标帮窝点线索",
+        "description": "逃跑或被俘的红标帮成员、镇民情报会指向崔森德庄园下方的窝点。"
+      }
+    ],
+    "events": [],
+    "exits": [
+      {
+        "id": "go_to_redbrand_hideout",
+        "label": "前往红标帮窝点",
+        "next_node_id": "redbrand_hideout",
+        "requires": ["redbrand_hideout_lead"],
+        "description": "玩家获知红标帮大本营后，前往崔森德庄园调查。"
+      },
+      {
+        "id": "return_to_phandalin",
+        "label": "回到凡达林继续调查",
+        "next_node_id": "phandalin",
+        "description": "玩家暂不追击红标帮，回到凡达林继续收集情报。"
+      }
+    ]
+  },
+  {
+    "id": "redbrand_hideout",
+    "module_id": "lost_mine",
+    "title": "红标帮窝点",
+    "kind": "location",
+    "page_start": 19,
+    "page_end": 25,
+    "source_excerpt": "红标帮窝点位于崔森德庄园下方。",
+    "dm_summary": "玩家探索红标帮窝点，揭露玻璃手杖与黑蜘蛛的关系，并让剧情进入蜘蛛之网阶段。",
+    "player_visible_intro": "崔森德庄园的废墟下方，潮湿幽暗的通道通向红标帮真正的巢穴。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "black_spider_letter",
+        "label": "黑蜘蛛信件",
+        "description": "玩家发现黑蜘蛛与红标帮、克拉摩地精之间的联系。"
+      }
+    ],
+    "events": [],
+    "exits": [
+      {
+        "id": "advance_to_spiders_web",
+        "label": "进入蜘蛛之网阶段",
+        "next_node_id": "spiders_web",
+        "requires": ["black_spider_letter"],
+        "description": "红标帮窝点事件结束后，玩家根据黑蜘蛛线索追查更大的阴谋。"
+      },
+      {
+        "id": "return_to_phandalin_after_hideout",
+        "label": "返回凡达林",
+        "next_node_id": "phandalin",
+        "description": "玩家结束或暂离红标帮窝点，回到凡达林休整和收集新线索。"
+      }
+    ]
+  },
+  {
+    "id": "spiders_web",
+    "module_id": "lost_mine",
+    "title": "第3 部分：蜘蛛之网",
+    "kind": "stage",
+    "page_start": 26,
+    "page_end": 26,
+    "source_excerpt": "角色们会根据现有的指引和一连串的问题展开行动。",
+    "dm_summary": "蜘蛛之网是开放调查阶段，玩家可根据凡达林获得的线索前往阿加莎、古枭井、雷树废墟、三猪小径/飞龙突岩或克拉摩堡。",
+    "player_visible_intro": "凡达林周边的线索像蛛网一样向外延伸，每一条都可能揭开黑蜘蛛阴谋的一角。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [],
+    "events": [],
+    "exits": [
+      {
+        "id": "visit_agatha",
+        "label": "寻找阿加莎",
+        "next_node_id": "conyberry_agathas_lair",
+        "requires": ["sister_garaele_agatha"],
+        "description": "玩家接受加莉尔修女相关线索后，前往兔莓与阿加莎的巢穴。"
+      },
+      {
+        "id": "investigate_old_owl_well",
+        "label": "调查古枭井",
+        "next_node_id": "old_owl_well",
+        "requires": ["daran_old_owl_well"],
+        "description": "玩家掌握古枭井异常活动线索后前往调查。"
+      },
+      {
+        "id": "go_to_thundertree",
+        "label": "前往雷树废墟",
+        "next_node_id": "ruins_of_thundertree",
+        "requires": ["quelline_reidoth"],
+        "description": "玩家寻找德鲁伊里多斯或雷树废墟线索时可用。"
+      },
+      {
+        "id": "seek_wyvern_tor",
+        "label": "寻找飞龙突岩兽人",
+        "next_node_id": "triboar_trail",
+        "requires": ["harbin_wyvern_tor"],
+        "description": "当前切分中飞龙突岩材料并入三猪小径/雷树附近节点，玩家追查兽人营地时先切到三猪小径材料。"
+      },
+      {
+        "id": "seek_cragmaw_castle",
+        "label": "寻找克拉摩堡",
+        "next_node_id": "cragmaw_castle",
+        "requires": ["sildar_cragmaw_castle"],
+        "description": "玩家掌握克拉摩堡线索后，前往营救甘德伦并寻找潮音洞穴地图。"
+      }
+    ]
+  },
+  {
+    "id": "cragmaw_castle",
+    "module_id": "lost_mine",
+    "title": "克拉摩堡",
+    "kind": "location",
+    "page_start": 33,
+    "page_end": 38,
+    "source_excerpt": "克拉摩堡是克拉摩部族在无冬森林中的据点。",
+    "dm_summary": "玩家探索克拉摩堡，营救甘德伦并夺回通往潮音洞穴的地图。",
+    "player_visible_intro": "森林深处，破败的石墙和塌陷的塔楼从树影间露出，这里就是克拉摩堡。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [
+      {
+        "id": "gundren_map",
+        "label": "甘德伦的地图",
+        "description": "玩家取得通往潮音洞穴的地图。"
+      },
+      {
+        "id": "gundren_rescued",
+        "label": "甘德伦获救",
+        "description": "玩家救出甘德伦·寻岩者。"
+      }
+    ],
+    "events": [],
+    "exits": [
+      {
+        "id": "return_to_phandalin_with_gundren",
+        "label": "护送甘德伦返回凡达林",
+        "next_node_id": "phandalin",
+        "requires": ["gundren_rescued"],
+        "description": "甘德伦获救后，玩家可护送他回凡达林休整。"
+      },
+      {
+        "id": "go_to_wave_echo_cave",
+        "label": "前往潮音洞穴",
+        "next_node_id": "wave_echo_cave",
+        "requires": ["gundren_map"],
+        "description": "玩家取得地图后，前往潮音洞穴进入最终阶段。"
+      }
+    ]
+  },
+  {
+    "id": "wave_echo_cave",
+    "module_id": "lost_mine",
+    "title": "第4 部分：潮音洞穴",
+    "kind": "stage",
+    "page_start": 39,
+    "page_end": 58,
+    "source_excerpt": "凡达林以东十五里宝剑山脉的山谷深处，正是潮音洞穴所在地。",
+    "dm_summary": "最终阶段。玩家探索潮音洞穴、寻找法术工厂并对抗黑蜘蛛涅兹纳尔。",
+    "player_visible_intro": "宝剑山脉深处，潮声在黑暗矿道中回荡。失落矿坑终于出现在你们眼前。",
+    "secrets": [],
+    "checks": [],
+    "encounters": [],
+    "rewards": [],
+    "clues": [],
+    "events": [],
+    "exits": [
+      {
+        "id": "enter_final_dungeon",
+        "label": "进入潮音洞穴探索",
+        "next_node_id": "wave_echo_cave__1_洞穴入口",
+        "description": "玩家从洞穴入口开始最终地下城探索。"
+      },
+      {
+        "id": "confront_black_spider",
+        "label": "对抗黑蜘蛛",
+        "next_node_id": "wave_echo_cave__19_杜马松的神庙",
+        "requires": ["black_spider_location"],
+        "description": "玩家定位黑蜘蛛后，前往杜马松神庙对抗涅兹纳尔。"
+      },
+      {
+        "id": "finish_lost_mine",
+        "label": "完成失落矿坑结局",
+        "next_node_id": "wave_echo_cave__结局",
+        "requires": ["nezznar_defeated"],
+        "description": "黑蜘蛛被击败、矿坑核心问题解决后，进入结局。"
+      }
+    ]
+  }
+]

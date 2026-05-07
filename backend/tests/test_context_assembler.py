@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -59,7 +60,7 @@ class ContextAssemblerTests(unittest.TestCase):
         messages = [HumanMessage(content="旧消息")]
         messages.append(AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {}, "id": "call_1"}]))
         messages.append(ToolMessage(content="Goblin 使用弯刀攻击。\n英雄 HP: 18 -> 13", tool_call_id="call_1", name="attack_action"))
-        messages.extend(HumanMessage(content=f"消息 {index}") for index in range(49))
+        messages.extend(HumanMessage(content=f"消息 {index}") for index in range(39))
 
         assembled = assembler.assemble({"messages": messages}, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
@@ -88,6 +89,44 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIsInstance(assembled.model_input_messages[-1], ToolMessage)
         self.assertIn("<runtime_state", assembled.model_input_messages[-3].content)
         self.assertIn("[工具:attack_action]", assembled.model_input_messages[-1].content)
+
+    def test_adventure_node_tool_projection_keeps_structured_material(self):
+        tool_message = ToolMessage(
+            content=json.dumps(
+                {
+                    "node": {
+                        "id": "goblin_ambush",
+                        "title": "地精伏击",
+                        "kind": "encounter",
+                        "source_pages": [6, 7],
+                        "source_excerpt": "伏击摘录",
+                        "source_text": "轮到地精行动时，其中两个地精冲出灌木丛。打败伏击的地精并发现克拉摩窝点后，每人75 XP。",
+                        "subsections": [{"title": "奖励经验值", "text": "每人75 XP"}],
+                        "dm_summary": "四只地精伏击。",
+                        "player_visible_intro": "两匹死马挡在路上。",
+                        "secrets": ["地精躲在灌木丛"],
+                        "checks": [{"ability": "wis", "skill": "survival", "dc": 10}],
+                        "encounters": [{"monster_slug": "goblin", "count": 4}],
+                        "rewards": [{"type": "xp", "description": "75 XP"}],
+                        "clues": [{"id": "goblin_trail", "label": "地精踪迹"}],
+                        "events": [],
+                        "dm_guidance": {"tactics": ["两近战两远程"], "xp": ["75 XP"]},
+                        "candidate_exits": [{"id": "goblin_trail"}],
+                    },
+                    "available_exits": [{"id": "follow_goblin_trail", "available": False}],
+                    "adventure_state": {"known_clue_ids": []},
+                },
+                ensure_ascii=False,
+            ),
+            tool_call_id="call_adventure",
+            name="load_adventure_node",
+        )
+
+        projected = summarize_tool_message(tool_message)
+
+        self.assertIn("轮到地精行动时", projected)
+        self.assertIn("goblin_trail", projected)
+        self.assertIn("available_exits", projected)
 
     def test_archived_combat_expands_start_to_triggering_ai_tool_call(self):
         assembler = ContextAssembler()
