@@ -312,12 +312,13 @@ def start_combat(
 ) -> Command:
     """开始战斗：从场景单位池中选取指定 ID 的单位作为参战者，投先攻骰并排定行动顺序。
     前置条件：必须先用 spawn_monsters 生成单位，并用 manage_space 把玩家和参战单位放到当前地图。
-    玩家角色会自动加入，无需在 combatant_ids 中指定。
+    玩家角色会自动加入，无需在 combatant_ids 中指定；友方不是玩家，必须和敌人一样显式列入 combatant_ids。
     新版突袭只让被突袭者先攻劣势，不跳过首回合，也不禁用反应。
-    参数示例：{"combatant_ids": ["goblin_1", "goblin_2"], "surprised_ids": ["player"]}。
+    开战前若需要判断突袭/被突袭，先对玩家小队或敌方小队整体做一次感知/潜行对抗，不要为每个单位逐个掷骰；判定完成后把被突袭单位 ID 放入 surprised_ids。
+    参数示例：{"combatant_ids": ["fighter_companion", "goblin_1", "goblin_2"], "surprised_ids": ["player"]}。
 
     Args:
-        combatant_ids: 从场景单位池中参加本次战斗的非玩家单位 ID 列表；不要把玩家 ID 放进来。
+        combatant_ids: 从场景单位池中参加本次战斗的非玩家单位 ID 列表；敌人和友方都要放进来，不要把玩家 ID 放进来。
         surprised_ids: 被突袭的单位 ID；这些单位先攻检定用劣势。可用 "player" 指代当前玩家。
     """
     scene_units: dict = state.get("scene_units") or {}
@@ -327,7 +328,7 @@ def start_combat(
         scene_raw = {}
 
     if not combatant_ids and not scene_raw:
-        return "场景中没有任何单位。请先使用 spawn_monsters 生成怪物。"
+        return "场景中没有任何单位。请先使用 spawn_monsters 或 spawn_ally 生成参战单位。"
 
     participants: dict[str, dict] = {}
     missing: list[str] = []
@@ -407,7 +408,13 @@ def start_combat(
         "active_combat_message_start": _combat_archive_start_index(state),
         "messages": [
             ToolMessage(
-                content=f"战斗开始！第 1 回合。\n先攻顺序：\n{order_desc}\n\n当前行动者：{all_units[order[0]].get('name', order[0])} [ID: {order[0]}]",
+                content=(
+                    "战斗开始！第 1 回合。\n"
+                    "先攻已经由工具完成结算；突袭单位的先攻劣势已计入下列骰式。"
+                    "必须以此先攻顺序和当前行动者为准，不要自行重排或补骰。\n"
+                    f"先攻顺序：\n{order_desc}\n\n"
+                    f"当前行动者：{all_units[order[0]].get('name', order[0])} [ID: {order[0]}]"
+                ),
                 tool_call_id=tool_call_id,
             )
         ],

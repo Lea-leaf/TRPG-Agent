@@ -36,6 +36,7 @@ class NoopExternalContextProvider:
 class AssembledContext:
     system_prompt: str
     hud_text: str
+    runtime_state_text: str
     model_input_messages: list[BaseMessage]
 
 
@@ -48,42 +49,53 @@ class ContextAssembler:
     def assemble(self, state: GraphState, mode: str, *, base_system_prompt: str) -> AssembledContext:
         """把图状态投影为一次模型调用所需的完整上下文。"""
         hud_text = self.build_hud_text(state)
+        runtime_state_text = self.build_runtime_state_text(state, mode, hud_text)
         return AssembledContext(
             system_prompt=self.build_system_prompt(state, mode, base_system_prompt),
             hud_text=hud_text,
-            model_input_messages=self.build_model_input_messages(state, mode, hud_text),
+            runtime_state_text=runtime_state_text,
+            model_input_messages=self.build_model_input_messages(state, mode, runtime_state_text),
         )
 
     def build_system_prompt(self, state: GraphState, mode: str, base_system_prompt: str) -> str:
-        system_prompt = base_system_prompt
+        # 中文注释：系统提示词只保留稳定规则，避免每轮状态变化破坏 DeepSeek 前缀缓存。
+        return base_system_prompt
 
+    def build_runtime_state_text(self, state: GraphState, mode: str, hud_text: str) -> str:
+        """把每轮变化的记忆、战斗指令和 HUD 统一放到尾部运行时状态。"""
+        sections: list[str] = []
         episodic_context = [item.strip() for item in state.get("episodic_context", []) if isinstance(item, str) and item.strip()]
         if episodic_context:
-            system_prompt += "\n\n[近期情节记忆]\n" + "\n".join(f"- {item}" for item in episodic_context)
+            sections.append("[近期情节记忆]\n" + "\n".join(f"- {item}" for item in episodic_context))
         elif summary := state.get("conversation_summary"):
-            system_prompt += f"\n\n[前情提要（必须铭记的游戏大纲）]\n{summary}"
+            sections.append(f"[前情提要（必须铭记的游戏大纲）]\n{summary}")
 
         if mode == COMBAT_AGENT_MODE:
             combat_brief = self._build_combat_brief(state)
             if combat_brief:
-                system_prompt += f"\n\n[战斗简报]\n{combat_brief}"
+                sections.append(f"[战斗简报]\n{combat_brief}")
 
             turn_directive = self._build_combat_turn_directive(state)
             if turn_directive:
-                system_prompt += f"\n\n[当前回合指令]\n{turn_directive}"
+                sections.append(f"[当前回合指令]\n{turn_directive}")
 
         if mode == NARRATIVE_AGENT_MODE and needs_opening_fighter_companion(state):
-            system_prompt += (
-                "\n\n[开局友方准则]\n"
+            sections.append(
+                "[开局友方准则]\n"
                 "当前玩家已加载但尚无友方单位。应在合理的开局叙事中主动创建一名战士友方，"
                 "使用友方创建能力生成 fighter_companion；创建后再继续推进冒险。"
             )
 
         external_blocks = self._external_context_provider.get_context_blocks(state=state, mode=mode)
         if external_blocks:
-            system_prompt += "\n\n[扩展上下文]\n" + "\n\n".join(block for block in external_blocks if block)
+            sections.append("[扩展上下文]\n" + "\n\n".join(block for block in external_blocks if block))
 
-        return system_prompt
+        adventure_anchor = self._build_adventure_node_anchor(state, mode)
+        if adventure_anchor:
+            sections.append(adventure_anchor)
+
+        sections.append(hud_text)
+        return "\n\n".join(block for block in sections if block)
 
     def build_hud_text(self, state: GraphState) -> str:
         sections: list[str] = []
@@ -129,12 +141,17 @@ class ContextAssembler:
         scene_data = dump_mapping_state(state.get("scene_units"))
         if scene_data:
             scene_lines = [
-                f"  {uid}: {unit.get('name', uid)} (side={unit.get('side')}, "
-                f"HP:{unit.get('hp')}/{unit.get('max_hp')}, resources=[{format_resources(unit)}], "
+                f"  ID:{uid} name={unit.get('name', uid)} side={unit.get('side')} "
+                f"start_combat.combatant_ids 可直接使用 \"{uid}\" "
+                f"(HP:{unit.get('hp')}/{unit.get('max_hp')}, "
+                f"resources=[{format_resources(unit)}], "
                 f"magic=[{format_magic(unit)}], behavior=[{format_behavior_profile(unit)}])"
                 for uid, unit in scene_data.items()
             ]
-            sections.append("[场景单位池（可用 start_combat 指定参战）]\n" + "\n".join(scene_lines))
+            sections.append(
+                "[场景单位池（start_combat 的非玩家参战 ID 来源；敌人和友方都必须显式列入 combatant_ids）]\n"
+                + "\n".join(scene_lines)
+            )
 
         space_data = state_value_to_dict(state.get("space"))
         sections.append("[当前平面空间]\n" + format_space_summary(space_data))
@@ -146,7 +163,7 @@ class ContextAssembler:
 
         return "\n\n=== 状态快照 ===\n" + "\n\n".join(sections) + "\n===========================\n"
 
-    def build_model_input_messages(self, state: GraphState, mode: str, hud_text: str) -> list[BaseMessage]:
+    def build_model_input_messages(self, state: GraphState, mode: str, runtime_state_text: str) -> list[BaseMessage]:
         source_messages = collapse_archived_combat_messages(
             list(state.get("messages", [])),
             state.get("combat_archives", []),
@@ -169,7 +186,7 @@ class ContextAssembler:
             projected_messages.append(message)
 
         repaired_messages = repair_tool_call_sequence(projected_messages)
-        return insert_runtime_hud_message(repaired_messages, hud_text)
+        return insert_runtime_hud_message(repaired_messages, runtime_state_text)
 
     def _build_combat_brief(self, state: GraphState) -> str:
         combat_dict = state_value_to_dict(state.get("combat"))
@@ -295,6 +312,23 @@ class ContextAssembler:
             "不要反复测距或手算坐标；"
             "不要只用文字宣告换人；当你判断该单位本回合可做且应做的事情都完成后，"
             "必须调用 next_turn 结束当前行动者回合。"
+        )
+
+    def _build_adventure_node_anchor(self, state: GraphState, mode: str) -> str:
+        """探索长对话中定期校准冒险节点，避免模型被聊天惯性带离模组。"""
+        if mode != NARRATIVE_AGENT_MODE:
+            return ""
+
+        human_turn_count = count_external_human_turns(state.get("messages", []))
+        if human_turn_count == 0 or human_turn_count % 4 != 0:
+            return ""
+
+        adventure_dict = AdventureState.model_validate(state_value_to_dict(state.get("adventure")) or {}).model_dump()
+        return (
+            "[冒险节点校准]\n"
+            f"当前仍处于模组 {adventure_dict['module_id']} 的节点 {adventure_dict['active_node_id']}。"
+            "继续叙事前先对齐该节点的已知事实、出口、线索与已完成事件；"
+            "不要因为多轮闲聊而脱离当前模组进度或提前揭露未获得的信息。"
         )
 
 
@@ -452,26 +486,21 @@ def normalize_combat_archives(combat_archives: list[dict[str, Any]] | None, mess
     return normalized
 
 
-# 将 HUD 作为临近当前轮次的系统消息注入，避免被模型误读成玩家发言。
-def insert_runtime_hud_message(messages: list[BaseMessage], hud_text: str) -> list[BaseMessage]:
-    hud_message = SystemMessage(content=format_runtime_hud_content(hud_text))
+# 将运行时状态作为尾部系统消息注入；动态内容越靠后，越不影响 DeepSeek 前缀缓存。
+def insert_runtime_hud_message(messages: list[BaseMessage], runtime_state_text: str) -> list[BaseMessage]:
+    hud_message = SystemMessage(content=format_runtime_hud_content(runtime_state_text))
     if not messages:
         return [hud_message]
 
-    projected_messages = list(messages)
-    latest_message = projected_messages[-1]
-    if isinstance(latest_message, HumanMessage) and not is_internal_system_human_message(latest_message):
-        return [*projected_messages[:-1], hud_message, latest_message]
-
-    tool_exchange_start = trailing_tool_exchange_start_index(projected_messages)
+    tool_exchange_start = trailing_tool_exchange_start_index(messages)
     if tool_exchange_start is not None:
         return [
-            *projected_messages[:tool_exchange_start],
+            *messages[:tool_exchange_start],
             hud_message,
-            *projected_messages[tool_exchange_start:],
+            *messages[tool_exchange_start:],
         ]
 
-    return [*projected_messages, hud_message]
+    return [*messages, hud_message]
 
 
 def trailing_tool_exchange_start_index(messages: list[BaseMessage]) -> int | None:
@@ -499,6 +528,15 @@ def format_runtime_hud_content(hud_text: str) -> str:
 
 def is_internal_system_human_message(message: HumanMessage) -> bool:
     return isinstance(message.content, str) and message.content.startswith("[系统")
+
+
+def count_external_human_turns(messages: list[BaseMessage]) -> int:
+    """只按真实玩家发言触发校准，排除内部系统战报。"""
+    return sum(
+        1
+        for message in messages
+        if isinstance(message, HumanMessage) and not is_internal_system_human_message(message)
+    )
 
 
 def clone_message_with_content(message: BaseMessage, content: Any) -> BaseMessage:
@@ -687,6 +725,9 @@ def summarize_tool_message(message: ToolMessage) -> str:
     tool_name = getattr(message, "name", "") or "tool"
     raw_text = message_content_to_text(message.content).strip()
 
+    if has_hp_resolution_lines(raw_text):
+        return summarize_state_resolution_tool(tool_name, raw_text)
+
     if tool_name == "load_adventure_node":
         return summarize_adventure_node_tool(raw_text)
     if tool_name == "search_adventure_nodes":
@@ -718,14 +759,53 @@ def summarize_tool_message(message: ToolMessage) -> str:
             final_total = roll_data.get("final_total", raw_roll)
             return f"[工具:{tool_name}] 掷骰结果 raw={raw_roll} total={final_total}"
 
+    if tool_name == "cast_spell":
+        # 多目标法术（如魔法飞弹）每个目标的 HP 变化都在工具返回里，不能只保留前三行。
+        return f"[工具:{tool_name}] {compact_text(raw_text, 2000)}"
+
     summary_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    max_lines = 3 if tool_name in {"attack_action", "use_monster_action", "cast_spell"} else 2
-    summary = " | ".join(summary_lines[:max_lines])
+    summary = " | ".join(summary_lines[:2])
     if not summary:
         summary = raw_text[:180] or "工具已执行。"
     if len(summary) > 180:
         summary = summary[:177] + "..."
     return f"[工具:{tool_name}] {summary}"
+
+
+def has_hp_resolution_lines(raw_text: str) -> bool:
+    """识别所有工具返回中的 HP 结算行，而不限于攻击工具。"""
+    return any(" HP:" in line and ("→" in line or "->" in line) for line in raw_text.splitlines())
+
+
+def summarize_state_resolution_tool(tool_name: str, raw_text: str) -> str:
+    """保留所有状态写回行，避免模型拿 HUD 当前值重复结算。"""
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    if not lines:
+        return f"[工具:{tool_name}] 工具已执行。"
+
+    important_lines: list[str] = []
+    for line in lines:
+        if (
+            not important_lines
+            or line.startswith("命中骰:")
+            or line.startswith("伤害骰:")
+            or " HP:" in line
+            or "倒下" in line
+            or "死亡豁免" in line
+            or "恢复" in line
+            or "治疗" in line
+            or "剩余" in line
+            or "资源" in line
+            or "法术位" in line
+            or "未命中" in line
+            or "严重失误" in line
+            or line.startswith("[")
+            or line.startswith("当前行动者")
+        ):
+            important_lines.append(line)
+
+    important_lines.append("结算状态：以上 HP 变化已经由工具写回；后续叙事只能复述结果，不得再次扣减、治疗或改写 HP。")
+    return f"[工具:{tool_name}] {compact_text(' | '.join(dict.fromkeys(important_lines)), 1600)}"
 
 
 def summarize_adventure_node_tool(raw_text: str) -> str:

@@ -25,7 +25,8 @@ def _build_system_prompt(state: dict, mode: str) -> str:
 def _build_model_input_messages(state: dict, mode: str):
     assembler = _context_assembler()
     hud_text = assembler.build_hud_text(state)
-    return assembler.build_model_input_messages(state, mode, hud_text)
+    runtime_state_text = assembler.build_runtime_state_text(state, mode, hud_text)
+    return assembler.build_model_input_messages(state, mode, runtime_state_text)
 
 
 def _build_combat_brief(state: dict) -> str:
@@ -325,11 +326,11 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
     assert projected_messages[1].content.startswith("[系统:战斗归档]")
     assert "英雄在 2 回合内击败哥布林" in projected_messages[1].content
     assert "Goblin 使用 [Scimitar]" not in projected_messages[1].content
-    assert projected_messages[-1].content.startswith("我检查哥布林尸体。")
-    assert isinstance(projected_messages[-2], SystemMessage)
-    assert "<runtime_state" in projected_messages[-2].content
-    assert 'source="hud"' in projected_messages[-2].content
-    assert "状态快照" in projected_messages[-2].content
+    assert projected_messages[-2].content.startswith("我检查哥布林尸体。")
+    assert isinstance(projected_messages[-1], SystemMessage)
+    assert "<runtime_state" in projected_messages[-1].content
+    assert 'source="hud"' in projected_messages[-1].content
+    assert "状态快照" in projected_messages[-1].content
 
 
 def test_tool_profiles_split_exploration_and_combat_visibility():
@@ -532,8 +533,9 @@ def test_combat_assistant_records_full_prompt_trace(mock_get_llm_service, mock_s
     assert mock_finish_trace.called
     start_kwargs = mock_start_trace.call_args.kwargs
     assert start_kwargs["system_prompt"]
+    assert start_kwargs["runtime_state_text"]
     assert any("继续战斗" in str(message.content) for message in start_kwargs["messages"])
-    assert "<runtime_state" in str(start_kwargs["messages"][0].content)
+    assert "<runtime_state" in str(start_kwargs["messages"][-1].content)
 
 
 def test_narrative_system_prompt_excludes_combat_only_guidelines():
@@ -596,9 +598,10 @@ def test_combat_assistant_node_invokes_llm_with_monster_turn_directive_and_comba
     llm_call = fake_service.calls[0]
     assert llm_call["mode"] == COMBAT_AGENT_MODE
     assert {tool.name for tool in llm_call["tools"]} == {tool.name for tool in get_tool_profile("combat")}
-    assert "当前是怪物/NPC Goblin [ID:goblin_1] 的回合" in llm_call["system_prompt"]
-    assert "不要等待用户继续发话" in llm_call["system_prompt"]
-    assert "哥布林正试图拖走祭司" in llm_call["system_prompt"]
+    runtime_state = llm_call["messages"][-1].content
+    assert "当前是怪物/NPC Goblin [ID:goblin_1] 的回合" in runtime_state
+    assert "不要等待用户继续发话" in runtime_state
+    assert "哥布林正试图拖走祭司" in runtime_state
     assert "start_combat" not in {tool.name for tool in llm_call["tools"]}
 
 

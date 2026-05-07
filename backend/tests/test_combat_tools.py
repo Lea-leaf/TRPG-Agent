@@ -281,6 +281,8 @@ class TestStartCombatPlayerJoin:
         assert result.update["player"]["action_available"] is True
         assert result.update["player"]["reaction_available"] is True
         assert "突袭劣势" in result.update["messages"][0].content
+        assert "突袭单位的先攻劣势已计入下列骰式" in result.update["messages"][0].content
+        assert "不要自行重排或补骰" in result.update["messages"][0].content
 
     def test_start_combat_rejects_unknown_surprised_id(self):
         """突袭目标必须能解析到参战单位，避免静默忽略拼错 ID。"""
