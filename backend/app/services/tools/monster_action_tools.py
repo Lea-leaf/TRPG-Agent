@@ -36,13 +36,16 @@ def use_monster_action(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """执行怪物/NPC结构化动作，LLM 只负责选择动作，规则结算在工具内完成。
+    参数示例：
+    - 近战攻击：{"actor_id": "goblin_1", "target_ids": ["温良"], "action_id": "scimitar", "advantage": "normal"}
+    - 范围/点选能力：{"actor_id": "mage_1", "action_id": "fireball", "target_point": {"x": 40, "y": 25}}
 
     Args:
-        actor_id: 行动单位 ID。
-        target_ids: 目标单位 ID 列表；多重攻击可传多个，范围能力可留空让空间系统展开。
-        action_id: actions 中展示的动作 ID 或名称。
-        advantage: 命中优劣势，normal / advantage / disadvantage。
-        target_point: 点选范围法术或瞬移法术的目标坐标。
+        actor_id: 行动单位 ID，必须是当前回合行动者。
+        target_ids: 目标单位 ID 列表；单体动作传一个，多重攻击可传多个，点选范围能力可留空。
+        action_id: HUD actions 中展示的动作 ID 或名称，例如 "scimitar"。
+        advantage: 命中优劣势，只能是 "normal"、"advantage" 或 "disadvantage"。
+        target_point: 点选范围法术或瞬移法术的目标坐标，例如 {"x": 40, "y": 25}。
     """
 
     def _reject(msg: str) -> Command:

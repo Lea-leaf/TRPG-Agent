@@ -18,6 +18,8 @@ from app.services.tools._helpers import (
     apply_attack_damage,
     build_attack_roll_event_payload,
     build_pending_reaction_state,
+    canonical_combatant_id,
+    canonicalize_player_space,
     clear_player_combat_fields,
     choose_attack,
     available_attack_names,
@@ -108,11 +110,12 @@ def spawn_monsters(
     """根据怪物图鉴生成战斗单位实例并加入当前场景。
     怪物数据来自 Open5e SRD（使用英文 slug，如 "goblin", "owlbear", "adult-red-dragon"）。
     生成后的单位进入场景单位池（scene_units），需要通过 start_combat 指定参战。
+    参数示例：{"monster_index": "goblin", "count": 4, "faction": "enemy"}。
 
     Args:
-        monster_index: 怪物的 Open5e slug（如 "goblin"）。必须输入其英文代号。
-        count: 生成该单位的数量。默认为 1。
-        faction: 阵营，通常为 "enemy", "ally" 或 "neutral"。默认 "enemy"。
+        monster_index: 怪物的 Open5e slug，必须是英文代号，例如 "goblin"、"wolf"、"bugbear"。
+        count: 生成该单位的数量，例如 4。
+        faction: 阵营，通常为 "enemy"、"ally" 或 "neutral"。
     """
     try:
         new_combatants = spawn_combatants(monster_index, count, faction)
@@ -150,11 +153,12 @@ def start_combat(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """开始战斗：从场景单位池中选取指定 ID 的单位作为参战者，投先攻骰并排定行动顺序。
-    前置条件：必须先用 spawn_monsters 生成单位到场景中。
+    前置条件：必须先用 spawn_monsters 生成单位，并用 manage_space 把玩家和参战单位放到当前地图。
     玩家角色会自动加入，无需在 combatant_ids 中指定。
+    参数示例：{"combatant_ids": ["goblin_1", "goblin_2", "goblin_3", "goblin_4"]}。
 
     Args:
-        combatant_ids: 从场景中参加本次战斗的单位 ID 列表（如 ["goblin_1", "goblin_2"]）。
+        combatant_ids: 从场景单位池中参加本次战斗的非玩家单位 ID 列表；不要把玩家 ID 放进来。
     """
     scene_units: dict = state.get("scene_units") or {}
     if hasattr(scene_units, "items"):
@@ -193,6 +197,7 @@ def start_combat(
     if player_dict:
         all_units[player_dict["id"]] = player_dict
 
+    state = {**state, "space": canonicalize_player_space(state.get("space"), player_dict)}
     if space_error := _validate_combat_space(state, list(all_units)):
         return Command(update={"messages": [ToolMessage(content=space_error, tool_call_id=tool_call_id)]})
 
@@ -248,12 +253,13 @@ def attack_action(
     """执行一次攻击动作：命中判定 → 暴击检测 → 伤害结算 → 扣血。
     状态效果（如目盲、隐形等）的优劣势会自动叠加计算。
     玩家攻击结束后如果没有其他额外动作，可以询问玩家或代表玩家调用 `next_turn`。
+    参数示例：{"attacker_id": "温良", "target_id": "goblin_1", "attack_name": "Longsword", "advantage": "normal"}。
 
     Args:
-        attacker_id: 攻击者的 ID。
-        target_id: 目标的 ID。
-        attack_name: 使用的攻击名称（可选，默认使用攻击者的第一个攻击方式）。
-        advantage: 攻击优劣势，"normal" / "advantage" / "disadvantage"。
+        attacker_id: 攻击者 ID，必须是当前回合行动者。
+        target_id: 目标单位 ID。
+        attack_name: 使用的攻击名称或动作名；不确定时可省略，让工具使用第一个攻击方式。
+        advantage: 攻击优劣势，只能是 "normal"、"advantage" 或 "disadvantage"。
     """
     combat_raw = state.get("combat")
     if not combat_raw:
@@ -268,6 +274,8 @@ def attack_action(
     # 通过统一接口获取攻防双方
     attacker = get_combatant(combat_dict, player_dict, attacker_id)
     target = get_combatant(combat_dict, player_dict, target_id)
+    resolved_attacker_id = canonical_combatant_id(attacker, attacker_id)
+    resolved_target_id = canonical_combatant_id(target, target_id)
 
     def _reject(msg: str) -> Command:
         return Command(update={"messages": [
@@ -278,7 +286,7 @@ def attack_action(
         return _reject(f"找不到攻击者 '{attacker_id}'。")
     if not target:
         return _reject(f"找不到目标 '{target_id}'。")
-    if combat_dict.get("current_actor_id") != attacker_id:
+    if combat_dict.get("current_actor_id") != resolved_attacker_id:
         return _reject(f"现在不是 {attacker.get('name', attacker_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
     if target.get("hp", 0) <= 0:
         return _reject(f"目标 {target.get('name', target_id)} 已经倒下，无法攻击。")
@@ -289,7 +297,8 @@ def attack_action(
     if attack_name and chosen_attack is None:
         available = ", ".join(available_attack_names(attacker)) or "无"
         return _reject(f"未知攻击 '{attack_name}'。可用攻击: {available}。")
-    if distance_error := validate_attack_distance(state.get("space"), attacker_id, target_id, chosen_attack):
+    canonical_space = canonicalize_player_space(state.get("space"), player_dict)
+    if distance_error := validate_attack_distance(canonical_space, resolved_attacker_id, resolved_target_id, chosen_attack):
         return _reject(distance_error)
 
     roll_info = roll_attack_hit(attacker, target, attack_name, advantage, state)
@@ -363,7 +372,9 @@ def next_turn(
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """结束当前行动者回合，并推进到下一个存活单位。如果所有人都行动过，则进入新的回合。"""
+    """结束当前行动者回合，并推进到下一个存活单位。如果所有人都行动过，则进入新的回合。
+    参数示例：{}。
+    """
     combat_raw = state.get("combat")
     if not combat_raw:
         return "当前不在战斗中。"
@@ -395,7 +406,9 @@ def end_combat(
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """结束当前战斗。存活的非玩家单位回归场景，死亡单位归入死亡档案（可搜尸等）。"""
+    """结束当前战斗。存活的非玩家单位回归场景，死亡单位归入死亡档案（可搜尸等）。
+    参数示例：{}。
+    """
     combat_raw = state.get("combat")
     summary = "战斗结束。"
     update: dict = {
@@ -477,9 +490,10 @@ def clear_dead_units(
 ) -> Command:
     """清除死亡单位档案。可指定 ID 列表部分清除，或不传参数清除全部。
     适用于剧情上玩家已完成搜刮尸体、处理遗骸等环节后的清理。
+    参数示例：{"unit_ids": ["goblin_1"]}；清除全部用 {}。
 
     Args:
-        unit_ids: 要清除的死亡单位 ID 列表。为空则清除全部。
+        unit_ids: 要清除的死亡单位 ID 列表；为空或不传则清除全部。
     """
     dead_units: dict = state.get("dead_units") or {}
     dead_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in dead_units.items()} if hasattr(dead_units, "items") else {}

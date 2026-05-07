@@ -293,7 +293,7 @@ def test_combat_projection_trims_more_aggressively_than_full_history():
 
     trimmed_messages = trim_model_messages(messages, COMBAT_AGENT_MODE)
 
-    assert len(trimmed_messages) == 32
+    assert len(trimmed_messages) == 25
     assert messages[0].content == "消息 0"
 
 
@@ -403,6 +403,16 @@ def test_manage_space_help_returns_skill_instructions():
     assert 'action="query_radius"' in content
 
 
+def test_adventure_module_skill_is_registered_for_on_demand_help():
+    from app.services.skills import load_skill_content
+
+    content = load_skill_content("adventure_module")
+
+    assert "冒险模组主持技能" in content
+    assert "load_adventure_node" in content
+    assert "mark_adventure_event" in content
+
+
 def test_combat_brief_includes_conditions_attacks_and_scene_stakes():
     poisoned_goblin = _combat_state("goblin_1")
     poisoned_goblin["participants"]["goblin_1"]["conditions"] = [{"id": "poisoned", "name_cn": "中毒"}]
@@ -477,6 +487,9 @@ def test_narrative_system_prompt_excludes_combat_only_guidelines():
     assert "不要主动输出整块角色卡" in prompt
     assert 'action="level_up"' not in prompt
     assert "character_state_management" not in prompt
+    assert "inspect_adventure_state(include_help=True)" in prompt
+    assert "reveal_adventure_clue" not in prompt
+    assert "search_adventure_nodes 能查到后期" not in prompt
 
 
 def test_combat_system_prompt_includes_combat_only_guidelines():

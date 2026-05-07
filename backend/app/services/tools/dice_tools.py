@@ -19,11 +19,12 @@ def request_dice_roll(
     """向玩家发起掷骰请求以判断动作结果（例如："破门力量检定"）。
     如果提供了 `ability` 参数，系统会自动获取对应角色的属性值，并计算修正附加到总分中。
     注意：你在接下来的叙事中绝对不需要（也不应该）手动二次加上修正值计算结果，因为本工具返回的 final_total 已经包含了修正值！
+    参数示例：{"reason": "搜索地精踪迹的感知检定", "ability": "wis", "formula": "1d20"}。
 
     Args:
         reason: 掷骰的叙事原因，例如 "破门力量检定"。
-        ability: 【强烈推荐】动作所依赖的属性 ("str", "dex", "con", "int", "wis", "cha")。
-        formula: 掷骰公式，默认为 "1d20"。
+        ability: 动作所依赖的属性，只能是 "str"、"dex"、"con"、"int"、"wis"、"cha"；不涉及属性时可不传。
+        formula: 掷骰公式，默认为 "1d20"；属性修正由工具自动追加，不要写成 "1d20+3"。
     """
     modifier = 0
     if ability and state.get("player") and "modifiers" in state["player"]:

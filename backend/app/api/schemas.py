@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.adventures.models import AdventureState
 from app.graph.state import PlayerState
 
 class ChatRequest(BaseModel):
@@ -21,3 +22,4 @@ class ChatResponse(BaseModel):
     player: Optional[PlayerState] = Field(default=None, description="Player state")
     combat: Optional[dict] = Field(default=None, description="Combat state")
     space: Optional[dict] = Field(default=None, description="Planar space state")
+    adventure: Optional[AdventureState] = Field(default=None, description="Adventure module progress")

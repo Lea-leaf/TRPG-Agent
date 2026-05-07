@@ -12,7 +12,14 @@ from langgraph.types import Command
 
 from app.graph.state import PlaneMapState, Point2D, SpaceState, UnitPlacementState
 from app.services.skills import load_skill_content
-from app.services.tools._helpers import apply_condition_movement_cost, get_combatant, get_condition_movement_block_reason
+from app.services.tools._helpers import (
+    apply_condition_movement_cost,
+    get_combatant,
+    get_condition_movement_block_reason,
+    get_player_identity,
+    player_reference_aliases,
+    is_player_reference,
+)
 from app.space.geometry import (
     build_space_state,
     distance_between,
@@ -61,7 +68,7 @@ def _unit_label(unit_id: str, state: dict | None) -> str:
 
     player = state.get("player")
     player_dict = player.model_dump() if hasattr(player, "model_dump") else dict(player) if player else None
-    if player_dict and unit_id == player_dict.get("id"):
+    if is_player_reference(player_dict, unit_id):
         return player_dict.get("name", unit_id)
 
     combat = state.get("combat")
@@ -97,6 +104,7 @@ def _unit_identity_index(state: dict | None) -> dict[str, str]:
             aliases.update({name, name.lower()})
         if unit.get("side") == "player":
             aliases.update({"player", "PLAYER", "玩家", "当前玩家"})
+            aliases.update(player_reference_aliases(unit))
         for alias in aliases:
             index[alias] = unit_id
 
@@ -565,11 +573,16 @@ def manage_space(
 ) -> Command:
     """平面空间管理技能。用于地图、单位落点、移动、测距和范围查询。
     如不确定 action 或 payload 写法，先用 action="help" 查看完整技能说明。
+    参数示例：
+    - 创建地图：action="create_map", payload={"name": "地精伏击路段", "width": 150, "height": 120}
+    - 放置单位：action="place_unit", payload={"unit_id": "goblin_1", "x": 55, "y": 40}
+    - 靠近目标：action="approach_unit", payload={"unit_id": "goblin_1", "target_id": "温良", "attack_name": "scimitar"}
+    - 测距：action="measure_distance", payload={"source_id": "温良", "target_id": "goblin_1"}
 
     Args:
-        action: 空间操作动作；用 "help" 获取完整说明。
-        payload: 对应动作的参数字典。
-        reason: 本次空间变化的叙事原因。
+        action: 空间操作动作；常用 "create_map"、"place_unit"、"move_unit"、"approach_unit"、"measure_distance"。
+        payload: 对应动作的参数字典；字段名必须放在 payload 内，不要放在顶层参数。
+        reason: 本次空间变化的叙事原因，例如 "玩家进入洞口，需要建立探索地图"。
     """
     payload = payload or {}
 

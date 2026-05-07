@@ -1,0 +1,1673 @@
+{
+  "pdf": "C:\\Users\\温良\\Downloads\\DND_5E\\DND_5E_规则书\\DND_5E_新手入门套装CN\\DnD_5E_新手套组_冒险模组CN.pdf",
+  "model": "gpt-5.5",
+  "max_chars_per_node": 18000,
+  "requested_count": 161,
+  "candidate_count": 161,
+  "failed_count": 0,
+  "items": [
+    {
+      "id": "adventure_hook",
+      "title": "冒险引子",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        4,
+        5
+      ]
+    },
+    {
+      "id": "goblin_arrows",
+      "title": "第1 部分：地精箭头",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        6,
+        6
+      ]
+    },
+    {
+      "id": "goblin_arrows__驾驶货车",
+      "title": "第1 部分：地精箭头 / 驾驶货车",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        6,
+        6
+      ]
+    },
+    {
+      "id": "goblin_ambush",
+      "title": "地精伏击",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "goblin_ambush__发展",
+      "title": "地精伏击 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "goblin_ambush__休息",
+      "title": "地精伏击 / 休息",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        7,
+        7
+      ]
+    },
+    {
+      "id": "goblin_ambush__地精踪迹",
+      "title": "地精伏击 / 地精踪迹",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        7,
+        7
+      ]
+    },
+    {
+      "id": "goblin_ambush__奖励经验值",
+      "title": "地精伏击 / 奖励经验值",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        7,
+        7
+      ]
+    },
+    {
+      "id": "cragmaw_hideout",
+      "title": "克拉摩窝点",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        7,
+        12
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__通用特征物",
+      "title": "克拉摩窝点 / 通用特征物",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        7,
+        8
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__1_洞口",
+      "title": "克拉摩窝点 / 1. 洞口",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__发展",
+      "title": "克拉摩窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__2_地精暗哨",
+      "title": "克拉摩窝点 / 2. 地精暗哨",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__3_犬舍",
+      "title": "克拉摩窝点 / 3. 犬舍",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        8,
+        8
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__4_陡峭通道",
+      "title": "克拉摩窝点 / 4. 陡峭通道",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        9,
+        10
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__5_天桥",
+      "title": "克拉摩窝点 / 5. 天桥",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        10,
+        10
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__6_地精休息室",
+      "title": "克拉摩窝点 / 6. 地精休息室",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        10,
+        11
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__发展_2",
+      "title": "克拉摩窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        11,
+        11
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__宝藏",
+      "title": "克拉摩窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        11,
+        11
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__7_双子池",
+      "title": "克拉摩窝点 / 7. 双子池",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        11,
+        12
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__8_克拉格的洞穴",
+      "title": "克拉摩窝点 / 8. 克拉格的洞穴",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        12,
+        12
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__发展_3",
+      "title": "克拉摩窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        12,
+        12
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__宝藏_2",
+      "title": "克拉摩窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        12,
+        12
+      ]
+    },
+    {
+      "id": "cragmaw_hideout__奖励经验值",
+      "title": "克拉摩窝点 / 奖励经验值",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        12,
+        12
+      ]
+    },
+    {
+      "id": "phandalin",
+      "title": "第2 部分：凡达林",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        13,
+        13
+      ]
+    },
+    {
+      "id": "phandalin_encounters",
+      "title": "凡达林的遭遇",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        13,
+        13
+      ]
+    },
+    {
+      "id": "important_npcs",
+      "title": "重要非玩家角色",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        14,
+        14
+      ]
+    },
+    {
+      "id": "town_description",
+      "title": "小镇详述",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        14,
+        18
+      ]
+    },
+    {
+      "id": "redbrand_ruffians",
+      "title": "红标帮恶霸",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        18,
+        18
+      ]
+    },
+    {
+      "id": "redbrand_ruffians__对抗",
+      "title": "红标帮恶霸 / 对抗",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        18,
+        18
+      ]
+    },
+    {
+      "id": "redbrand_ruffians__发展",
+      "title": "红标帮恶霸 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        18,
+        18
+      ]
+    },
+    {
+      "id": "redbrand_ruffians__奖励经验",
+      "title": "红标帮恶霸 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        18,
+        18
+      ]
+    },
+    {
+      "id": "redbrand_hideout",
+      "title": "红标帮窝点",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: skeleton",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: rat"
+      ],
+      "source_pages": [
+        19,
+        25
+      ]
+    },
+    {
+      "id": "redbrand_hideout__通用特征物",
+      "title": "红标帮窝点 / 通用特征物",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        19,
+        19
+      ]
+    },
+    {
+      "id": "redbrand_hideout__1_地窖",
+      "title": "红标帮窝点 / 1. 地窖",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        19,
+        19
+      ]
+    },
+    {
+      "id": "redbrand_hideout__发展",
+      "title": "红标帮窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        19,
+        19
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        19,
+        19
+      ]
+    },
+    {
+      "id": "redbrand_hideout__2_营房",
+      "title": "红标帮窝点 / 2. 营房",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        19,
+        20
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_2",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        20,
+        20
+      ]
+    },
+    {
+      "id": "redbrand_hideout__奖励经验",
+      "title": "红标帮窝点 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        20,
+        20
+      ]
+    },
+    {
+      "id": "redbrand_hideout__3_陷阱走廊",
+      "title": "红标帮窝点 / 3. 陷阱走廊",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        20,
+        20
+      ]
+    },
+    {
+      "id": "redbrand_hideout__奖励经验_2",
+      "title": "红标帮窝点 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        21,
+        21
+      ]
+    },
+    {
+      "id": "redbrand_hideout__4_崔森德墓室",
+      "title": "红标帮窝点 / 4. 崔森德墓室",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: skeleton"
+      ],
+      "source_pages": [
+        21,
+        21
+      ]
+    },
+    {
+      "id": "redbrand_hideout__发展_2",
+      "title": "红标帮窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        21,
+        21
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_3",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        21,
+        21
+      ]
+    },
+    {
+      "id": "redbrand_hideout__5_奴隶圈栏",
+      "title": "红标帮窝点 / 5. 奴隶圈栏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        21,
+        21
+      ]
+    },
+    {
+      "id": "redbrand_hideout__6_军械库",
+      "title": "红标帮窝点 / 6. 军械库",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        21,
+        22
+      ]
+    },
+    {
+      "id": "redbrand_hideout__7_储藏室与工作间",
+      "title": "红标帮窝点 / 7. 储藏室与工作间",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        22,
+        22
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_4",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        22,
+        22
+      ]
+    },
+    {
+      "id": "redbrand_hideout__8_裂隙",
+      "title": "红标帮窝点 / 8. 裂隙",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        22,
+        23
+      ]
+    },
+    {
+      "id": "redbrand_hideout__奖励经验_3",
+      "title": "红标帮窝点 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        23,
+        23
+      ]
+    },
+    {
+      "id": "redbrand_hideout__9_警卫营房",
+      "title": "红标帮窝点 / 9. 警卫营房",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        23,
+        23
+      ]
+    },
+    {
+      "id": "redbrand_hideout__发展_3",
+      "title": "红标帮窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        23,
+        23
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_5",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        23,
+        23
+      ]
+    },
+    {
+      "id": "redbrand_hideout__10_公共休息室",
+      "title": "红标帮窝点 / 10. 公共休息室",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        23,
+        24
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_6",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        24,
+        24
+      ]
+    },
+    {
+      "id": "redbrand_hideout__奖励经验_4",
+      "title": "红标帮窝点 / 奖励经验",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: rat"
+      ],
+      "source_pages": [
+        24,
+        24
+      ]
+    },
+    {
+      "id": "redbrand_hideout__发展_4",
+      "title": "红标帮窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        24,
+        24
+      ]
+    },
+    {
+      "id": "redbrand_hideout__12_玻璃手杖的居所",
+      "title": "红标帮窝点 / 12. 玻璃手杖的居所",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: mage"
+      ],
+      "source_pages": [
+        24,
+        25
+      ]
+    },
+    {
+      "id": "redbrand_hideout__发展_5",
+      "title": "红标帮窝点 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        25,
+        25
+      ]
+    },
+    {
+      "id": "redbrand_hideout__宝藏_7",
+      "title": "红标帮窝点 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        25,
+        25
+      ]
+    },
+    {
+      "id": "redbrand_hideout__奖励经验_5",
+      "title": "红标帮窝点 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        25,
+        25
+      ]
+    },
+    {
+      "id": "spiders_web",
+      "title": "第3 部分：蜘蛛之网",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        26,
+        26
+      ]
+    },
+    {
+      "id": "triboar_trail",
+      "title": "三猪小径",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: ogre",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: orc"
+      ],
+      "source_pages": [
+        26,
+        26
+      ]
+    },
+    {
+      "id": "conyberry_agathas_lair",
+      "title": "兔莓与阿加莎的巢穴",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: banshee"
+      ],
+      "source_pages": [
+        27,
+        27
+      ]
+    },
+    {
+      "id": "conyberry_agathas_lair__奖励经验",
+      "title": "兔莓与阿加莎的巢穴 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        27,
+        27
+      ]
+    },
+    {
+      "id": "old_owl_well",
+      "title": "古枭井",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: mage"
+      ],
+      "source_pages": [
+        27,
+        28
+      ]
+    },
+    {
+      "id": "old_owl_well__宝藏",
+      "title": "古枭井 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        28,
+        28
+      ]
+    },
+    {
+      "id": "old_owl_well__奖励经验",
+      "title": "古枭井 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        28,
+        28
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree",
+      "title": "雷树废墟",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: cultist"
+      ],
+      "source_pages": [
+        28,
+        33
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__通用特征物",
+      "title": "雷树废墟 / 通用特征物",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        28,
+        28
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__1_最西边的小屋",
+      "title": "雷树废墟 / 1. 最西边的小屋",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight"
+      ],
+      "source_pages": [
+        28,
+        29
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__奖励经验",
+      "title": "雷树废墟 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        29,
+        29
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__2_枯萎的小屋",
+      "title": "雷树废墟 / 2. 枯萎的小屋",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight"
+      ],
+      "source_pages": [
+        29,
+        29
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__宝藏",
+      "title": "雷树废墟 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        29,
+        29
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__3_棕馬酒馆",
+      "title": "雷树废墟 / 3. 棕馬酒馆",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        29,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__奖励经验_2",
+      "title": "雷树废墟 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        30,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__4_德魯伊哨点",
+      "title": "雷树废墟 / 4. 德魯伊哨点",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        30,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__发展",
+      "title": "雷树废墟 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        30,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__5_枯萎的农舍",
+      "title": "雷树废墟 / 5. 枯萎的农舍",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight"
+      ],
+      "source_pages": [
+        30,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__6_商店废墟",
+      "title": "雷树废墟 / 6. 商店废墟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        30,
+        30
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__宝藏_2",
+      "title": "雷树废墟 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__奖励经验_3",
+      "title": "雷树废墟 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__7_龙之塔",
+      "title": "雷树废墟 / 7. 龙之塔",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__8_老旧铁匠铺",
+      "title": "雷树废墟 / 8. 老旧铁匠铺",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__9_药草店",
+      "title": "雷树废墟 / 9. 药草店",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        31
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__10_镇广场",
+      "title": "雷树废墟 / 10. 镇广场",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        31,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__11_旧驻防岗哨",
+      "title": "雷树废墟 / 11. 旧驻防岗哨",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: ash-zombie"
+      ],
+      "source_pages": [
+        32,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__奖励经验_4",
+      "title": "雷树废墟 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        32,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__12_织布工小屋",
+      "title": "雷树废墟 / 12. 织布工小屋",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight"
+      ],
+      "source_pages": [
+        32,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__发展_2",
+      "title": "雷树废墟 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        32,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__13_龙之邪教徒",
+      "title": "雷树废墟 / 13. 龙之邪教徒",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: cultist"
+      ],
+      "source_pages": [
+        32,
+        32
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__宝藏_3",
+      "title": "雷树废墟 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        32,
+        33
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__宝藏_4",
+      "title": "雷树废墟 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        33,
+        33
+      ]
+    },
+    {
+      "id": "ruins_of_thundertree__奖励经验_5",
+      "title": "雷树废墟 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        33,
+        33
+      ]
+    },
+    {
+      "id": "cragmaw_castle",
+      "title": "克拉摩堡",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: doppelganger"
+      ],
+      "source_pages": [
+        33,
+        38
+      ]
+    },
+    {
+      "id": "cragmaw_castle__通用特征物",
+      "title": "克拉摩堡 / 通用特征物",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        33,
+        33
+      ]
+    },
+    {
+      "id": "cragmaw_castle__1_城堡入口",
+      "title": "克拉摩堡 / 1. 城堡入口",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        33,
+        33
+      ]
+    },
+    {
+      "id": "cragmaw_castle__发展",
+      "title": "克拉摩堡 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        34,
+        34
+      ]
+    },
+    {
+      "id": "cragmaw_castle__2_陷阱大厅",
+      "title": "克拉摩堡 / 2. 陷阱大厅",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        34,
+        34
+      ]
+    },
+    {
+      "id": "cragmaw_castle__奖励经验",
+      "title": "克拉摩堡 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__3_弓箭手岗哨",
+      "title": "克拉摩堡 / 3. 弓箭手岗哨",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__4_营房废墟",
+      "title": "克拉摩堡 / 4. 营房废墟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__发展_2",
+      "title": "克拉摩堡 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__5_储藏室",
+      "title": "克拉摩堡 / 5. 储藏室",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__6_大地精营房",
+      "title": "克拉摩堡 / 6. 大地精营房",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__宝藏",
+      "title": "克拉摩堡 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__7_宴会厅",
+      "title": "克拉摩堡 / 7. 宴会厅",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        35,
+        35
+      ]
+    },
+    {
+      "id": "cragmaw_castle__奖励经验_2",
+      "title": "克拉摩堡 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__8_黑暗大厅",
+      "title": "克拉摩堡 / 8. 黑暗大厅",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__发展_3",
+      "title": "克拉摩堡 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__宝藏_2",
+      "title": "克拉摩堡 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__9_地精圣坛",
+      "title": "克拉摩堡 / 9. 地精圣坛",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__10_后门",
+      "title": "克拉摩堡 / 10. 后门",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        36,
+        36
+      ]
+    },
+    {
+      "id": "cragmaw_castle__11_塔楼废墟",
+      "title": "克拉摩堡 / 11. 塔楼废墟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        37
+      ]
+    },
+    {
+      "id": "cragmaw_castle__12_警卫营房",
+      "title": "克拉摩堡 / 12. 警卫营房",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        37
+      ]
+    },
+    {
+      "id": "cragmaw_castle__奖励经验_3",
+      "title": "克拉摩堡 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        37
+      ]
+    },
+    {
+      "id": "cragmaw_castle__13_枭熊塔楼",
+      "title": "克拉摩堡 / 13. 枭熊塔楼",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        37
+      ]
+    },
+    {
+      "id": "cragmaw_castle__发展_4",
+      "title": "克拉摩堡 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        37
+      ]
+    },
+    {
+      "id": "cragmaw_castle__宝藏_3",
+      "title": "克拉摩堡 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        37,
+        38
+      ]
+    },
+    {
+      "id": "cragmaw_castle__发展_5",
+      "title": "克拉摩堡 / 发展",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: doppelganger"
+      ],
+      "source_pages": [
+        38,
+        38
+      ]
+    },
+    {
+      "id": "cragmaw_castle__宝藏_4",
+      "title": "克拉摩堡 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        38,
+        38
+      ]
+    },
+    {
+      "id": "cragmaw_castle__奖励经验_4",
+      "title": "克拉摩堡 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        38,
+        38
+      ]
+    },
+    {
+      "id": "wave_echo_cave",
+      "title": "第4 部分：潮音洞穴",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        39,
+        39
+      ]
+    },
+    {
+      "id": "wave_echo_cave__经验奖励",
+      "title": "第4 部分：潮音洞穴 / 经验奖励",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        39,
+        58
+      ]
+    },
+    {
+      "id": "wave_echo_cave__游荡怪物",
+      "title": "第4 部分：潮音洞穴 / 游荡怪物",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: skeleton",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: ochre-jelly"
+      ],
+      "source_pages": [
+        39,
+        39
+      ]
+    },
+    {
+      "id": "wave_echo_cave__通用特征物",
+      "title": "第4 部分：潮音洞穴 / 通用特征物",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        39,
+        39
+      ]
+    },
+    {
+      "id": "wave_echo_cave__关键遭遇",
+      "title": "第4 部分：潮音洞穴 / 关键遭遇",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        39,
+        40
+      ]
+    },
+    {
+      "id": "wave_echo_cave__1_洞穴入口",
+      "title": "第4 部分：潮音洞穴 / 1. 洞穴入口",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "wave_echo_cave__2_矿道",
+      "title": "第4 部分：潮音洞穴 / 2. 矿道",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: ochre-jelly"
+      ],
+      "source_pages": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "wave_echo_cave__3_旧入口",
+      "title": "第4 部分：潮音洞穴 / 3. 旧入口",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "wave_echo_cave__4_旧警卫室",
+      "title": "第4 部分：潮音洞穴 / 4. 旧警卫室",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: skeleton"
+      ],
+      "source_pages": [
+        41,
+        41
+      ]
+    },
+    {
+      "id": "wave_echo_cave__5_试金师办公室",
+      "title": "第4 部分：潮音洞穴 / 5. 试金师办公室",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        41,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__7_荒废的储物间",
+      "title": "第4 部分：潮音洞穴 / 7. 荒废的储物间",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__8_真菌洞窟",
+      "title": "第4 部分：潮音洞穴 / 8. 真菌洞窟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__9_大洞窟",
+      "title": "第4 部分：潮音洞穴 / 9. 大洞窟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__10_黑水池",
+      "title": "第4 部分：潮音洞穴 / 10. 黑水池",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏_2",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        42
+      ]
+    },
+    {
+      "id": "wave_echo_cave__11_北部营房",
+      "title": "第4 部分：潮音洞穴 / 11. 北部营房",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        42,
+        43
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏_3",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        43,
+        43
+      ]
+    },
+    {
+      "id": "wave_echo_cave__12_冶炼洞窟",
+      "title": "第4 部分：潮音洞穴 / 12. 冶炼洞窟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        43,
+        43
+      ]
+    },
+    {
+      "id": "wave_echo_cave__13_明亮的洞窟",
+      "title": "第4 部分：潮音洞穴 / 13. 明亮的洞窟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        43,
+        43
+      ]
+    },
+    {
+      "id": "wave_echo_cave__14_法师的居所",
+      "title": "第4 部分：潮音洞穴 / 14. 法师的居所",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        43,
+        44
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏_4",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        44,
+        44
+      ]
+    },
+    {
+      "id": "wave_echo_cave__15_法术工厂",
+      "title": "第4 部分：潮音洞穴 / 15. 法术工厂",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        44,
+        44
+      ]
+    },
+    {
+      "id": "wave_echo_cave__16_轰鸣洞窟",
+      "title": "第4 部分：潮音洞穴 / 16. 轰鸣洞窟",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        44,
+        45
+      ]
+    },
+    {
+      "id": "wave_echo_cave__17_古老河床",
+      "title": "第4 部分：潮音洞穴 / 17. 古老河床",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        45,
+        45
+      ]
+    },
+    {
+      "id": "wave_echo_cave__18_崩塌的洞窟",
+      "title": "第4 部分：潮音洞穴 / 18. 崩塌的洞窟",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: doppelganger"
+      ],
+      "source_pages": [
+        45,
+        45
+      ]
+    },
+    {
+      "id": "wave_echo_cave__发展",
+      "title": "第4 部分：潮音洞穴 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        45,
+        45
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏_5",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        45,
+        45
+      ]
+    },
+    {
+      "id": "wave_echo_cave__19_杜马松的神庙",
+      "title": "第4 部分：潮音洞穴 / 19. 杜马松的神庙",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: drow",
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: doppelganger"
+      ],
+      "source_pages": [
+        45,
+        46
+      ]
+    },
+    {
+      "id": "wave_echo_cave__发展_2",
+      "title": "第4 部分：潮音洞穴 / 发展",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        46,
+        46
+      ]
+    },
+    {
+      "id": "wave_echo_cave__宝藏_6",
+      "title": "第4 部分：潮音洞穴 / 宝藏",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        46,
+        46
+      ]
+    },
+    {
+      "id": "wave_echo_cave__奖励经验",
+      "title": "第4 部分：潮音洞穴 / 奖励经验",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        46,
+        46
+      ]
+    },
+    {
+      "id": "wave_echo_cave__20_祭司的居所",
+      "title": "第4 部分：潮音洞穴 / 20. 祭司的居所",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: commoner"
+      ],
+      "source_pages": [
+        46,
+        46
+      ]
+    },
+    {
+      "id": "wave_echo_cave__结局",
+      "title": "第4 部分：潮音洞穴 / 结局",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        46,
+        57
+      ]
+    },
+    {
+      "id": "wave_echo_cave__1_困惑射线confusion_ray_目标必须进行一次dc_13_的感知",
+      "title": "第4 部分：潮音洞穴 / 1.困惑射线Confusion Ray。目标必须进行一次DC 13 的感知",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        57,
+        57
+      ]
+    },
+    {
+      "id": "wave_echo_cave__2_麻痹射线paralyzing_ray_目标必须进行一次dc_13_的体",
+      "title": "第4 部分：潮音洞穴 / 2.麻痹射线Paralyzing Ray。目标必须进行一次DC 13 的体",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        57,
+        57
+      ]
+    },
+    {
+      "id": "wave_echo_cave__3_恐惧射线fear_ray_目标必须进行一次dc_13_的感知豁免",
+      "title": "第4 部分：潮音洞穴 / 3.恐惧射线Fear Ray。目标必须进行一次DC 13 的感知豁免，",
+      "status": "ok",
+      "warnings": [],
+      "source_pages": [
+        57,
+        57
+      ]
+    },
+    {
+      "id": "wave_echo_cave__4_致伤射线wounding_ray_目标必须进行一次dc_13_的体质",
+      "title": "第4 部分：潮音洞穴 / 4.致伤射线Wounding Ray。目标必须进行一次DC 13 的体质",
+      "status": "ok",
+      "warnings": [
+        "怪物 slug 未在本地 Lost Mine 动作表中确认: twig-blight"
+      ],
+      "source_pages": [
+        57,
+        58
+      ]
+    }
+  ]
+}

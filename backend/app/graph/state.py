@@ -8,6 +8,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 from app.conditions._base import ActiveCondition
+from app.adventures.models import AdventureState
 from app.monsters.models import MonsterAction
 
 
@@ -264,6 +265,7 @@ class GraphState(TypedDict, total=False):
     phase: Literal["exploration", "combat", "resolution"]
 
     scene_summary: str
+    adventure: AdventureState
     player: PlayerState
 
     pending_check: Optional[CheckState]

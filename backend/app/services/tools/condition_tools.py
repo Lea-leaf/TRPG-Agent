@@ -11,7 +11,7 @@ from langgraph.types import Command
 
 from app.conditions import get_condition_def, has_condition, list_condition_defs, remove_condition_by_id, upsert_condition
 from app.conditions._base import create_condition
-from app.services.tools._helpers import get_combatant, sync_ac_state, sync_movement_state
+from app.services.tools._helpers import get_combatant, get_player_identity, is_player_reference, sync_ac_state, sync_movement_state
 
 
 def _locate_target(state: dict, target_id: str) -> tuple[dict | None, dict, str]:
@@ -20,8 +20,8 @@ def _locate_target(state: dict, target_id: str) -> tuple[dict | None, dict, str]
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if target_id == "player" and player_dict:
-        target_id = f"player_{player_dict.get('name', 'player')}"
+    if is_player_reference(player_dict, target_id):
+        target_id, _ = get_player_identity(player_dict)
 
     # 战斗中：通过统一接口查找（玩家从 player_dict，NPC 从 participants）
     combat_raw = state.get("combat")
@@ -44,7 +44,7 @@ def _locate_target(state: dict, target_id: str) -> tuple[dict | None, dict, str]
         return scene_raw[target_id], {"_scene_raw": scene_raw, "_player_dict": player_dict, "_target_id": target_id}, target_id
 
     # 玩家本体（非战斗状态）
-    if player_dict and target_id == f"player_{player_dict.get('name', 'player')}":
+    if is_player_reference(player_dict, target_id):
         return player_dict, {"_player_dict": player_dict, "_target_id": target_id}, target_id
 
     return None, {}, target_id

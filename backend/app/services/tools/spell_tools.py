@@ -12,6 +12,8 @@ from langgraph.types import Command
 from app.services.tools._helpers import (
     get_combatant,
     get_condition_action_block_reason,
+    get_player_identity,
+    canonicalize_player_space,
     refresh_arcane_ward_on_abjuration,
     remove_action_breaking_conditions,
 )
@@ -202,12 +204,17 @@ def cast_spell(
 
     当角色想提前关闭正在维持的专注法术（如 hold_person、blur、darkness）时，
     也使用本工具：传 end_concentration=True 即可；此时 spell_id/target_ids 只作占位，不会实际施法。
+    参数示例：
+    - 单体法术：{"spell_id": "fire_bolt", "target_ids": ["goblin_1"]}
+    - 高环施法：{"spell_id": "magic_missile", "target_ids": ["goblin_1"], "slot_level": 2}
+    - 点选范围：{"spell_id": "fireball", "target_ids": [], "slot_level": 3, "target_point": {"x": 35, "y": 20}}
+    - 结束专注：{"spell_id": "hold_person", "target_ids": [], "end_concentration": true}
 
     Args:
-        spell_id: 法术标识符（如 "magic_missile", "fire_bolt", "shield"）。
-        target_ids: 目标单位 ID 列表。对自身施法传 ["self"]。
-        slot_level: 使用的法术位等级。0 表示使用该法术最低环位。
-        target_point: 点选范围法术的目标坐标，如 {"x": 30, "y": 20}。
+        spell_id: 法术标识符，例如 "magic_missile"、"fire_bolt"、"shield"。
+        target_ids: 目标单位 ID 列表；自身法术传 ["self"]，点选范围法术通常传 []。
+        slot_level: 使用的法术位等级；0 表示使用该法术最低环位，戏法保持 0。
+        target_point: 点选范围法术或传送类法术的目标坐标，例如 {"x": 30, "y": 20}。
         end_concentration: 主动结束当前专注时传 True；优先于 spell_id，不消耗动作或法术位。
     """
     def _reject(msg: str) -> Command:
@@ -217,8 +224,10 @@ def cast_spell(
     if not player_raw:
         return _reject("玩家尚未加载角色卡。")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw)
-    player_id = f"player_{player_dict.get('name', 'player')}"
-    player_dict.setdefault("id", player_id)
+    player_id, player_name = get_player_identity(player_dict)
+    player_dict["id"] = player_id
+    player_dict["name"] = player_name
+    state = {**state, "space": canonicalize_player_space(state.get("space"), player_dict)}
 
     combat_raw = state.get("combat")
     combat_dict = combat_raw.model_dump() if hasattr(combat_raw, "model_dump") else dict(combat_raw) if combat_raw else None

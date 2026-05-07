@@ -40,6 +40,15 @@ from app.services.tools.space_tools import (
     switch_plane_map,
 )
 from app.services.tools.monster_action_tools import use_monster_action
+from app.services.tools.adventure_tools import (
+    advance_adventure,
+    inspect_adventure_state,
+    load_adventure_node,
+    mark_adventure_event,
+    reveal_adventure_clue,
+    search_adventure_nodes,
+    switch_adventure_node,
+)
 
 # 供外部模块直接引用的战斗计算函数
 from app.services.tools._helpers import (
@@ -64,6 +73,13 @@ build_player_combatant = prepare_player_for_combat
 ToolProfile = Literal["narrative", "combat"]
 
 _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
+    inspect_adventure_state,
+    load_adventure_node,
+    search_adventure_nodes,
+    switch_adventure_node,
+    reveal_adventure_clue,
+    mark_adventure_event,
+    advance_adventure,
     request_dice_roll,
     load_character_profile,
     modify_character_state,
@@ -79,6 +95,7 @@ _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
 )
 
 _COMBAT_TOOLS: tuple[BaseTool, ...] = (
+    inspect_adventure_state,
     request_dice_roll,
     modify_character_state,
     attack_action,

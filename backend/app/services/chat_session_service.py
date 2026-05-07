@@ -11,6 +11,7 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
+from app.adventures.models import AdventureState
 from app.config.settings import settings
 from app.graph.builder import build_graph
 from app.memory.checkpointer import close_checkpointer, get_checkpointer
@@ -112,7 +113,11 @@ class ChatSessionService:
         combat_data = None
         space_data = None
         scene_units_data = None
+        adventure_data = None
         if hasattr(state, "values"):
+            adventure = state.values.get("adventure")
+            if adventure:
+                adventure_data = self._state_value_to_dict(adventure)
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
@@ -155,6 +160,7 @@ class ChatSessionService:
             "combat": combat_data,
             "space": space_data,
             "scene_units": scene_units_data,
+            "adventure": adventure_data,
         }
 
     def _get_pending_action(self, state: Any) -> Optional[dict]:
@@ -231,6 +237,7 @@ class ChatSessionService:
         values = state.values if state and hasattr(state, "values") else {}
         return {
             "phase": values.get("phase"),
+            "adventure": self._state_value_to_dict(values.get("adventure")),
             "conversation_summary": values.get("conversation_summary", ""),
             "active_combat_message_start": values.get("active_combat_message_start"),
             "combat_archives": self._state_value_to_dict(values.get("combat_archives", [])),
@@ -313,13 +320,21 @@ class ChatSessionService:
             return
 
         episodic_context = await self._load_episodic_context(session_id)
+        existing_state = await self._graph.aget_state(config)
         await self._graph.aupdate_state(
             config,
             {
                 "session_id": session_id,
                 "episodic_context": episodic_context,
+                "adventure": self._current_or_default_adventure(existing_state),
             },
         )
+
+    def _current_or_default_adventure(self, state: Any) -> dict[str, Any]:
+        """新会话默认进入 Lost Mine 起点，已有会话保持原进度。"""
+        if state and hasattr(state, "values") and state.values.get("adventure"):
+            return self._state_value_to_dict(state.values["adventure"])
+        return AdventureState().model_dump()
 
     async def _load_episodic_context(self, session_id: str) -> list[str]:
         """读取最近的回合摘要，作为热路径的长期情节记忆输入。"""
@@ -509,7 +524,11 @@ class ChatSessionService:
         scene_units_data = None
         dead_units_data = None
         space_data = None
+        adventure_data = None
         if hasattr(state, "values"):
+            adventure = state.values.get("adventure")
+            if adventure:
+                adventure_data = self._state_value_to_dict(adventure)
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
@@ -535,6 +554,7 @@ class ChatSessionService:
             "scene_units": scene_units_data,
             "dead_units": dead_units_data,
             "space": space_data,
+            "adventure": adventure_data,
         })
 
         pending = self._get_pending_action(state)
@@ -588,7 +608,11 @@ class ChatSessionService:
         combat_data = None
         space_data = None
         scene_units_data = None
+        adventure_data = None
         if hasattr(state, "values"):
+            adventure = state.values.get("adventure")
+            if adventure:
+                adventure_data = self._state_value_to_dict(adventure)
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
@@ -611,6 +635,7 @@ class ChatSessionService:
             "combat": combat_data,
             "space": space_data,
             "scene_units": scene_units_data,
+            "adventure": adventure_data,
         }
 
 
