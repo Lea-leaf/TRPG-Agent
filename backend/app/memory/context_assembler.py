@@ -85,7 +85,12 @@ class ContextAssembler:
 
         player_dict = state_value_to_dict(state.get("player"))
         if player_dict:
-            sections.append("[当前玩家状态]\n" + json.dumps(player_dict, ensure_ascii=False, indent=2))
+            sections.append(
+                "[当前玩家状态]\n"
+                + format_player_priority_summary(player_dict)
+                + "\n"
+                + json.dumps(player_dict, ensure_ascii=False, indent=2)
+            )
         else:
             sections.append("[当前玩家状态]\n玩家尚未加载或创建角色卡。")
 
@@ -107,7 +112,8 @@ class ContextAssembler:
                 combat_lines.append(
                     f"  {combatant.get('name', uid)} [ID:{uid}] side={combatant.get('side')} "
                     f"HP:{combatant.get('hp')}/{combatant.get('max_hp')} AC:{display_ac} "
-                    f"conditions=[{format_conditions(combatant)}] actions=[{actions_desc}]{marker}"
+                    f"conditions=[{format_conditions(combatant)}] resources=[{format_resources(combatant)}] "
+                    f"death_saves={format_death_save_status(combatant)} actions=[{actions_desc}]{marker}"
                 )
             sections.append("[当前战斗状态]\n" + "\n".join(combat_lines))
 
@@ -181,6 +187,7 @@ class ContextAssembler:
             status = (
                 f"{combatant.get('name', uid)}[HP:{combatant.get('hp')}/{combatant.get('max_hp')}, "
                 f"AC:{display_ac}, conditions:{format_conditions(combatant)}, "
+                f"resources:{format_resources(combatant)}, death_saves:{format_death_save_status(combatant)}, "
                 f"actions:{format_actions(combatant)}]"
             )
             if combatant.get("side") == "player":
@@ -210,6 +217,23 @@ class ContextAssembler:
         current_actor = participants.get(current_id, {})
         current_name = current_actor.get("name", current_id)
         if current_actor.get("side") == "player":
+            if current_actor.get("hp", 0) <= 0:
+                if current_actor.get("is_dead"):
+                    return (
+                        f"当前是玩家单位 {current_name} [ID:{current_id}] 的回合，但角色已经死亡。"
+                        "不要执行攻击或施法；若剧情允许复活，使用 modify_character_state(action=\"revive\")，否则调用 next_turn。"
+                    )
+                if current_actor.get("is_stable"):
+                    return (
+                        f"当前是玩家单位 {current_name} [ID:{current_id}] 的回合，角色 0 HP 且伤势稳定。"
+                        "不要执行攻击或施法；如无外部救援，调用 next_turn。"
+                    )
+                return (
+                    f"当前是玩家单位 {current_name} [ID:{current_id}] 的回合，角色 0 HP，必须进行死亡豁免。"
+                    "先调用 request_dice_roll(reason=\"死亡豁免\", formula=\"1d20\")，"
+                    "再用 modify_character_state(action=\"record_death_save\", payload={\"roll_total\": 掷骰raw_roll}) 写回结果；"
+                    "不要执行攻击、施法或主动移动。"
+                )
             return (
                 f"当前是玩家单位 {current_name} [ID:{current_id}] 的回合。"
                 "根据玩家最新意图调用合适工具；若本回合已无合理动作，调用 next_turn 结束当前行动者回合。"
@@ -440,6 +464,43 @@ def format_conditions(combatant: dict[str, Any]) -> str:
     if not conditions:
         return "无"
     return ", ".join(condition.get("name_cn") or condition.get("id", "?") for condition in conditions)
+
+
+def format_resources(combatant: dict[str, Any]) -> str:
+    """把资源压成一行，避免模型从旧对话里读取过期法术位。"""
+    resources = combatant.get("resources", {}) or {}
+    caps = combatant.get("resource_caps", {}) or {}
+    if not resources:
+        return "无"
+    parts = []
+    for key in sorted(resources):
+        cap = caps.get(key)
+        value = resources.get(key)
+        parts.append(f"{key}={value}/{cap}" if cap is not None else f"{key}={value}")
+    return ", ".join(parts)
+
+
+def format_death_save_status(combatant: dict[str, Any]) -> str:
+    """高亮死亡豁免状态，让 0 HP 玩家不会被误判为游戏结束。"""
+    if combatant.get("is_dead"):
+        return "dead"
+    if combatant.get("is_stable"):
+        return "stable"
+    successes = int(combatant.get("death_save_successes", 0) or 0)
+    failures = int(combatant.get("death_save_failures", 0) or 0)
+    if combatant.get("hp", 0) <= 0 or successes or failures:
+        return f"{successes}成功/{failures}失败"
+    return "无"
+
+
+def format_player_priority_summary(player: dict[str, Any]) -> str:
+    """把当前资源和濒死状态放在 JSON 前，降低旧消息的干扰权重。"""
+    return (
+        f"HP:{player.get('hp')}/{player.get('max_hp')} "
+        f"AC:{compute_ac(player)} "
+        f"resources:[{format_resources(player)}] "
+        f"death_saves:{format_death_save_status(player)}"
+    )
 
 
 def format_attacks(combatant: dict[str, Any]) -> str:

@@ -17,6 +17,7 @@ _SHARED_OPERATION_RULES_PROMPT = (
     "3. 若回答中提到查询、检定或工具结果，该过程必须真实发生，并且结论必须与工具返回一致。\n"
     "4. 前端已展示基础状态信息；除非玩家明确要求，不要主动输出整块角色卡或状态面板。\n"
     "5. 探索和战斗只要涉及位置、距离、范围、入场、移动、巡逻或单位展示，就应先建立或切换平面地图。\n"
+    "6. 当前 HUD 中的 HP、resources、death_saves 永远覆盖旧对话里的资源数字；旧战报只作历史叙事参考。\n"
 )
 
 _NARRATIVE_AGENT_RULES_PROMPT = (
@@ -38,6 +39,7 @@ _COMBAT_AGENT_RULES_PROMPT = (
     "6. 战斗地图默认采用 1 格 = 5 尺的网格；常规遭遇通常以 30x30 格到 40x40 格起步，狭窄场景可更小，开阔场景可更大。\n"
     "7. 战斗结束后，死亡单位默认应从空间中清理掉，不要只挪到角落充当占位符。\n"
     "8. `attack_action`、`cast_spell`、`use_monster_action` 已写回 HP/资源/状态，不要再用 `modify_character_state` 重放同一结果。\n"
+    "9. 玩家 0 HP 时不要宣告游戏结束；其回合应先用 `request_dice_roll` 掷 1d20 死亡豁免，再用 `modify_character_state(action=\"record_death_save\")` 写回结果。剧情允许救援时，可用 `modify_character_state(action=\"revive\")` 复活玩家。\n"
 )
 
 

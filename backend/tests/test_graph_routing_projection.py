@@ -542,7 +542,7 @@ def test_combat_assistant_node_invokes_llm_with_monster_turn_directive_and_comba
     assert "start_combat" not in {tool.name for tool in llm_call["tools"]}
 
 
-def test_combat_resolution_node_interrupts_and_ends_battle_on_player_death():
+def test_combat_resolution_node_does_not_interrupt_on_player_down():
     state = {
         "phase": "combat",
         "combat": _combat_state("goblin_1"),
@@ -556,15 +556,6 @@ def test_combat_resolution_node_interrupts_and_ends_battle_on_player_death():
         "hp_changes": [{"id": "player_hero", "old_hp": 4, "new_hp": 0, "max_hp": 18}],
     }
 
-    with patch("langgraph.types.interrupt", return_value="revive"):
-        result = combat_resolution_node(state)
+    result = combat_resolution_node(state)
 
-    assert result["combat"] is None
-    assert result["phase"] == "exploration"
-    assert result["player"]["hp"] == 9
-    assert result["messages"][0].content == "[系统] 玩家角色倒下，战斗结束。"
-    assert result["hp_changes"] == []
-    assert result["active_combat_message_start"] is None
-    assert result["combat_archives"][0]["start_index"] == 0
-    assert result["combat_archives"][0]["end_index"] == 1
-    assert "战斗以玩家角色倒下告终" in result["combat_archives"][0]["summary"]
+    assert result == {}

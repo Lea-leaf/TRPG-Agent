@@ -50,6 +50,10 @@ class PlayerState(BaseModel, extra="allow"):
     spellcasting_ability: str = ""
     class_features: list[str] = Field(default_factory=list)
     concentrating_on: str | None = None  # 当前专注的法术 ID
+    death_save_successes: int = 0
+    death_save_failures: int = 0
+    is_stable: bool = False
+    is_dead: bool = False
     xp: int = 0
     arcane_tradition: str = ""  # 奥术传承（如 "evocation", "abjuration"）
     fighter_archetype: str = ""  # 战士武术范型（如 "champion", "battle_master"）

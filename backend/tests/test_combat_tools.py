@@ -636,6 +636,180 @@ class TestModifyCharacterStateResources:
         assert result.update["player"]["hp"] == 8
         assert result.update["player"]["resources"]["spell_slot_lv1"] == 2
 
+    def test_record_death_save_uses_unified_state_tool(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 13},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["death_save_successes"] == 1
+        assert result.update["player"]["death_save_failures"] == 0
+        assert "死亡豁免 d20=13：成功" in result.update["messages"][0].content
+
+    def test_death_save_natural_20_revives_player(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_failures"] = 2
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 20},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 1
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["hp_changes"][0]["new_hp"] == 1
+
+    def test_revive_action_restores_hp_and_clears_death_saves(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_successes"] = 1
+        player["death_save_failures"] = 2
+        player["is_dead"] = True
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "revive",
+                "payload": {"hp": 4},
+                "reason": "治疗药水",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 4
+        assert result.update["player"]["death_save_successes"] == 0
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["player"]["is_dead"] is False
+
+    def test_damage_at_zero_hp_adds_death_save_failure(self):
+        from app.services.tools._helpers import apply_damage_to_target
+
+        player = _make_player_combatant("法师")
+        player["hp"] = 0
+        player["death_save_failures"] = 1
+
+        _, hp_change, lines = apply_damage_to_target(player, 3, damage_type="slashing")
+
+        assert hp_change["old_hp"] == 0
+        assert hp_change["new_hp"] == 0
+        assert player["death_save_failures"] == 2
+        assert any("死亡豁免失败 +1" in line for line in lines)
+
+    def test_stable_player_does_not_record_more_death_saves(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_successes"] = 3
+        player["death_save_failures"] = 0
+        player["is_stable"] = True
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 4},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["is_stable"] is True
+        assert result.update["player"]["death_save_failures"] == 0
+        assert "已经伤势稳定" in result.update["messages"][0].content
+
+    def test_hp_delta_to_zero_marks_player_dying(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 2
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "update",
+                "changes": {"hp_delta": -5},
+                "reason": "陷阱伤害",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 0
+        assert result.update["player"]["death_save_successes"] == 0
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["player"]["is_dead"] is False
+        assert "进入濒死" in result.update["messages"][0].content
+
+    def test_next_turn_keeps_downed_unstable_player_in_order(self):
+        from app.services.tool_service import advance_turn
+
+        player = _make_player_combatant("法师")
+        player["hp"] = 0
+        player["death_save_successes"] = 0
+        player["death_save_failures"] = 1
+        goblin = _make_goblin()
+        combat = _make_combat_state(
+            {goblin["id"]: goblin, player["id"]: player},
+            current_actor_id=goblin["id"],
+            player_dict=player,
+        ).model_dump()
+
+        result_text = advance_turn(combat, player)
+
+        assert combat["current_actor_id"] == player["id"]
+        assert "当前行动者" in result_text
+        assert player["action_available"] is False
+
     def test_grant_xp_action_uses_unified_state_tool(self):
         from app.services.tool_service import modify_character_state
 
@@ -798,6 +972,44 @@ class TestSpellRangeValidation:
         )
 
         assert "距离不足" in result.update["messages"][0].content
+
+    def test_cure_wounds_clears_death_saves_on_healed_target(self):
+        from app.services.tool_service import cast_spell
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["牧师"])
+        ally = _make_goblin("ally_1")
+        ally["side"] = "ally"
+        ally["hp"] = 0
+        ally["death_save_successes"] = 1
+        ally["death_save_failures"] = 2
+        state = {
+            "player": player,
+            "scene_units": {"ally_1": ally},
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "神殿", "width": 40, "height": 40}},
+                "placements": {
+                    "player_预设-牧师": {"unit_id": "player_预设-牧师", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "ally_1": {"unit_id": "ally_1", "map_id": "map_1", "position": {"x": 1, "y": 0}},
+                },
+            },
+        }
+
+        result = _invoke_tool(
+            cast_spell,
+            tool_input={
+                "spell_id": "cure_wounds",
+                "target_ids": ["ally_1"],
+                "slot_level": 1,
+                "state": state,
+            },
+        )
+
+        healed_ally = result.update["scene_units"]["ally_1"]
+        assert healed_ally["hp"] > 0
+        assert healed_ally["death_save_successes"] == 0
+        assert healed_ally["death_save_failures"] == 0
+        assert healed_ally["is_dead"] is False
 
     def test_self_spell_does_not_require_placement_distance(self):
         from app.services.tool_service import cast_spell

@@ -27,6 +27,7 @@ from app.services.tools._helpers import (
     get_combatant,
     prepare_player_for_combat,
     roll_attack_hit,
+    tracks_death_saves,
     validate_attack_distance,
 )
 from app.services.tools.reactions import get_available_reactions
@@ -288,7 +289,9 @@ def attack_action(
         return _reject(f"找不到目标 '{target_id}'。")
     if combat_dict.get("current_actor_id") != resolved_attacker_id:
         return _reject(f"现在不是 {attacker.get('name', attacker_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
-    if target.get("hp", 0) <= 0:
+    if attacker.get("hp", 0) <= 0:
+        return _reject(f"{attacker.get('name', attacker_id)} 已经倒下，无法攻击；若这是玩家回合，应先进行死亡豁免。")
+    if target.get("hp", 0) <= 0 and not tracks_death_saves(target):
         return _reject(f"目标 {target.get('name', target_id)} 已经倒下，无法攻击。")
     if not attacker.get("action_available", True):
         return _reject(f"{attacker.get('name', attacker_id)} 本回合的动作已用尽。")
