@@ -113,7 +113,8 @@ class ContextAssembler:
                     f"  {combatant.get('name', uid)} [ID:{uid}] side={combatant.get('side')} "
                     f"HP:{combatant.get('hp')}/{combatant.get('max_hp')} AC:{display_ac} "
                     f"conditions=[{format_conditions(combatant)}] resources=[{format_resources(combatant)}] "
-                    f"death_saves={format_death_save_status(combatant)} actions=[{actions_desc}]{marker}"
+                    f"death_saves={format_death_save_status(combatant)} surprised={bool(combatant.get('surprised'))} "
+                    f"actions=[{actions_desc}]{marker}"
                 )
             sections.append("[当前战斗状态]\n" + "\n".join(combat_lines))
 
@@ -188,6 +189,7 @@ class ContextAssembler:
                 f"{combatant.get('name', uid)}[HP:{combatant.get('hp')}/{combatant.get('max_hp')}, "
                 f"AC:{display_ac}, conditions:{format_conditions(combatant)}, "
                 f"resources:{format_resources(combatant)}, death_saves:{format_death_save_status(combatant)}, "
+                f"surprised:{bool(combatant.get('surprised'))}, "
                 f"actions:{format_actions(combatant)}]"
             )
             if combatant.get("side") == "player":

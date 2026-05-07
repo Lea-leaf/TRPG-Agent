@@ -100,6 +100,21 @@ def test_goblin_actions_keep_existing_attack_behavior():
     assert result["combat"]["participants"]["goblin_1"]["action_available"] is False
 
 
+def test_lost_mine_wandering_monster_weapon_actions_are_structured():
+    """随机遭遇里的常见武器攻击也应能走 use_monster_action。"""
+    expected_actions = {
+        "commoner": {"club"},
+        "cultist": {"scimitar"},
+        "skeleton": {"shortsword", "shortbow"},
+        "ogre": {"greatclub", "javelin"},
+        "orc": {"greataxe", "javelin"},
+    }
+
+    for slug, action_ids in expected_actions.items():
+        actions = {action.id for action in get_lost_mine_actions(slug)}
+        assert action_ids <= actions
+
+
 def test_structured_simple_attack_keeps_player_reaction_window():
     from app.services.tool_service import use_monster_action
 

@@ -12,29 +12,16 @@ import re
 
 import d20
 
+from app.equipment.weapons import resolve_weapon_data
 from app.conditions import get_combat_effects, get_condition_module, tick_conditions
 from app.graph.state import AttackInfo
-
-
-RANGED_WEAPON_RANGES: dict[str, tuple[int, int]] = {
-    "shortbow": (80, 320),
-    "longbow": (150, 600),
-    "light crossbow": (80, 320),
-    "heavy crossbow": (100, 400),
-    "hand crossbow": (30, 120),
-    "sling": (30, 120),
-    "dart": (20, 60),
-    "javelin": (30, 120),
-    "handaxe": (20, 60),
-    "dagger": (20, 60),
-    "spear": (20, 60),
-}
 
 
 # ── 战斗覆盖字段 ────────────────────────────────────────────────
 # 战斗期间叠加到 player_dict 上的字段，战斗结束后清除
 COMBAT_OVERLAY_KEYS = frozenset({
     "id", "side", "initiative", "proficiency_bonus", "attacks",
+    "surprised",
     "action_available", "bonus_action_available", "reaction_available",
     "speed", "movement_left",
 })
@@ -348,7 +335,8 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
     prof = 2  # 1 级角色标准熟练加值
 
     attacks: list[dict] = []
-    for w in player_dict.get("weapons", []):
+    for raw_weapon in player_dict.get("weapons", []):
+        w = resolve_weapon_data(raw_weapon)
         props = w.get("properties", [])
         if "finesse" in props:
             ability_mod = max(modifiers.get("str", 0), modifiers.get("dex", 0))
@@ -357,18 +345,23 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
         else:
             ability_mod = modifiers.get("str", 0)
 
-        weapon_name = str(w["name"]).lower()
-        range_tuple = RANGED_WEAPON_RANGES.get(weapon_name)
-        if range_tuple is None and "thrown" in props:
-            range_tuple = RANGED_WEAPON_RANGES.get(weapon_name)
+        base_damage_dice = w.get("damage_dice", "1d4")
+        if "versatile" in props and w.get("wielding") == "two_handed" and w.get("versatile_damage_dice"):
+            base_damage_dice = w["versatile_damage_dice"]
+
+        damage_bonus = ability_mod + int(w.get("damage_bonus", 0) or 0)
+        damage_dice = _append_dice_modifier(base_damage_dice, damage_bonus)
+        if w.get("extra_damage_dice"):
+            damage_dice = f"{damage_dice}+{w['extra_damage_dice']}"
 
         attacks.append(AttackInfo(
             name=w["name"],
-            attack_bonus=prof + ability_mod,
-            damage_dice=w.get("damage_dice", "1d4"),
+            attack_bonus=prof + ability_mod + int(w.get("attack_bonus", 0) or 0),
+            damage_dice=damage_dice,
             damage_type=w.get("damage_type", "bludgeoning"),
-            normal_range_feet=range_tuple[0] if range_tuple else None,
-            long_range_feet=range_tuple[1] if range_tuple else None,
+            reach_feet=int(w.get("reach_feet", 5) or 5),
+            normal_range_feet=w.get("normal_range_feet"),
+            long_range_feet=w.get("long_range_feet"),
         ).model_dump())
 
     player_id, player_name = get_player_identity(player_dict)
@@ -384,6 +377,15 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
     player_dict["movement_left"] = 30
     sync_ac_state(player_dict)
     return player_dict
+
+
+def _append_dice_modifier(dice: str, modifier: int) -> str:
+    """按 5e 武器伤害规则把能力调整值写进伤害公式。"""
+    if modifier == 0:
+        return str(dice)
+    if modifier > 0:
+        return f"{dice}+{modifier}"
+    return f"{dice}{modifier}"
 
 
 def clear_player_combat_fields(player_dict: dict) -> dict:

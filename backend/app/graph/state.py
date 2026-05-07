@@ -22,12 +22,20 @@ ModifierBlock = dict[str, int]
 
 
 class WeaponData(BaseModel):
-    """武器基础数据 — 对应 D&D 5e SRD 武器表"""
+    """角色卡上的武器声明；缺省规则由装备表补齐。"""
     name: str
     damage_dice: str = "1d4"
     damage_type: str = "bludgeoning"
     weapon_type: Literal["melee", "ranged"] = "melee"
     properties: list[str] = Field(default_factory=list)  # finesse, light, thrown, ...
+    normal_range_feet: int | None = None
+    long_range_feet: int | None = None
+    reach_feet: int = 5
+    versatile_damage_dice: str | None = None
+    attack_bonus: int = 0
+    damage_bonus: int = 0
+    extra_damage_dice: str = ""
+    extra_damage_type: str = ""
 
 
 class PlayerState(BaseModel, extra="allow"):
@@ -142,6 +150,7 @@ class CombatantState(BaseModel, extra="allow"):
     base_ac: int = 10                     # 无 buff 裸 AC
     ac: int = 10                          # 向后兼容别名
     initiative: int = 0
+    surprised: bool = False               # 新版突袭：只让先攻劣势，不跳过回合
     speed: int = 30
     conditions: list[ActiveCondition] = Field(default_factory=list)
     damage_resistances: list[str] = Field(default_factory=list)
