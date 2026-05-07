@@ -111,7 +111,7 @@ class TestBuildPlayerCombatant:
     """验证玩家角色卡 → 战斗字段叠加逻辑"""
 
     def test_melee_weapon_bonus(self):
-        """战士→长剑: attack_bonus = prof(2) + STR mod(3) = 5"""
+        """战士→长剑: 命中与伤害都加入 STR 调整值。"""
         result = _make_player_combatant("战士")
 
         assert result["id"] == "战士"
@@ -122,7 +122,7 @@ class TestBuildPlayerCombatant:
 
         longsword = next(a for a in result["attacks"] if a["name"] == "Longsword")
         assert longsword["attack_bonus"] == 5   # prof(2) + STR(3)
-        assert longsword["damage_dice"] == "1d8"
+        assert longsword["damage_dice"] == "1d8+3"
         assert longsword["damage_type"] == "slashing"
 
     def test_finesse_weapon_takes_higher(self):
@@ -138,6 +138,29 @@ class TestBuildPlayerCombatant:
 
         shortbow = next(a for a in result["attacks"] if a["name"] == "Shortbow")
         assert shortbow["attack_bonus"] == 5  # prof(2) + DEX(3)
+        assert shortbow["damage_dice"] == "1d6+3"
+        assert shortbow["normal_range_feet"] == 80
+        assert shortbow["long_range_feet"] == 320
+
+    def test_thrown_weapon_uses_strength_and_range_from_registry(self):
+        """标枪按近战投掷武器处理：STR 攻击/伤害，同时带 30/120 尺射程。"""
+        result = _make_player_combatant("野蛮人")
+
+        javelin = next(a for a in result["attacks"] if a["name"] == "Javelin")
+        assert javelin["attack_bonus"] == 5
+        assert javelin["damage_dice"] == "1d6+3"
+        assert javelin["normal_range_feet"] == 30
+        assert javelin["long_range_feet"] == 120
+
+    def test_lost_mine_named_weapon_applies_magic_bonus(self):
+        """模组命名武器从装备表继承基础武器，并叠加 +1 魔法武器加值。"""
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["weapons"] = [{"name": "Talon"}]
+        prepare_player_for_combat(player)
+
+        talon = player["attacks"][0]
+        assert talon["attack_bonus"] == 6
+        assert talon["damage_dice"] == "1d8+4"
 
     def test_no_weapons_yields_empty_attacks(self):
         """没有武器时 attacks 为空列表"""
@@ -171,9 +194,12 @@ class TestBuildPlayerCombatant:
 class TestStartCombatPlayerJoin:
     """验证 start_combat 自动将已加载的玩家角色纳入战斗（玩家在 player 字段，不在 participants）"""
 
-    def _invoke_start_combat(self, state: dict):
+    def _invoke_start_combat(self, state: dict, surprised_ids: list[str] | None = None):
         from app.services.tool_service import start_combat
-        return _invoke_tool(start_combat, tool_input={"combatant_ids": ["goblin_1"], "state": state})
+        tool_input = {"combatant_ids": ["goblin_1"], "state": state}
+        if surprised_ids is not None:
+            tool_input["surprised_ids"] = surprised_ids
+        return _invoke_tool(start_combat, tool_input=tool_input)
 
     def test_player_added_to_initiative(self):
         """玩家角色卡存在时，start_combat 后 initiative_order 应包含玩家 ID"""
@@ -225,6 +251,47 @@ class TestStartCombatPlayerJoin:
         state = {"scene_units": {"goblin_1": goblin}, "space": _make_space_state(["goblin_1"])}
         result = self._invoke_start_combat(state)
         assert "goblin_1" in result.update["combat"]["participants"]
+
+    def test_surprised_player_rolls_initiative_with_disadvantage_only(self):
+        """新版突袭只影响先攻劣势，不禁用首回合行动或反应。"""
+        class FakeRoll:
+            def __init__(self, total: int, text: str):
+                self.total = total
+                self.text = text
+
+            def __str__(self) -> str:
+                return self.text
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良"}
+        goblin = _make_goblin()
+        state = {"player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["温良", "goblin_1"])}
+        rolled_exprs: list[str] = []
+
+        def fake_roll(expr: str):
+            rolled_exprs.append(expr)
+            if expr.startswith("2d20kl1"):
+                return FakeRoll(5, "2d20kl1+2 = 5")
+            return FakeRoll(14, "1d20+2 = 14")
+
+        with patch("app.services.tools.combat_tools.d20.roll", side_effect=fake_roll):
+            result = self._invoke_start_combat(state, surprised_ids=["player"])
+
+        assert any(expr.startswith("2d20kl1") for expr in rolled_exprs)
+        assert result.update["player"]["surprised"] is True
+        assert result.update["player"]["action_available"] is True
+        assert result.update["player"]["reaction_available"] is True
+        assert "突袭劣势" in result.update["messages"][0].content
+
+    def test_start_combat_rejects_unknown_surprised_id(self):
+        """突袭目标必须能解析到参战单位，避免静默忽略拼错 ID。"""
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良"}
+        goblin = _make_goblin()
+        state = {"player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["温良", "goblin_1"])}
+
+        result = self._invoke_start_combat(state, surprised_ids=["missing_1"])
+
+        assert "找不到被突袭单位" in result.update["messages"][0].content
+        assert "combat" not in result.update
 
     def test_start_combat_requires_active_space_map(self):
         """战斗开始前必须先建立平面地图。"""
@@ -524,16 +591,42 @@ class TestWeaponDataModel:
 
     def test_weapon_data_fields(self):
         w = WeaponData(name="Longsword", damage_dice="1d8", damage_type="slashing",
-                       weapon_type="melee", properties=["versatile"])
+                       weapon_type="melee", properties=["versatile"], versatile_damage_dice="1d10")
         assert w.name == "Longsword"
         assert w.weapon_type == "melee"
         assert "versatile" in w.properties
+        assert w.versatile_damage_dice == "1d10"
 
     def test_weapon_data_defaults(self):
         w = WeaponData(name="Fist")
         assert w.damage_dice == "1d4"
         assert w.weapon_type == "melee"
         assert w.properties == []
+
+    def test_lost_mine_weapon_registry_covers_module_weapons(self):
+        from app.equipment.weapons import get_weapon_spec
+
+        for weapon_name in [
+            "Club",
+            "Greatclub",
+            "Javelin",
+            "Mace",
+            "Quarterstaff",
+            "Shortbow",
+            "Battleaxe",
+            "Greataxe",
+            "Longsword",
+            "Morningstar",
+            "Scimitar",
+            "Shortsword",
+            "Heavy Crossbow",
+            "Longbow",
+            "Talon",
+            "Hew",
+            "Lightbringer",
+            "Spider Staff",
+        ]:
+            assert get_weapon_spec(weapon_name) is not None, f"{weapon_name} 缺少武器规则"
 
 
 # ── Phase 7: modify_character_state 资源同步 ─────────────────────
@@ -635,6 +728,180 @@ class TestModifyCharacterStateResources:
         assert isinstance(result, Command)
         assert result.update["player"]["hp"] == 8
         assert result.update["player"]["resources"]["spell_slot_lv1"] == 2
+
+    def test_record_death_save_uses_unified_state_tool(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 13},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["death_save_successes"] == 1
+        assert result.update["player"]["death_save_failures"] == 0
+        assert "死亡豁免 d20=13：成功" in result.update["messages"][0].content
+
+    def test_death_save_natural_20_revives_player(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_failures"] = 2
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 20},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 1
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["hp_changes"][0]["new_hp"] == 1
+
+    def test_revive_action_restores_hp_and_clears_death_saves(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_successes"] = 1
+        player["death_save_failures"] = 2
+        player["is_dead"] = True
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "revive",
+                "payload": {"hp": 4},
+                "reason": "治疗药水",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 4
+        assert result.update["player"]["death_save_successes"] == 0
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["player"]["is_dead"] is False
+
+    def test_damage_at_zero_hp_adds_death_save_failure(self):
+        from app.services.tools._helpers import apply_damage_to_target
+
+        player = _make_player_combatant("法师")
+        player["hp"] = 0
+        player["death_save_failures"] = 1
+
+        _, hp_change, lines = apply_damage_to_target(player, 3, damage_type="slashing")
+
+        assert hp_change["old_hp"] == 0
+        assert hp_change["new_hp"] == 0
+        assert player["death_save_failures"] == 2
+        assert any("死亡豁免失败 +1" in line for line in lines)
+
+    def test_stable_player_does_not_record_more_death_saves(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 0
+        player["death_save_successes"] = 3
+        player["death_save_failures"] = 0
+        player["is_stable"] = True
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "record_death_save",
+                "payload": {"roll_total": 4},
+                "reason": "死亡豁免",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["is_stable"] is True
+        assert result.update["player"]["death_save_failures"] == 0
+        assert "已经伤势稳定" in result.update["messages"][0].content
+
+    def test_hp_delta_to_zero_marks_player_dying(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        player["id"] = "温良"
+        player["name"] = "温良"
+        player["side"] = "player"
+        player["hp"] = 2
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "player",
+                "action": "update",
+                "changes": {"hp_delta": -5},
+                "reason": "陷阱伤害",
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["hp"] == 0
+        assert result.update["player"]["death_save_successes"] == 0
+        assert result.update["player"]["death_save_failures"] == 0
+        assert result.update["player"]["is_dead"] is False
+        assert "进入濒死" in result.update["messages"][0].content
+
+    def test_next_turn_keeps_downed_unstable_player_in_order(self):
+        from app.services.tool_service import advance_turn
+
+        player = _make_player_combatant("法师")
+        player["hp"] = 0
+        player["death_save_successes"] = 0
+        player["death_save_failures"] = 1
+        goblin = _make_goblin()
+        combat = _make_combat_state(
+            {goblin["id"]: goblin, player["id"]: player},
+            current_actor_id=goblin["id"],
+            player_dict=player,
+        ).model_dump()
+
+        result_text = advance_turn(combat, player)
+
+        assert combat["current_actor_id"] == player["id"]
+        assert "当前行动者" in result_text
+        assert player["action_available"] is False
 
     def test_grant_xp_action_uses_unified_state_tool(self):
         from app.services.tool_service import modify_character_state
@@ -798,6 +1065,44 @@ class TestSpellRangeValidation:
         )
 
         assert "距离不足" in result.update["messages"][0].content
+
+    def test_cure_wounds_clears_death_saves_on_healed_target(self):
+        from app.services.tool_service import cast_spell
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["牧师"])
+        ally = _make_goblin("ally_1")
+        ally["side"] = "ally"
+        ally["hp"] = 0
+        ally["death_save_successes"] = 1
+        ally["death_save_failures"] = 2
+        state = {
+            "player": player,
+            "scene_units": {"ally_1": ally},
+            "space": {
+                "active_map_id": "map_1",
+                "maps": {"map_1": {"id": "map_1", "name": "神殿", "width": 40, "height": 40}},
+                "placements": {
+                    "player_预设-牧师": {"unit_id": "player_预设-牧师", "map_id": "map_1", "position": {"x": 0, "y": 0}},
+                    "ally_1": {"unit_id": "ally_1", "map_id": "map_1", "position": {"x": 1, "y": 0}},
+                },
+            },
+        }
+
+        result = _invoke_tool(
+            cast_spell,
+            tool_input={
+                "spell_id": "cure_wounds",
+                "target_ids": ["ally_1"],
+                "slot_level": 1,
+                "state": state,
+            },
+        )
+
+        healed_ally = result.update["scene_units"]["ally_1"]
+        assert healed_ally["hp"] > 0
+        assert healed_ally["death_save_successes"] == 0
+        assert healed_ally["death_save_failures"] == 0
+        assert healed_ally["is_dead"] is False
 
     def test_self_spell_does_not_require_placement_distance(self):
         from app.services.tool_service import cast_spell

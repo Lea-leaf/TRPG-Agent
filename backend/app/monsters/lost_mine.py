@@ -50,6 +50,26 @@ def _spell(spell_id: str, *, slot_level: int = 0, action_type: str = "action") -
 
 
 LOST_MINE_ACTIONS: dict[str, list[MonsterAction]] = {
+    "commoner": [
+        MonsterAction(
+            id="club",
+            name="Club",
+            kind="attack",
+            attack_bonus=2,
+            damage=[_damage("1d4", "bludgeoning")],
+            reach_feet=5,
+        ),
+    ],
+    "cultist": [
+        MonsterAction(
+            id="scimitar",
+            name="Scimitar",
+            kind="attack",
+            attack_bonus=3,
+            damage=[_damage("1d6+1", "slashing")],
+            reach_feet=5,
+        ),
+    ],
     "goblin": [
         MonsterAction(
             id="scimitar",
@@ -196,6 +216,65 @@ LOST_MINE_ACTIONS: dict[str, list[MonsterAction]] = {
             damage=[_damage("1d6+1", "bludgeoning")],
             reach_feet=5,
         )
+    ],
+    "skeleton": [
+        MonsterAction(
+            id="shortsword",
+            name="Shortsword",
+            kind="attack",
+            attack_bonus=4,
+            damage=[_damage("1d6+2", "piercing")],
+            reach_feet=5,
+        ),
+        MonsterAction(
+            id="shortbow",
+            name="Shortbow",
+            kind="attack",
+            attack_bonus=4,
+            damage=[_damage("1d6+2", "piercing")],
+            normal_range_feet=80,
+            long_range_feet=320,
+        ),
+    ],
+    "ogre": [
+        MonsterAction(
+            id="greatclub",
+            name="Greatclub",
+            kind="attack",
+            attack_bonus=6,
+            damage=[_damage("2d8+4", "bludgeoning")],
+            reach_feet=5,
+        ),
+        MonsterAction(
+            id="javelin",
+            name="Javelin",
+            kind="attack",
+            attack_bonus=6,
+            damage=[_damage("2d6+4", "piercing")],
+            reach_feet=5,
+            normal_range_feet=30,
+            long_range_feet=120,
+        ),
+    ],
+    "orc": [
+        MonsterAction(
+            id="greataxe",
+            name="Greataxe",
+            kind="attack",
+            attack_bonus=5,
+            damage=[_damage("1d12+3", "slashing")],
+            reach_feet=5,
+        ),
+        MonsterAction(
+            id="javelin",
+            name="Javelin",
+            kind="attack",
+            attack_bonus=5,
+            damage=[_damage("1d6+3", "piercing")],
+            reach_feet=5,
+            normal_range_feet=30,
+            long_range_feet=120,
+        ),
     ],
     "young-green-dragon": [
         MonsterAction(

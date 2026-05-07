@@ -13,6 +13,9 @@
 - 普通数值调整：`action="update"`，传 `target_id` 与 `changes`。
 - 施加状态：`action="apply_condition"`，传 `payload={"target_id": 目标ID, "condition_id": 状态ID}`，可选 `source_id`、`duration`。
 - 移除状态：`action="remove_condition"`，传 `payload={"target_id": 目标ID, "condition_id": 状态ID}`。
+- 记录死亡豁免：先调用 `request_dice_roll(reason="死亡豁免", formula="1d20")`，再调用 `modify_character_state(action="record_death_save", payload={"roll_total": raw_roll})`。
+- 稳定伤势：`modify_character_state(action="stabilize", target_id="player")`。
+- 复活玩家：`modify_character_state(action="revive", target_id="player", payload={"hp": 1})`。
 
 ## 常用 `changes`
 
@@ -28,5 +31,7 @@
 
 - HP 变化优先用 `hp_delta`，让工具处理边界。
 - 法术位消耗通常由 `cast_spell` 自动处理；只有长休、剧情奖励、特殊恢复时才用本技能手动调整资源。
+- 玩家 0 HP 不等于游戏结束；死亡豁免由 LLM 调用骰子工具后写回状态，治疗或复活会清空死亡豁免计数。
+- HUD 中 `resources` 和 `death_saves` 是当前事实；旧聊天记录里的“剩余法术位”可能已经过期。
 - 战斗中的攻击、施法、回合推进仍使用战斗工具；本技能只负责无法由专门工具自动处理的状态变更。
 - 如果需要知道目标 ID，先从 HUD 读取；HUD 不足时再用 `inspect_unit`。

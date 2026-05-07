@@ -16,11 +16,15 @@ from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
 from app.conditions import remove_condition_by_id, upsert_condition
 from app.services.skills import load_skill_content
 from app.services.tools._helpers import (
+    apply_death_save_failures_from_damage,
     apply_hp_change,
     compute_ac,
     get_combatant,
     get_player_identity,
     is_player_reference,
+    mark_unit_dying,
+    record_death_save_roll,
+    reset_death_save_state,
     sync_ac_state,
     sync_movement_state,
 )
@@ -111,26 +115,31 @@ def modify_character_state(
         "choose_fighter_archetype",
         "apply_condition",
         "remove_condition",
+        "record_death_save",
+        "stabilize",
+        "revive",
     ] = "update",
     payload: dict | None = None,
     reason: str = "",
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """角色状态调整与成长入口。用于 HP/AC/能力值/资源/状态效果，以及经验、升级、子职选择。
+    """角色状态调整与成长入口。用于 HP/AC/能力值/资源/状态效果、死亡豁免与复活，以及经验、升级、子职选择。
     不要用它重放攻击、施法、怪物动作工具刚刚结算过的结果。
     如不确定 action、changes 或 payload 的写法，先用 action="help" 查看状态说明；
     成长流程用 action="help", payload={"topic": "progression"} 查看完整说明。
     参数示例：
     - 扣血：{"target_id": "温良", "action": "update", "changes": {"hp_delta": -3}, "reason": "陷阱伤害"}
-    - 恢复资源：{"target_id": "player", "action": "update", "changes": {"resource_delta": {"spell_slot_1": 1}}, "reason": "短休恢复"}
+    - 恢复资源：{"target_id": "player", "action": "update", "changes": {"resource_delta": {"spell_slot_lv1": 1}}, "reason": "短休恢复"}
     - 加状态：{"action": "apply_condition", "payload": {"target_id": "goblin_1", "condition_id": "prone", "duration": 1}}
+    - 记录死亡豁免：{"target_id": "player", "action": "record_death_save", "payload": {"roll_total": 13}}
+    - 复活玩家：{"target_id": "player", "action": "revive", "payload": {"hp": 1}, "reason": "治疗药水"}
     - 获得经验：{"action": "grant_xp", "payload": {"amount": 75, "reason": "击败地精伏击"}}
 
     Args:
         target_id: 目标单位 ID；玩家角色的 ID 就是玩家名字，也兼容 "player" 表示当前玩家。
         changes: action="update" 时的状态变更字典，常用 hp_delta、set_hp、resource_delta、set_resource、add_condition、remove_condition。
-        action: 状态调整动作；常用 "update"、"apply_condition"、"remove_condition"、"grant_xp"、"level_up"。
+        action: 状态调整动作；常用 "update"、"record_death_save"、"revive"、"apply_condition"、"remove_condition"、"grant_xp"、"level_up"。
         payload: 非 update 动作的参数；不要把 update 的 changes 字段塞到 payload。
         reason: 修改原因，会进入工具结果，便于回合记录。
     """
@@ -169,14 +178,15 @@ def modify_character_state(
         changes = {"remove_condition": str(payload["condition_id"])}
         reason = str(payload.get("reason", reason))
 
+    death_actions = {"record_death_save", "stabilize", "revive"}
     changes = changes or {}
-    if not changes:
+    if not changes and action not in death_actions:
         extra = " action=\"update\" 的状态变更请写入 changes，而不是 payload。" if payload else ""
         return Command(update={"messages": [
             ToolMessage(content=f"未提供状态变更内容。{extra}", tool_call_id=tool_call_id)
         ]})
 
-    invalid_keys = sorted(set(changes) - _STATE_CHANGE_KEYS)
+    invalid_keys = sorted(set(changes) - _STATE_CHANGE_KEYS) if action not in death_actions else []
     if invalid_keys:
         hints = [hint for key, hint in _STATE_CHANGE_KEY_HINTS.items() if key in invalid_keys]
         hint_text = f"\n常见修正: {'；'.join(hints)}。" if hints else ""
@@ -241,15 +251,65 @@ def modify_character_state(
     resource_caps = _get_resource_caps(target, player_dict)
 
     # 应用各项变更
+    if action == "record_death_save":
+        if target.get("is_stable"):
+            lines.append(f"  {target_name} 已经伤势稳定，无需继续进行死亡豁免。")
+        elif "roll_total" not in payload and "raw_roll" not in payload and "final_total" not in payload:
+            return Command(update={"messages": [
+                ToolMessage(
+                    content="记录死亡豁免需要 payload.roll_total（或 raw_roll/final_total）。",
+                    tool_call_id=tool_call_id,
+                )
+            ]})
+        else:
+            old_hp = target.get("hp", 0)
+            roll_total = int(payload.get("roll_total") or payload.get("raw_roll") or payload.get("final_total"))
+            lines.extend(f"  {line}" for line in record_death_save_roll(target, roll_total))
+            if target.get("hp", old_hp) != old_hp:
+                hp_changes.append({
+                    "id": target.get("id", target_id),
+                    "name": target_name,
+                    "old_hp": old_hp,
+                    "new_hp": target.get("hp", old_hp),
+                    "max_hp": target.get("max_hp", old_hp),
+                })
+    elif action == "stabilize":
+        target["hp"] = 0
+        target["death_save_successes"] = 0
+        target["death_save_failures"] = 0
+        target["is_stable"] = True
+        target["is_dead"] = False
+        lines.append(f"  {target_name} 伤势稳定，保持 0 HP。")
+    elif action == "revive":
+        old_hp = target.get("hp", 0)
+        max_hp = target.get("max_hp", old_hp)
+        new_hp = max(1, min(int(payload.get("hp", 1)), max_hp))
+        target["hp"] = new_hp
+        reset_death_save_state(target)
+        hp_changes.append({
+            "id": target.get("id", target_id),
+            "name": target_name,
+            "old_hp": old_hp,
+            "new_hp": new_hp,
+            "max_hp": max_hp,
+        })
+        lines.append(f"  {target_name} 复活并恢复至 {new_hp} HP。")
+
     if "hp_delta" in changes:
         hc = apply_hp_change(target, changes["hp_delta"])
         hp_changes.append(hc)
         lines.append(f"  {target_name} HP: {hc['old_hp']} → {hc['new_hp']}")
+        if hc["old_hp"] > 0 and hc["new_hp"] == 0:
+            mark_unit_dying(target, lines)
+        elif hc["old_hp"] == 0 and hc["new_hp"] == 0 and int(changes["hp_delta"]) < 0:
+            apply_death_save_failures_from_damage(target, crit=False, lines=lines)
     if "set_hp" in changes:
         old_hp = target.get("hp", 0)
         max_hp = target.get("max_hp", old_hp)
         new_hp = max(0, min(int(changes["set_hp"]), max_hp))
         target["hp"] = new_hp
+        if new_hp > 0:
+            reset_death_save_state(target)
         hp_changes.append({"id": target.get("id", target_id), "name": target_name, "old_hp": old_hp, "new_hp": new_hp, "max_hp": max_hp})
         lines.append(f"  {target_name} HP 设为 {new_hp}")
     if "ac" in changes:

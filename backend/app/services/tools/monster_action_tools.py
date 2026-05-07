@@ -9,7 +9,7 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from app.services.tools._helpers import get_all_combatants, get_combatant, get_condition_action_block_reason
+from app.services.tools._helpers import get_all_combatants, get_combatant, get_condition_action_block_reason, tracks_death_saves
 from app.services.tools._helpers import build_pending_reaction_state
 from app.services.tools.reactions import get_available_reactions
 from app.services.tools.monster_action_resolvers import (
@@ -104,7 +104,7 @@ def use_monster_action(
         target = all_combatants.get(target_id)
         if not target:
             return _reject(f"找不到目标 '{target_id}'。")
-        if target.get("hp", 0) <= 0:
+        if target.get("hp", 0) <= 0 and not tracks_death_saves(target):
             return _reject(f"目标 {target.get('name', target_id)} 已经倒下。")
         targets_by_id[target_id] = target
 

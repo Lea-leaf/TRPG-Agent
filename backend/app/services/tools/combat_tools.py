@@ -27,6 +27,7 @@ from app.services.tools._helpers import (
     get_combatant,
     prepare_player_for_combat,
     roll_attack_hit,
+    tracks_death_saves,
     validate_attack_distance,
 )
 from app.services.tools.reactions import get_available_reactions
@@ -99,6 +100,29 @@ def _validate_combat_space(state: dict, unit_ids: list[str]) -> str | None:
     return None
 
 
+def _resolve_surprised_ids(raw_ids: list[str], all_units: dict[str, dict], player_dict: dict | None) -> tuple[set[str], list[str]]:
+    """新版突袭只标记先攻劣势目标，避免再引入跳过回合的旧状态。"""
+    surprised: set[str] = set()
+    missing: list[str] = []
+    for raw_id in raw_ids:
+        unit_id = str(raw_id).strip()
+        if player_dict and unit_id in {"player", "玩家", "当前玩家"}:
+            unit_id = player_dict["id"]
+        if unit_id in all_units:
+            surprised.add(unit_id)
+        else:
+            missing.append(str(raw_id))
+    return surprised, missing
+
+
+def _roll_initiative(unit: dict, *, surprised: bool) -> tuple[int, str]:
+    """先攻骰统一入口；新版突袭让目标先攻劣势，而不是失去首回合。"""
+    dex_mod = unit.get("modifiers", {}).get("dex", 0)
+    expr = f"2d20kl1+{dex_mod}" if surprised else f"1d20+{dex_mod}"
+    result = d20.roll(expr)
+    return result.total, str(result)
+
+
 @tool
 def spawn_monsters(
     monster_index: str,
@@ -149,16 +173,19 @@ def spawn_monsters(
 @tool
 def start_combat(
     combatant_ids: list[str],
+    surprised_ids: list[str] | None = None,
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """开始战斗：从场景单位池中选取指定 ID 的单位作为参战者，投先攻骰并排定行动顺序。
     前置条件：必须先用 spawn_monsters 生成单位，并用 manage_space 把玩家和参战单位放到当前地图。
     玩家角色会自动加入，无需在 combatant_ids 中指定。
-    参数示例：{"combatant_ids": ["goblin_1", "goblin_2", "goblin_3", "goblin_4"]}。
+    新版突袭只让被突袭者先攻劣势，不跳过首回合，也不禁用反应。
+    参数示例：{"combatant_ids": ["goblin_1", "goblin_2"], "surprised_ids": ["player"]}。
 
     Args:
         combatant_ids: 从场景单位池中参加本次战斗的非玩家单位 ID 列表；不要把玩家 ID 放进来。
+        surprised_ids: 被突袭的单位 ID；这些单位先攻检定用劣势。可用 "player" 指代当前玩家。
     """
     scene_units: dict = state.get("scene_units") or {}
     if hasattr(scene_units, "items"):
@@ -201,15 +228,26 @@ def start_combat(
     if space_error := _validate_combat_space(state, list(all_units)):
         return Command(update={"messages": [ToolMessage(content=space_error, tool_call_id=tool_call_id)]})
 
-    initiative_list: list[tuple[str, int]] = []
+    surprised_set, surprise_missing = _resolve_surprised_ids(surprised_ids or [], all_units, player_dict)
+    if surprise_missing:
+        available = ", ".join(all_units.keys()) or "无"
+        return Command(update={"messages": [
+            ToolMessage(
+                content=f"无法开始战斗：找不到被突袭单位 {', '.join(surprise_missing)}。可用单位: {available}",
+                tool_call_id=tool_call_id,
+            )
+        ]})
+
+    initiative_list: list[tuple[str, int, str, bool]] = []
     for uid, p in all_units.items():
-        dex_mod = p.get("modifiers", {}).get("dex", 0)
-        init_roll = d20.roll(f"1d20+{dex_mod}")
-        p["initiative"] = init_roll.total
-        initiative_list.append((uid, init_roll.total))
+        surprised = uid in surprised_set
+        init_total, roll_text = _roll_initiative(p, surprised=surprised)
+        p["initiative"] = init_total
+        p["surprised"] = surprised
+        initiative_list.append((uid, init_total, roll_text, surprised))
 
     initiative_list.sort(key=lambda x: x[1], reverse=True)
-    order = [uid for uid, _ in initiative_list]
+    order = [uid for uid, _, _, _ in initiative_list]
 
     # combat.participants 仅存 NPC/怪物
     combat_dict = {
@@ -220,8 +258,9 @@ def start_combat(
     }
 
     order_desc = "\n".join(
-        f"  {i+1}. {all_units[uid].get('name', uid)} [ID: {uid}] (先攻 {init})"
-        for i, (uid, init) in enumerate(initiative_list)
+        f"  {i+1}. {all_units[uid].get('name', uid)} [ID: {uid}] "
+        f"(先攻 {init}{'，突袭劣势' if surprised else ''}；{roll_text})"
+        for i, (uid, init, roll_text, surprised) in enumerate(initiative_list)
     )
 
     update: dict = {
@@ -288,7 +327,9 @@ def attack_action(
         return _reject(f"找不到目标 '{target_id}'。")
     if combat_dict.get("current_actor_id") != resolved_attacker_id:
         return _reject(f"现在不是 {attacker.get('name', attacker_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
-    if target.get("hp", 0) <= 0:
+    if attacker.get("hp", 0) <= 0:
+        return _reject(f"{attacker.get('name', attacker_id)} 已经倒下，无法攻击；若这是玩家回合，应先进行死亡豁免。")
+    if target.get("hp", 0) <= 0 and not tracks_death_saves(target):
         return _reject(f"目标 {target.get('name', target_id)} 已经倒下，无法攻击。")
     if not attacker.get("action_available", True):
         return _reject(f"{attacker.get('name', attacker_id)} 本回合的动作已用尽。")

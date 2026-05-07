@@ -284,6 +284,8 @@ def cast_spell(
     # 动作经济
     casting_time = spell_def.get("casting_time", "action")
     if player_dict.get("id"):
+        if combat_dict and player_dict.get("hp", 0) <= 0:
+            return _reject(f"{player_dict.get('name')} 已经倒下，无法施法；若这是玩家回合，应先进行死亡豁免。")
         if casting_time in ("action", "bonus_action") and combat_dict and combat_dict.get("current_actor_id") != player_id:
             return _reject(f"当前不是 {player_dict.get('name')} 的回合。")
         action_map = {"action": "action_available", "bonus_action": "bonus_action_available", "reaction": "reaction_available"}

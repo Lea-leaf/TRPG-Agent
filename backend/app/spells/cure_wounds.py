@@ -17,6 +17,8 @@ SPELL_DEF: SpellDef = {
 
 def execute(caster: dict, targets: list[dict], slot_level: int, **_) -> SpellResult:
     """1d8+施法修正值治疗量，每升1环+1d8"""
+    from app.services.tools._helpers import reset_death_save_state
+
     target = targets[0]
     spell_mod = get_spellcasting_mod(caster)
     dice_count = 1 + (slot_level - 1)
@@ -32,6 +34,8 @@ def execute(caster: dict, targets: list[dict], slot_level: int, **_) -> SpellRes
     max_hp = target.get("max_hp", old_hp)
     new_hp = min(old_hp + healing, max_hp)
     target["hp"] = new_hp
+    if new_hp > 0:
+        reset_death_save_state(target)
 
     lines = [
         f"{caster_name} 施放 治疗创伤（{slot_level}环）→ {target_name}",

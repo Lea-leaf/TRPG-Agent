@@ -285,55 +285,8 @@ def _build_player_death_summary(messages: list[BaseMessage]) -> str:
 
 
 def combat_resolution_node(state: GraphState) -> dict:
-    """战斗后置收束节点：统一处理玩家团灭 interrupt，不再依赖旧 monster 节点。"""
-    from langgraph.types import interrupt
-
-    combat_dict = _state_value_to_dict(state.get("combat"))
-    if not combat_dict:
-        return {}
-
-    player_dict = _state_value_to_dict(state.get("player"))
-    if not _all_players_down(combat_dict, player_dict):
-        return {}
-
-    death_summary = _build_player_death_summary(state.get("messages", []))
-    user_choice = interrupt({
-        "type": "player_death",
-        "summary": death_summary,
-        "hp_changes": list(state.get("hp_changes", [])),
-    })
-
-    if player_dict:
-        if user_choice == "revive":
-            player_dict["hp"] = max(1, player_dict.get("max_hp", 1) // 2)
-        else:
-            player_dict["hp"] = 0
-
-    archive_summary = "战斗以玩家角色倒下告终。"
-    compact_death_summary = death_summary.replace("\n", " | ").strip()
-    if compact_death_summary and compact_death_summary != "[系统:怪物行动] | 所有玩家单位已倒下！":
-        archive_summary += f" 最后关键战报：{compact_death_summary}"
-
-    combat_archives = _combat_archives_from_state(state)
-    active_start = state.get("active_combat_message_start")
-    if isinstance(active_start, int):
-        combat_archives.append(_build_combat_archive(archive_summary, active_start, _message_count(state)))
-
-    result_state: dict = {
-        "combat": None,
-        "phase": "exploration",
-        "messages": [HumanMessage(content="[系统] 玩家角色倒下，战斗结束。")],
-        "hp_changes": [],
-        "pending_reaction": None,
-        "reaction_choice": None,
-        "active_combat_message_start": None,
-    }
-    if player_dict:
-        result_state["player"] = player_dict
-    if combat_archives:
-        result_state["combat_archives"] = combat_archives
-
-    return result_state
+    """战斗后置收束节点保留为空壳；玩家倒地由死亡豁免与状态工具处理。"""
+    return {}
 
 
 def resolve_reaction_node(state: GraphState) -> dict:

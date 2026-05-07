@@ -88,7 +88,7 @@ def route_from_tool(state: GraphState) -> str:
 
 
 def route_from_combat_resolution(state: GraphState) -> str:
-    """战斗后置收束：团灭/恢复在此完成，其余情况回到 phase 对应 assistant。"""
+    """战斗后置收束：不再中断玩家倒地流程，直接回到 phase 对应 assistant。"""
     if state.get("pending_reaction"):
         return END_NODE
     return _assistant_node_for_phase(state)

@@ -12,29 +12,16 @@ import re
 
 import d20
 
+from app.equipment.weapons import resolve_weapon_data
 from app.conditions import get_combat_effects, get_condition_module, tick_conditions
 from app.graph.state import AttackInfo
-
-
-RANGED_WEAPON_RANGES: dict[str, tuple[int, int]] = {
-    "shortbow": (80, 320),
-    "longbow": (150, 600),
-    "light crossbow": (80, 320),
-    "heavy crossbow": (100, 400),
-    "hand crossbow": (30, 120),
-    "sling": (30, 120),
-    "dart": (20, 60),
-    "javelin": (30, 120),
-    "handaxe": (20, 60),
-    "dagger": (20, 60),
-    "spear": (20, 60),
-}
 
 
 # ── 战斗覆盖字段 ────────────────────────────────────────────────
 # 战斗期间叠加到 player_dict 上的字段，战斗结束后清除
 COMBAT_OVERLAY_KEYS = frozenset({
     "id", "side", "initiative", "proficiency_bonus", "attacks",
+    "surprised",
     "action_available", "bonus_action_available", "reaction_available",
     "speed", "movement_left",
 })
@@ -121,6 +108,8 @@ def apply_hp_change(target: dict, delta: int) -> dict:
     max_hp = target.get("max_hp", old_hp)
     new_hp = max(0, min(old_hp + delta, max_hp))
     target["hp"] = new_hp
+    if old_hp == 0 and new_hp > 0:
+        reset_death_save_state(target)
     return {
         "id": target.get("id", ""),
         "name": target.get("name", "?"),
@@ -128,6 +117,98 @@ def apply_hp_change(target: dict, delta: int) -> dict:
         "new_hp": new_hp,
         "max_hp": max_hp,
     }
+
+
+def tracks_death_saves(unit: dict | None) -> bool:
+    """只有玩家或已带死亡豁免字段的重要单位进入死亡豁免流程。"""
+    if not unit:
+        return False
+    return unit.get("side") == "player" or any(
+        key in unit
+        for key in ("death_save_successes", "death_save_failures", "is_stable", "is_dead")
+    )
+
+
+def reset_death_save_state(unit: dict) -> None:
+    """恢复 HP 后清除濒死计数，避免旧死亡豁免继续污染 HUD。"""
+    if not tracks_death_saves(unit):
+        return
+    unit["death_save_successes"] = 0
+    unit["death_save_failures"] = 0
+    unit["is_stable"] = False
+    unit["is_dead"] = False
+
+
+def mark_unit_dying(unit: dict, lines: list[str]) -> None:
+    """首次降到 0 HP 时进入濒死状态，但不自动结束战斗。"""
+    if not tracks_death_saves(unit):
+        return
+    unit["death_save_successes"] = 0
+    unit["death_save_failures"] = 0
+    unit["is_stable"] = False
+    unit["is_dead"] = False
+    lines.append(f"{unit.get('name', '?')} 进入濒死，死亡豁免 0 成功 / 0 失败。")
+
+
+def record_death_save_roll(unit: dict, roll_total: int) -> list[str]:
+    """按 D&D 5e 死亡豁免规则记录一次 d20 结果。"""
+    name = unit.get("name", "?")
+    if unit.get("hp", 0) > 0:
+        reset_death_save_state(unit)
+        return [f"{name} 已有 HP，无需进行死亡豁免。"]
+    if unit.get("is_dead"):
+        return [f"{name} 已死亡，无法继续进行死亡豁免。"]
+
+    unit["is_stable"] = False
+    successes = int(unit.get("death_save_successes", 0))
+    failures = int(unit.get("death_save_failures", 0))
+
+    if roll_total == 20:
+        old_hp = unit.get("hp", 0)
+        unit["hp"] = 1
+        reset_death_save_state(unit)
+        return [f"{name} 死亡豁免 d20={roll_total}：天然 20，恢复 1 HP（{old_hp} → 1）。"]
+
+    if roll_total == 1:
+        failures += 2
+        lines = [f"{name} 死亡豁免 d20={roll_total}：天然 1，计 2 次失败。"]
+    elif roll_total >= 10:
+        successes += 1
+        lines = [f"{name} 死亡豁免 d20={roll_total}：成功。"]
+    else:
+        failures += 1
+        lines = [f"{name} 死亡豁免 d20={roll_total}：失败。"]
+
+    unit["death_save_successes"] = min(successes, 3)
+    unit["death_save_failures"] = min(failures, 3)
+
+    if failures >= 3:
+        unit["is_dead"] = True
+        unit["is_stable"] = False
+        lines.append(f"{name} 累计 3 次死亡豁免失败，已经死亡。")
+    elif successes >= 3:
+        unit["is_stable"] = True
+        lines.append(f"{name} 累计 3 次死亡豁免成功，伤势稳定但仍为 0 HP。")
+    else:
+        lines.append(f"当前死亡豁免：{unit['death_save_successes']} 成功 / {unit['death_save_failures']} 失败。")
+
+    return lines
+
+
+def apply_death_save_failures_from_damage(unit: dict, *, crit: bool, lines: list[str]) -> None:
+    """0 HP 时继续受伤会累计死亡豁免失败；暴击计 2 次失败。"""
+    if not tracks_death_saves(unit) or unit.get("hp", 0) > 0 or unit.get("is_dead"):
+        return
+    added = 2 if crit else 1
+    old_failures = int(unit.get("death_save_failures", 0))
+    new_failures = min(old_failures + added, 3)
+    unit["death_save_failures"] = new_failures
+    unit["is_stable"] = False
+    name = unit.get("name", "?")
+    lines.append(f"{name} 在 0 HP 时继续受伤，死亡豁免失败 +{added}（{old_failures} → {new_failures}）。")
+    if new_failures >= 3:
+        unit["is_dead"] = True
+        lines.append(f"{name} 累计 3 次死亡豁免失败，已经死亡。")
 
 
 def apply_damage_to_target(
@@ -150,6 +231,9 @@ def apply_damage_to_target(
     _apply_zero_hp_damage_hooks(target, damage, damage_type, crit, hp_change, lines)
     if hp_change["new_hp"] == 0 and hp_change["old_hp"] > 0:
         lines.append(f"{name} 倒下了！")
+        mark_unit_dying(target, lines)
+    elif hp_change["new_hp"] == 0 and hp_change["old_hp"] == 0 and damage > 0:
+        apply_death_save_failures_from_damage(target, crit=crit, lines=lines)
     if damage > 0:
         lines.extend(check_concentration(target, damage))
 
@@ -251,7 +335,8 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
     prof = 2  # 1 级角色标准熟练加值
 
     attacks: list[dict] = []
-    for w in player_dict.get("weapons", []):
+    for raw_weapon in player_dict.get("weapons", []):
+        w = resolve_weapon_data(raw_weapon)
         props = w.get("properties", [])
         if "finesse" in props:
             ability_mod = max(modifiers.get("str", 0), modifiers.get("dex", 0))
@@ -260,18 +345,23 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
         else:
             ability_mod = modifiers.get("str", 0)
 
-        weapon_name = str(w["name"]).lower()
-        range_tuple = RANGED_WEAPON_RANGES.get(weapon_name)
-        if range_tuple is None and "thrown" in props:
-            range_tuple = RANGED_WEAPON_RANGES.get(weapon_name)
+        base_damage_dice = w.get("damage_dice", "1d4")
+        if "versatile" in props and w.get("wielding") == "two_handed" and w.get("versatile_damage_dice"):
+            base_damage_dice = w["versatile_damage_dice"]
+
+        damage_bonus = ability_mod + int(w.get("damage_bonus", 0) or 0)
+        damage_dice = _append_dice_modifier(base_damage_dice, damage_bonus)
+        if w.get("extra_damage_dice"):
+            damage_dice = f"{damage_dice}+{w['extra_damage_dice']}"
 
         attacks.append(AttackInfo(
             name=w["name"],
-            attack_bonus=prof + ability_mod,
-            damage_dice=w.get("damage_dice", "1d4"),
+            attack_bonus=prof + ability_mod + int(w.get("attack_bonus", 0) or 0),
+            damage_dice=damage_dice,
             damage_type=w.get("damage_type", "bludgeoning"),
-            normal_range_feet=range_tuple[0] if range_tuple else None,
-            long_range_feet=range_tuple[1] if range_tuple else None,
+            reach_feet=int(w.get("reach_feet", 5) or 5),
+            normal_range_feet=w.get("normal_range_feet"),
+            long_range_feet=w.get("long_range_feet"),
         ).model_dump())
 
     player_id, player_name = get_player_identity(player_dict)
@@ -287,6 +377,15 @@ def prepare_player_for_combat(player_dict: dict) -> dict:
     player_dict["movement_left"] = 30
     sync_ac_state(player_dict)
     return player_dict
+
+
+def _append_dice_modifier(dice: str, modifier: int) -> str:
+    """按 5e 武器伤害规则把能力调整值写进伤害公式。"""
+    if modifier == 0:
+        return str(dice)
+    if modifier > 0:
+        return f"{dice}+{modifier}"
+    return f"{dice}{modifier}"
 
 
 def clear_player_combat_fields(player_dict: dict) -> dict:
@@ -1147,7 +1246,21 @@ def _process_turn_start_conditions(actor: dict, all_combatants: dict[str, dict])
     from app.services.tools.monster_action_resolvers import roll_action_recharges
     lines.extend(roll_action_recharges(actor))
     sync_movement_state(actor, reset_to_current_speed=True)
+    if actor.get("hp", 0) <= 0:
+        actor["action_available"] = False
+        actor["bonus_action_available"] = False
+        actor["reaction_available"] = False
+        actor["movement_left"] = 0
     return lines
+
+
+def is_turn_eligible(unit: dict | None) -> bool:
+    """0 HP 的玩家仍要获得回合来进行死亡豁免；稳定或死亡后跳过。"""
+    if not unit:
+        return False
+    if unit.get("hp", 0) > 0:
+        return True
+    return tracks_death_saves(unit) and not unit.get("is_stable") and not unit.get("is_dead")
 
 
 def _process_turn_start_condition_hooks(actor: dict, all_combatants: dict[str, dict]) -> list[str]:
@@ -1200,7 +1313,7 @@ def advance_turn(combat_dict: dict, player_dict: dict | None = None, state: dict
     while checked < total:
         candidate_id = order[next_idx]
         p = get_combatant(combat_dict, player_dict, candidate_id)
-        if p and p.get("hp", 0) > 0:
+        if is_turn_eligible(p):
             break
         next_idx = (next_idx + 1) % total
         checked += 1
