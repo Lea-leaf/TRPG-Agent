@@ -276,8 +276,8 @@ def spawn_monsters(
     count: int = 1,
     faction: str = "enemy",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId]
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None
 ) -> Command:
     """根据怪物图鉴生成战斗单位实例并加入当前场景。
     怪物数据来自 Open5e SRD（使用英文 slug，如 "goblin", "owlbear", "adult-red-dragon"）。
@@ -383,8 +383,8 @@ def start_combat(
     combatant_ids: list[str],
     surprised_ids: list[str] | None = None,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """开始战斗：从场景单位池中选取指定 ID 的单位作为参战者，投先攻骰并排定行动顺序。
     前置条件：必须先用 spawn_monsters 生成单位，并用 manage_space 把玩家和参战单位放到当前地图。
@@ -508,8 +508,8 @@ def attack_action(
     attack_name: str | None = None,
     advantage: Literal["normal", "advantage", "disadvantage"] = "normal",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """执行一次攻击动作：命中判定 → 暴击检测 → 伤害结算 → 扣血。
     状态效果（如目盲、隐形等）的优劣势会自动叠加计算。
@@ -635,8 +635,8 @@ def attack_action(
 @tool
 def next_turn(
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """结束当前行动者回合，并推进到下一个存活单位。如果所有人都行动过，则进入新的回合。
     参数示例：{}。
@@ -670,8 +670,8 @@ def next_turn(
 @tool
 def end_combat(
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """结束当前战斗。存活的非玩家单位回归场景，死亡单位归入死亡档案（可搜尸等）。
     参数示例：{}。
@@ -756,8 +756,8 @@ def end_combat(
 def clear_dead_units(
     unit_ids: list[str] | None = None,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """清除死亡单位档案。可指定 ID 列表部分清除，或不传参数清除全部。
     适用于剧情上玩家已完成搜刮尸体、处理遗骸等环节后的清理。

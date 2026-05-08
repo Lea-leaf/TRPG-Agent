@@ -302,8 +302,8 @@ def manage_adventure(
 def load_adventure_node(
     node_id: str | None = None,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """读取当前或指定剧情节点的主持材料。
     用于探索阶段了解当前模组场景、可见开场、DM 私密信息、遭遇、线索和可推进出口。
@@ -319,8 +319,8 @@ def load_adventure_node(
 def inspect_adventure_state(
     include_help: bool = False,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """查看当前冒险进度；如需完整主持流程说明，传 include_help=True。
     参数示例：{}；加载说明用 {"include_help": true}。
@@ -333,8 +333,8 @@ def search_adventure_nodes(
     query: str,
     limit: int = 5,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """搜索 PDF 冒险节点。
     用于玩家偏离当前节点，或提到地点、NPC、线索、遭遇等模组关键词时。
@@ -352,8 +352,8 @@ def switch_adventure_node(
     node_id: str,
     reason: str = "",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """把当前冒险书签切换到指定节点。
     这是轻量主持书签，不做硬出口校验；只在剧情上合理可达时使用。
@@ -370,8 +370,8 @@ def switch_adventure_node(
 def reveal_adventure_clue(
     clue_id: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """记录玩家已经通过调查、审问、搜索或剧情互动获得的线索。
     参数示例：{"clue_id": "goblin_trail"}。
@@ -386,8 +386,8 @@ def reveal_adventure_clue(
 def mark_adventure_event(
     event_id: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """记录已经真实发生的剧情事件，例如遭遇解决、NPC 获救或任务完成。
     参数示例：{"event_id": "goblin_ambush_resolved"}。
@@ -402,8 +402,8 @@ def mark_adventure_event(
 def advance_adventure(
     option_id: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """沿当前节点的出口推进到下一个剧情节点。
     只有当出口条件满足时才会改变 active_node_id。

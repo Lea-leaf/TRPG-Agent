@@ -423,13 +423,23 @@ def collapse_archived_combat_messages(messages: list[BaseMessage], combat_archiv
         collapsed.extend(messages[cursor:start_index])
         summary = archive["summary"]
         if summary:
-            collapsed.append(HumanMessage(content=f"{COMBAT_ARCHIVE_MESSAGE_PREFIX}\n{summary}"))
+            collapsed.append(HumanMessage(content=format_combat_archive_message(summary)))
         else:
             collapsed.extend(messages[start_index:end_index + 1])
         cursor = end_index + 1
 
     collapsed.extend(messages[cursor:])
     return collapsed
+
+
+def format_combat_archive_message(summary: str) -> str:
+    """把战斗摘要标成已完成事实，避免模型把前序开战准备当作当前待办。"""
+    return (
+        f"{COMBAT_ARCHIVE_MESSAGE_PREFIX}\n"
+        "状态: 已完成并归档。该战斗已经真实发生并结束；不要再次开始同一场战斗，不要重投先攻或补做突袭判定。\n"
+        "前文若仍保留开战准备、突袭判定或 start_combat 规划，只能作为历史原因参考，不是当前待执行任务。\n"
+        f"结果摘要: {summary}"
+    )
 
 
 def expand_archive_start_to_tool_call(messages: list[BaseMessage], start_index: int) -> int:

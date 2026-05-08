@@ -85,8 +85,8 @@ def apply_condition(
     duration: int | None = None,
     reason: str = "",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """对目标单位施加一个状态效果（如目盲、魅惑、隐形等）。
     受到该状态影响的单位在战斗中会自动应用相应的优劣势与限制规则。
@@ -144,8 +144,8 @@ def remove_condition(
     condition_id: str,
     reason: str = "",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """移除目标单位身上的一个状态效果。
 

@@ -69,7 +69,7 @@ def load_character_profile(
     role_class: str,
     character_name: str = "",
     *,
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command | str:
     """根据玩家姓名与职业读取并加载角色预设属性卡。
     此工具会自动把角色的血量(HP)、护甲(AC)和各项能力值/修正值写入游戏的主状态中。
@@ -123,8 +123,8 @@ def modify_character_state(
     payload: dict | None = None,
     reason: str = "",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """角色状态调整与成长入口。用于 HP/AC/能力值/资源/状态效果、死亡豁免与复活，以及经验、升级、子职选择。
     不要用它重放攻击、施法、怪物动作工具刚刚结算过的结果。
@@ -391,8 +391,8 @@ def modify_character_state(
 def inspect_unit(
     target_id: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """查询任意场景内单位（包括玩家、怪物、NPC）的完整属性信息。
     返回 HP、AC、能力值、攻击列表、法术位、状态效果等全部信息。
@@ -815,8 +815,8 @@ def grant_xp(
     amount: int,
     reason: str = "",
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为玩家角色增加经验值。新模型可见入口是 modify_character_state。"""
     return _grant_xp_command(amount, reason, state, tool_call_id)
@@ -825,8 +825,8 @@ def grant_xp(
 @tool
 def level_up(
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：将玩家角色升级到下一等级。新模型可见入口是 modify_character_state。"""
     return _level_up_command(state, tool_call_id)
@@ -836,8 +836,8 @@ def level_up(
 def choose_arcane_tradition(
     tradition: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为法师选择奥术传承。新模型可见入口是 modify_character_state。"""
     return _choose_arcane_tradition_command(tradition, state, tool_call_id)
@@ -847,8 +847,8 @@ def choose_arcane_tradition(
 def choose_fighter_archetype(
     archetype: str,
     *,
-    state: Annotated[dict, InjectedState],
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为战士选择武术范型。新模型可见入口是 modify_character_state。"""
     return _choose_fighter_archetype_command(archetype, state, tool_call_id)

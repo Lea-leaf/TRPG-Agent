@@ -367,6 +367,8 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
 
     assert len(projected_messages) == 4
     assert projected_messages[1].content.startswith("[系统:战斗归档]")
+    assert "状态: 已完成并归档" in projected_messages[1].content
+    assert "不要再次开始同一场战斗" in projected_messages[1].content
     assert "英雄在 2 回合内击败哥布林" in projected_messages[1].content
     assert "Goblin 使用 [Scimitar]" not in projected_messages[1].content
     assert projected_messages[-2].content.startswith("我检查哥布林尸体。")
@@ -374,6 +376,44 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
     assert "<runtime_state" in projected_messages[-1].content
     assert 'source="hud"' in projected_messages[-1].content
     assert "状态快照" in projected_messages[-1].content
+
+
+def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_messages_remain():
+    state = {
+        "phase": "exploration",
+        "combat": None,
+        "player": _player_state(),
+        "messages": [
+            HumanMessage(content="继续前进。"),
+            AIMessage(content="我应该正式启动战斗流程。", tool_calls=[{"name": "request_dice_roll", "args": {}, "id": "call_roll"}]),
+            ToolMessage(content="突袭检定 raw=12", tool_call_id="call_roll", name="request_dice_roll"),
+            AIMessage(content="现在进入正式战斗！", tool_calls=[{"name": "start_combat", "args": {"combatant_ids": ["goblin_1"]}, "id": "call_start"}]),
+            ToolMessage(content="战斗开始！第 1 回合。", tool_call_id="call_start", name="start_combat"),
+            AIMessage(content="", tool_calls=[{"name": "end_combat", "args": {}, "id": "call_end"}]),
+            ToolMessage(content="共进行了 1 回合。 存活: 英雄 倒下: Goblin", tool_call_id="call_end", name="end_combat"),
+            HumanMessage(content="我检查路障。"),
+        ],
+        "combat_archives": [
+            {
+                "summary": "地精伏击已经结束，英雄击败了拦路地精。",
+                "start_index": 3,
+                "end_index": 6,
+            }
+        ],
+    }
+
+    projected_messages = _build_model_input_messages(state, NARRATIVE_AGENT_MODE)
+    projected_text = "\n".join(str(message.content) for message in projected_messages)
+
+    assert "[系统:战斗归档]" in projected_text
+    assert "状态: 已完成并归档" in projected_text
+    assert "不要再次开始同一场战斗" in projected_text
+    assert "前文若仍保留开战准备" in projected_text
+    assert "地精伏击已经结束" in projected_text
+    assert "正式启动战斗流程" in projected_text
+    assert "突袭检定 raw=12" in projected_text
+    assert "现在进入正式战斗" not in projected_text
+    assert projected_messages[-2].content == "我检查路障。"
 
 
 def test_tool_profiles_split_exploration_and_combat_visibility():

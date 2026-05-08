@@ -46,7 +46,16 @@ from app.services.tools.space_tools import (  # noqa: F401
     query_units_in_radius,
     switch_plane_map,
 )
-from app.services.tools.adventure_tools import manage_adventure  # noqa: F401
+from app.services.tools.adventure_tools import (  # noqa: F401
+    advance_adventure,
+    inspect_adventure_state,
+    load_adventure_node,
+    manage_adventure,
+    mark_adventure_event,
+    reveal_adventure_clue,
+    search_adventure_nodes,
+    switch_adventure_node,
+)
 
 # 旧名称兼容
 _build_player_combatant = prepare_player_for_combat

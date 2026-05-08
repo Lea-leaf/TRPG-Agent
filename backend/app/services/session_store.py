@@ -44,6 +44,55 @@ def _build_preview(message: str | None, reply: str | None) -> str:
     return text[:120]
 
 
+async def _table_exists(conn: aiosqlite.Connection, table: str) -> bool:
+    cursor = await conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    return row is not None
+
+
+async def _has_thread_checkpoint(conn: aiosqlite.Connection, session_id: str) -> bool:
+    """历史页只恢复 checkpoint 中存在的会话；元数据孤儿不能继续展示。"""
+    if not await _table_exists(conn, "checkpoints"):
+        return False
+
+    cursor = await conn.execute(
+        "SELECT 1 FROM checkpoints WHERE thread_id = ? LIMIT 1",
+        (session_id,),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    return row is not None
+
+
+def _delete_trace_file(session_id: str) -> int:
+    trace_file = resolve_trace_file(session_id)
+    if not trace_file.exists():
+        return 0
+
+    trace_file.unlink()
+    return 1
+
+
+def _delete_orphan_trace_files(live_session_ids: list[str]) -> int:
+    """trace 是会话派生产物；没有可恢复会话支撑的旧 trace 不应继续参与导出。"""
+    trace_dir = resolve_trace_file("__trace_dir_probe__").parent
+    live_trace_names = {resolve_trace_file(session_id).name for session_id in live_session_ids}
+    deleted_count = 0
+
+    for trace_file in trace_dir.glob("*.jsonl"):
+        if trace_file.name in live_trace_names:
+            continue
+
+        trace_file.unlink()
+        deleted_count += 1
+
+    return deleted_count
+
+
 async def ensure_session_table(db_path: str | Path | None = None) -> None:
     """用一张轻量元数据表记录会话入口，不介入 LangGraph 的官方 checkpoint 表。"""
     db_file = resolve_memory_db_path(db_path)
@@ -136,7 +185,7 @@ async def touch_chat_session(
 
 
 async def list_chat_sessions(db_path: str | Path | None = None) -> list[dict]:
-    """按最近活动时间列出会话；空会话也会显示，方便刚创建后继续进入。"""
+    """按最近活动时间列出可恢复会话，并顺手清理旧测试或删除残留的元数据孤儿。"""
     await ensure_session_table(db_path)
     db_file = resolve_memory_db_path(db_path)
 
@@ -151,6 +200,25 @@ async def list_chat_sessions(db_path: str | Path | None = None) -> list[dict]:
         rows = await cursor.fetchall()
         await cursor.close()
 
+        live_rows = []
+        orphan_session_ids = []
+        for row in rows:
+            session_id = row[0]
+            if await _has_thread_checkpoint(conn, session_id):
+                live_rows.append(row)
+            else:
+                orphan_session_ids.append(session_id)
+
+        live_session_ids = [row[0] for row in live_rows]
+        for session_id in orphan_session_ids:
+            await conn.execute(f"DELETE FROM {SESSION_TABLE} WHERE id = ?", (session_id,))
+
+        deleted_storage_rows = await prune_orphan_session_storage(conn, live_session_ids)
+        if orphan_session_ids or deleted_storage_rows:
+            await conn.commit()
+
+    _delete_orphan_trace_files(live_session_ids)
+
     return [
         {
             "id": row[0],
@@ -160,8 +228,31 @@ async def list_chat_sessions(db_path: str | Path | None = None) -> list[dict]:
             "createdAt": row[4],
             "lastMessageAt": row[5],
         }
-        for row in rows
+        for row in live_rows
     ]
+
+
+async def prune_orphan_session_storage(conn: aiosqlite.Connection, live_session_ids: list[str]) -> int:
+    """以历史元数据为会话白名单，清理无法从前端恢复的 SQLite 残留。"""
+    deleted_rows = 0
+    placeholders = ", ".join("?" for _ in live_session_ids)
+
+    if await _table_exists(conn, "checkpoints"):
+        sql = "DELETE FROM checkpoints" if not live_session_ids else f"DELETE FROM checkpoints WHERE thread_id NOT IN ({placeholders})"
+        result = await conn.execute(sql, tuple(live_session_ids))
+        deleted_rows += result.rowcount if result.rowcount > 0 else 0
+
+    if await _table_exists(conn, "writes"):
+        sql = "DELETE FROM writes" if not live_session_ids else f"DELETE FROM writes WHERE thread_id NOT IN ({placeholders})"
+        result = await conn.execute(sql, tuple(live_session_ids))
+        deleted_rows += result.rowcount if result.rowcount > 0 else 0
+
+    if await _table_exists(conn, "episodic_memory"):
+        sql = "DELETE FROM episodic_memory" if not live_session_ids else f"DELETE FROM episodic_memory WHERE session_id NOT IN ({placeholders})"
+        result = await conn.execute(sql, tuple(live_session_ids))
+        deleted_rows += result.rowcount if result.rowcount > 0 else 0
+
+    return deleted_rows
 
 
 async def purge_chat_session_data(session_id: str, db_path: str | Path | None = None) -> dict[str, int]:
@@ -203,10 +294,6 @@ async def purge_chat_session_data(session_id: str, db_path: str | Path | None = 
 
         await conn.commit()
 
-    trace_file = resolve_trace_file(session_id)
-    deleted_trace_files = 0
-    if trace_file.exists():
-        trace_file.unlink()
-        deleted_trace_files = 1
+    deleted_trace_files = _delete_trace_file(session_id)
 
     return {"deletedRows": deleted_rows, "deletedTraceFiles": deleted_trace_files}
