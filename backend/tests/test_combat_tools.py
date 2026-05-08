@@ -329,11 +329,12 @@ class TestAllySystem:
 
     def test_spawn_ally_adds_character_like_scene_unit(self):
         """友方法师生成后应带武器、法术资源和反应资源。"""
-        from app.services.tool_service import spawn_ally
+        from app.services.tool_service import manage_scene_units
 
         result = _invoke_tool(
-            spawn_ally,
+            manage_scene_units,
             tool_input={
+                "action": "spawn_ally",
                 "profile_id": "apprentice_wizard",
                 "name": "伊莲",
                 "unit_id": "ally_wizard",
@@ -351,6 +352,20 @@ class TestAllySystem:
         assert dagger["attack_bonus"] == 4
         assert dagger["damage_dice"] == "1d4+2"
         assert dagger["normal_range_feet"] == 20
+
+    def test_manage_scene_units_help_returns_skill_instructions(self):
+        """场景单位聚合入口应能按需披露完整说明。"""
+        from app.services.tool_service import manage_scene_units
+
+        result = _invoke_tool(
+            manage_scene_units,
+            tool_input={"action": "help", "state": {}},
+        )
+
+        content = result.update["messages"][0].content
+        assert "场景单位管理技能" in content
+        assert "manage_scene_units" in content
+        assert 'action="spawn_monsters"' in content
 
     def test_start_combat_prepares_ally_and_keeps_resources(self):
         """友方从场景入战后留在 participants，并保留角色资源。"""

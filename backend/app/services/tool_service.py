@@ -15,6 +15,7 @@ from app.services.tools.combat_tools import (  # noqa: F401
     clear_dead_units,
     end_combat,
     help_action,
+    manage_scene_units,
     next_turn,
     spawn_ally,
     spawn_monsters,
@@ -44,6 +45,16 @@ from app.services.tools.space_tools import (  # noqa: F401
     place_unit,
     query_units_in_radius,
     switch_plane_map,
+)
+from app.services.tools.adventure_tools import (  # noqa: F401
+    advance_adventure,
+    inspect_adventure_state,
+    load_adventure_node,
+    manage_adventure,
+    mark_adventure_event,
+    reveal_adventure_clue,
+    search_adventure_nodes,
+    switch_adventure_node,
 )
 
 # 旧名称兼容

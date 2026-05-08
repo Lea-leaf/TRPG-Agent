@@ -19,6 +19,7 @@ from app.services.tools._helpers import compute_ac
 COMBAT_ARCHIVE_MESSAGE_PREFIX = "[系统:战斗归档]"
 NARRATIVE_VISIBLE_MESSAGE_LIMIT = 40
 COMBAT_VISIBLE_MESSAGE_LIMIT = 25
+COMBAT_PRELUDE_MESSAGE_LIMIT = 5
 
 
 class ExternalContextProvider(Protocol):
@@ -168,7 +169,7 @@ class ContextAssembler:
             list(state.get("messages", [])),
             state.get("combat_archives", []),
         )
-        trimmed_messages = trim_model_messages(source_messages, mode)
+        trimmed_messages = trim_model_messages(source_messages, mode, state=state)
         projected_messages: list[BaseMessage] = []
 
         for message in trimmed_messages:
@@ -347,7 +348,10 @@ def needs_opening_fighter_companion(state: GraphState) -> bool:
     return True
 
 
-def trim_model_messages(messages: list[BaseMessage], mode: str) -> list[BaseMessage]:
+def trim_model_messages(messages: list[BaseMessage], mode: str, state: GraphState | None = None) -> list[BaseMessage]:
+    if mode == COMBAT_AGENT_MODE:
+        return trim_combat_model_messages(messages, state)
+
     keep_count = NARRATIVE_VISIBLE_MESSAGE_LIMIT if mode == NARRATIVE_AGENT_MODE else COMBAT_VISIBLE_MESSAGE_LIMIT
     if len(messages) <= keep_count:
         return list(messages)
@@ -356,6 +360,48 @@ def trim_model_messages(messages: list[BaseMessage], mode: str) -> list[BaseMess
     while start_index > 0 and isinstance(messages[start_index], ToolMessage):
         start_index -= 1
 
+    return list(messages[start_index:])
+
+
+def trim_combat_model_messages(messages: list[BaseMessage], state: GraphState | None = None) -> list[BaseMessage]:
+    """战斗态从开战点重建短上下文，让模式切换的 cache miss 尽量小。"""
+    if not messages:
+        return []
+
+    combat_start = combat_window_start_index(messages, state)
+    if combat_start is None:
+        return trim_recent_messages(messages, COMBAT_VISIBLE_MESSAGE_LIMIT)
+
+    prelude_start = max(0, combat_start - COMBAT_PRELUDE_MESSAGE_LIMIT)
+    while prelude_start > 0 and isinstance(messages[prelude_start], ToolMessage):
+        prelude_start -= 1
+
+    return list(messages[prelude_start:])
+
+
+def combat_window_start_index(messages: list[BaseMessage], state: GraphState | None) -> int | None:
+    """优先使用 start_combat 记录的归档起点；缺失时回扫最近的开战工具调用。"""
+    active_start = state.get("active_combat_message_start") if state else None
+    if isinstance(active_start, int) and 0 <= active_start < len(messages):
+        return expand_archive_start_to_tool_call(messages, active_start)
+
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if isinstance(message, ToolMessage) and message.name == "start_combat":
+            return expand_archive_start_to_tool_call(messages, index)
+        if isinstance(message, AIMessage) and any(tool_call.get("name") == "start_combat" for tool_call in message.tool_calls):
+            return index
+    return None
+
+
+def trim_recent_messages(messages: list[BaseMessage], keep_count: int) -> list[BaseMessage]:
+    """保留最近窗口，并向前补齐起始 ToolMessage 对应的 AI tool_call。"""
+    if len(messages) <= keep_count:
+        return list(messages)
+
+    start_index = len(messages) - keep_count
+    while start_index > 0 and isinstance(messages[start_index], ToolMessage):
+        start_index -= 1
     return list(messages[start_index:])
 
 
@@ -377,13 +423,23 @@ def collapse_archived_combat_messages(messages: list[BaseMessage], combat_archiv
         collapsed.extend(messages[cursor:start_index])
         summary = archive["summary"]
         if summary:
-            collapsed.append(HumanMessage(content=f"{COMBAT_ARCHIVE_MESSAGE_PREFIX}\n{summary}"))
+            collapsed.append(HumanMessage(content=format_combat_archive_message(summary)))
         else:
             collapsed.extend(messages[start_index:end_index + 1])
         cursor = end_index + 1
 
     collapsed.extend(messages[cursor:])
     return collapsed
+
+
+def format_combat_archive_message(summary: str) -> str:
+    """把战斗摘要标成已完成事实，避免模型把前序开战准备当作当前待办。"""
+    return (
+        f"{COMBAT_ARCHIVE_MESSAGE_PREFIX}\n"
+        "状态: 已完成并归档。该战斗已经真实发生并结束；不要再次开始同一场战斗，不要重投先攻或补做突袭判定。\n"
+        "前文若仍保留开战准备、突袭判定或 start_combat 规划，只能作为历史原因参考，不是当前待执行任务。\n"
+        f"结果摘要: {summary}"
+    )
 
 
 def expand_archive_start_to_tool_call(messages: list[BaseMessage], start_index: int) -> int:
@@ -834,6 +890,7 @@ def summarize_adventure_node_tool(raw_text: str) -> str:
             "clues": node.get("clues", []),
             "events": node.get("events", []),
             "dm_guidance": node.get("dm_guidance", {}),
+            "rules_overrides": node.get("rules_overrides", []),
             "candidate_exits": node.get("candidate_exits", []),
         },
         "available_exits": payload.get("available_exits", []),

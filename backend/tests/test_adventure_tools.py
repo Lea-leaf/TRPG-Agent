@@ -14,6 +14,7 @@ from app.services.tools.adventure_tools import (  # noqa: E402
     advance_adventure,
     inspect_adventure_state,
     load_adventure_node,
+    manage_adventure,
     reveal_adventure_clue,
     search_adventure_nodes,
     switch_adventure_node,
@@ -44,6 +45,15 @@ def test_load_default_lost_mine_start_node():
     assert payload["available_exits"][0]["id"] == "continue_to_ambush"
 
 
+def test_manage_adventure_loads_default_node():
+    result = _invoke_tool(manage_adventure, tool_input={"action": "load_node", "state": {}})
+
+    assert isinstance(result, Command)
+    payload = _payload(result)
+    assert payload["node"]["id"] == "lost_mine_start"
+    assert payload["available_exits"][0]["id"] == "continue_to_ambush"
+
+
 def test_inspect_adventure_state_can_load_skill_instructions():
     result = _invoke_tool(
         inspect_adventure_state,
@@ -52,8 +62,17 @@ def test_inspect_adventure_state_can_load_skill_instructions():
 
     content = result.update["messages"][0].content
     assert "冒险模组主持技能" in content
-    assert "load_adventure_node" in content
-    assert "switch_adventure_node" in content
+    assert "manage_adventure" in content
+    assert 'action="load_node"' in content
+
+
+def test_manage_adventure_help_loads_skill_instructions():
+    result = _invoke_tool(manage_adventure, tool_input={"action": "help", "state": {}})
+
+    content = result.update["messages"][0].content
+    assert "冒险模组主持技能" in content
+    assert "manage_adventure" in content
+    assert 'action="search_nodes"' in content
 
 
 def test_advance_requires_revealed_clue_when_exit_has_condition():
@@ -89,6 +108,33 @@ def test_advance_requires_revealed_clue_when_exit_has_condition():
     assert "goblin_ambush" in advanced.update["adventure"]["completed_node_ids"]
 
 
+def test_manage_adventure_can_reveal_clue_and_advance():
+    state = {
+        "adventure": {
+            "module_id": "lost_mine",
+            "active_node_id": "goblin_ambush",
+            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "completed_node_ids": [],
+            "known_clue_ids": [],
+            "completed_event_ids": [],
+            "pending_exit_option_ids": [],
+        }
+    }
+
+    revealed = _invoke_tool(
+        manage_adventure,
+        tool_input={"action": "reveal_clue", "clue_id": "goblin_trail", "state": state},
+    )
+    state["adventure"] = revealed.update["adventure"]
+
+    advanced = _invoke_tool(
+        manage_adventure,
+        tool_input={"action": "advance", "option_id": "follow_goblin_trail", "state": state},
+    )
+
+    assert advanced.update["adventure"]["active_node_id"] == "cragmaw_hideout_entrance"
+
+
 def test_search_adventure_nodes_finds_module_material():
     result = _invoke_tool(
         search_adventure_nodes,
@@ -112,6 +158,21 @@ def test_load_ambush_node_includes_pdf_guidance():
     assert "75 XP" in node["source_text"]
     assert node["dm_guidance"]["tactics"]
     assert node["dm_guidance"]["xp"]
+
+
+def test_load_ambush_node_overrides_legacy_surprise_rule():
+    result = _invoke_tool(
+        load_adventure_node,
+        tool_input={"node_id": "goblin_ambush", "state": {}},
+    )
+
+    payload = _payload(result)
+    node = payload["node"]
+    visible_text = json.dumps(node, ensure_ascii=False)
+    assert "第一轮无法执行任何动作" not in visible_text
+    assert "新版突袭规则" in visible_text
+    assert "先攻检定上获得劣势" in visible_text
+    assert "不跳过首回合" in visible_text
 
 
 def test_search_adventure_nodes_uses_dm_guidance_and_subsections():

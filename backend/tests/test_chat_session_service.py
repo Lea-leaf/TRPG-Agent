@@ -9,6 +9,14 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.services.chat_session_service import ChatSessionService
 
 
+async def _noop_touch_chat_session(**kwargs):
+    return None
+
+
+def _noop_trace(*args, **kwargs):
+    return None
+
+
 class FakeGraph:
     def __init__(self, result: dict):
         self.result = result
@@ -58,6 +66,34 @@ class FakeEpisodicStore:
 
 
 class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._touch_session_patcher = patch(
+            "app.services.chat_session_service.touch_chat_session",
+            side_effect=_noop_touch_chat_session,
+        )
+        self._trace_request_patcher = patch(
+            "app.services.chat_session_service.trace_chat_request",
+            side_effect=_noop_trace,
+        )
+        self._trace_result_patcher = patch(
+            "app.services.chat_session_service.trace_chat_result",
+            side_effect=_noop_trace,
+        )
+        self._trace_error_patcher = patch(
+            "app.services.chat_session_service.trace_chat_error",
+            side_effect=_noop_trace,
+        )
+        self._touch_session_patcher.start()
+        self._trace_request_patcher.start()
+        self._trace_result_patcher.start()
+        self._trace_error_patcher.start()
+
+    async def asyncTearDown(self):
+        self._trace_error_patcher.stop()
+        self._trace_result_patcher.stop()
+        self._trace_request_patcher.stop()
+        self._touch_session_patcher.stop()
+
     async def test_process_turn_returns_last_non_tool_ai_message(self):
         graph = FakeGraph(
             {
