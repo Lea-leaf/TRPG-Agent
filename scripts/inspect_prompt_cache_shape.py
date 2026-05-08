@@ -17,7 +17,13 @@ if str(BACKEND_ROOT) not in sys.path:
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
-from app.memory.context_assembler import ContextAssembler
+from app.memory.context_assembler import (
+    CONTEXT_HARD_TRIM_TOKEN_BUDGET,
+    CONTEXT_SOFT_COMPACT_TOKEN_BUDGET,
+    MODEL_CONTEXT_TOKEN_LIMIT,
+    ContextAssembler,
+    estimate_messages_tokens,
+)
 from app.prompts import get_assistant_system_prompt
 from app.services.tools import get_tool_profile
 
@@ -192,6 +198,11 @@ def inspect(mode: str, min_prefix_chars: int, history_pairs: int) -> int:
 
     print(f"mode: {mode}")
     print(f"stable_history_pairs: {history_pairs}")
+    print(f"context_token_limit: {MODEL_CONTEXT_TOKEN_LIMIT}")
+    print(f"soft_compact_token_budget: {CONTEXT_SOFT_COMPACT_TOKEN_BUDGET}")
+    print(f"hard_trim_token_budget: {CONTEXT_HARD_TRIM_TOKEN_BUDGET}")
+    print(f"estimated_history_tokens_a: {estimate_messages_tokens(state_a['messages'])}")
+    print(f"estimated_history_tokens_b: {estimate_messages_tokens(state_b['messages'])}")
     print(f"payload_a_chars: {len(text_a)}")
     print(f"payload_b_chars: {len(text_b)}")
     print(f"common_prefix_chars: {prefix_len}")

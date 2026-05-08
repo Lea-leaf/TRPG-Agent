@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 import d20
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
@@ -74,6 +74,65 @@ def _build_combat_archive(summary: str, start_index: int, end_index: int) -> dic
         "start_index": safe_start,
         "end_index": safe_end,
     }
+
+
+def _build_detailed_combat_archive_summary(base_summary: str, state: dict | None, start_index: int) -> str:
+    """战斗归档要保留足够经过，否则战后模型容易把已完成战斗误判成待执行任务。"""
+    messages = state.get("messages") or [] if state else []
+    if not messages or start_index >= len(messages):
+        return base_summary
+
+    raw_lines: list[str] = []
+    for message in messages[max(start_index, 0):]:
+        line = _archive_message_line(message)
+        if line:
+            raw_lines.append(line)
+    if not raw_lines:
+        return base_summary
+
+    raw_text = "\n".join(raw_lines)
+    detail_budget = max(1200, int(len(raw_text) * 0.3))
+    detail_text = _compact_archive_text(raw_text, detail_budget)
+    return (
+        f"{base_summary}\n"
+        "关键经过（已发生事实，约按原战斗记录三成以上预算保留）："
+        f"{detail_text}"
+    )
+
+
+def _archive_message_line(message: BaseMessage) -> str:
+    """把战斗区间内的消息转成归档文本，保留工具结果而不是只留最终一句。"""
+    tool_calls = getattr(message, "tool_calls", None) or []
+    content = _message_content_to_text(getattr(message, "content", "")).strip()
+    if tool_calls:
+        tool_names = ", ".join(str(tool_call.get("name", "")) for tool_call in tool_calls)
+        return f"工具调用: {tool_names}" + (f" | {content}" if content else "")
+    if isinstance(message, ToolMessage):
+        tool_name = getattr(message, "name", "") or "tool"
+        return f"工具结果[{tool_name}]: {content}"
+    return content
+
+
+def _message_content_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                parts.append(str(item["text"]))
+        return "\n".join(parts)
+    return str(content)
+
+
+def _compact_archive_text(text: str, limit: int) -> str:
+    """归档压缩只清理空白与硬截断，不改写事实以免制造新剧情。"""
+    compact = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    if len(compact) > limit:
+        return compact[: limit - 3].rstrip() + "..."
+    return compact
 
 
 def _remove_space_units(space_raw: dict | None, unit_ids: list[str]) -> dict | None:
@@ -745,7 +804,8 @@ def end_combat(
     active_start = state.get("active_combat_message_start") if state else None
     combat_archives = _combat_archives_from_state(state)
     if isinstance(active_start, int):
-        combat_archives.append(_build_combat_archive(summary, active_start, _message_count(state)))
+        archive_summary = _build_detailed_combat_archive_summary(summary, state, active_start)
+        combat_archives.append(_build_combat_archive(archive_summary, active_start, _message_count(state)))
         update["combat_archives"] = combat_archives
 
     update["messages"] = [ToolMessage(content=summary, tool_call_id=tool_call_id)]

@@ -4,7 +4,7 @@ import unittest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
-from app.memory.context_assembler import ContextAssembler, summarize_tool_message
+from app.memory.context_assembler import ContextAssembler, summarize_tool_message, trim_model_messages
 
 
 class _StaticContextProvider:
@@ -33,12 +33,13 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("状态快照", assembled.hud_text)
         self.assertEqual("我看看四周。", assembled.model_input_messages[-2].content)
         self.assertIsInstance(assembled.model_input_messages[-1], SystemMessage)
-        self.assertIn("<runtime_state", assembled.model_input_messages[-1].content)
-        self.assertIn('source="hud"', assembled.model_input_messages[-1].content)
+        self.assertIn("<runtime_state_frame", assembled.model_input_messages[-1].content)
+        self.assertIn('source="state"', assembled.model_input_messages[-1].content)
         self.assertIn('visibility="model_only"', assembled.model_input_messages[-1].content)
         self.assertNotIn("复述", assembled.model_input_messages[-1].content)
         self.assertNotIn("解释", assembled.model_input_messages[-1].content)
-        self.assertIn("状态快照", assembled.model_input_messages[-1].content)
+        self.assertIn("[运行状态帧]", assembled.model_input_messages[-1].content)
+        self.assertNotIn("状态快照", assembled.model_input_messages[-1].content)
         self.assertIn("[当前平面空间]", assembled.hud_text)
         self.assertIn("当前没有平面地图", assembled.hud_text)
 
@@ -135,7 +136,7 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertNotIn("[冒险节点校准]", assembled.runtime_state_text)
 
-    def test_assemble_trims_without_starting_from_tool_message(self):
+    def test_assemble_keeps_full_history_under_large_context_budget(self):
         assembler = ContextAssembler()
         messages = [HumanMessage(content="旧消息")]
         messages.append(AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {}, "id": "call_1"}]))
@@ -144,12 +145,32 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble({"messages": messages}, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIsInstance(assembled.model_input_messages[0], AIMessage)
+        self.assertEqual("旧消息", assembled.model_input_messages[0].content)
         tool_messages = [message for message in assembled.model_input_messages if isinstance(message, ToolMessage)]
         self.assertEqual(1, len(tool_messages))
         self.assertIn("[工具:attack_action]", tool_messages[0].content)
 
-    def test_hud_preserves_trailing_tool_exchange_for_followup_call(self):
+    def test_budget_trim_never_starts_from_tool_message(self):
+        messages = [HumanMessage(content="旧消息")]
+        messages.append(AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {}, "id": "call_1"}]))
+        messages.append(ToolMessage(content="Goblin 使用弯刀攻击。\n英雄 HP: 18 -> 13", tool_call_id="call_1", name="attack_action"))
+        messages.extend(HumanMessage(content="x" * 50_000) for _ in range(40))
+
+        trimmed = trim_model_messages(messages, NARRATIVE_AGENT_MODE)
+
+        self.assertFalse(isinstance(trimmed[0], ToolMessage))
+
+    def test_budget_trim_inserts_thick_context_archive(self):
+        messages = [HumanMessage(content=f"重要人设线索 {index}: 巴伦害怕深水但信守承诺。" + ("x" * 50_000)) for index in range(40)]
+
+        trimmed = trim_model_messages(messages, NARRATIVE_AGENT_MODE)
+
+        self.assertIsInstance(trimmed[0], HumanMessage)
+        self.assertIn("[系统:上下文预算归档]", trimmed[0].content)
+        self.assertIn("重要人设线索", trimmed[0].content)
+        self.assertIn("巴伦害怕深水但信守承诺", trimmed[0].content)
+
+    def test_runtime_state_frame_follows_trailing_tool_exchange(self):
         assembler = ContextAssembler()
         state = {
             "messages": [
@@ -164,11 +185,11 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="combat rules")
 
-        self.assertIsInstance(assembled.model_input_messages[-3], SystemMessage)
-        self.assertIsInstance(assembled.model_input_messages[-2], AIMessage)
-        self.assertIsInstance(assembled.model_input_messages[-1], ToolMessage)
-        self.assertIn("<runtime_state", assembled.model_input_messages[-3].content)
-        self.assertIn("[工具:attack_action]", assembled.model_input_messages[-1].content)
+        self.assertIsInstance(assembled.model_input_messages[-3], AIMessage)
+        self.assertIsInstance(assembled.model_input_messages[-2], ToolMessage)
+        self.assertIsInstance(assembled.model_input_messages[-1], SystemMessage)
+        self.assertIn("[工具:attack_action]", assembled.model_input_messages[-2].content)
+        self.assertIn("<runtime_state_frame", assembled.model_input_messages[-1].content)
 
     def test_adventure_node_tool_projection_keeps_structured_material(self):
         tool_message = ToolMessage(
@@ -278,7 +299,7 @@ class ContextAssemblerTests(unittest.TestCase):
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
         self.assertEqual("战斗规则", assembled.system_prompt)
-        self.assertIn("[战斗简报]", assembled.runtime_state_text)
+        self.assertIn("[战斗状态]", assembled.runtime_state_text)
         self.assertIn("[当前回合指令]", assembled.runtime_state_text)
         self.assertIn("Goblin", assembled.runtime_state_text)
 

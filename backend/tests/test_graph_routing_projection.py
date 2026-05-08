@@ -144,12 +144,14 @@ def test_graph_continues_after_tool_message_until_llm_stops_calling_tools():
                     tool_calls=[{"name": "request_dice_roll", "args": {"reason": "first", "formula": "1d1"}, "id": "call_1"}],
                 )
             if len(self.calls) == 2:
-                assert isinstance(messages[-1], ToolMessage)
+                assert isinstance(messages[-2], ToolMessage)
+                assert isinstance(messages[-1], SystemMessage)
                 return AIMessage(
                     content="",
                     tool_calls=[{"name": "request_dice_roll", "args": {"reason": "second", "formula": "1d1"}, "id": "call_2"}],
                 )
-            assert isinstance(messages[-1], ToolMessage)
+            assert isinstance(messages[-2], ToolMessage)
+            assert isinstance(messages[-1], SystemMessage)
             return AIMessage(content="done", tool_calls=[])
 
     fake_service = _LoopingLLMService()
@@ -280,25 +282,25 @@ def test_model_projection_summarizes_tool_messages_without_mutating_transcript()
     projected_messages = _build_model_input_messages(state, COMBAT_AGENT_MODE)
 
     assert tool_message.content.startswith("Goblin 使用 [Scimitar]")
-    assert isinstance(projected_messages[-3], SystemMessage)
-    assert "<runtime_state" in projected_messages[-3].content
-    assert 'source="hud"' in projected_messages[-3].content
-    assert "状态快照" in projected_messages[-3].content
-    assert isinstance(projected_messages[-2], AIMessage)
-    assert projected_messages[-1].content.startswith("[工具:attack_action]")
+    assert isinstance(projected_messages[-3], AIMessage)
+    assert projected_messages[-2].content.startswith("[工具:attack_action]")
+    assert isinstance(projected_messages[-1], SystemMessage)
+    assert "<runtime_state_frame" in projected_messages[-1].content
+    assert 'source="state"' in projected_messages[-1].content
+    assert "状态快照" not in projected_messages[-1].content
     assert state["messages"][-1].content == tool_message.content
 
 
-def test_combat_projection_trims_more_aggressively_than_full_history():
+def test_combat_projection_keeps_full_history_under_large_context_budget():
     messages = [HumanMessage(content=f"消息 {index}") for index in range(60)]
 
     trimmed_messages = trim_model_messages(messages, COMBAT_AGENT_MODE)
 
-    assert len(trimmed_messages) == 25
-    assert messages[0].content == "消息 0"
+    assert len(trimmed_messages) == 60
+    assert trimmed_messages[0].content == "消息 0"
 
 
-def test_combat_projection_keeps_short_prelude_and_active_battle_span():
+def test_combat_projection_keeps_full_prelude_and_active_battle_span_under_budget():
     messages = [
         HumanMessage(content=f"旧探索 {index}")
         for index in range(12)
@@ -317,13 +319,32 @@ def test_combat_projection_keeps_short_prelude_and_active_battle_span():
         state={"active_combat_message_start": 12},
     )
 
-    assert [message.content for message in trimmed_messages[:5]] == [f"旧探索 {index}" for index in range(7, 12)]
-    assert isinstance(trimmed_messages[5], AIMessage)
-    assert trimmed_messages[5].tool_calls[0]["name"] == "start_combat"
+    assert [message.content for message in trimmed_messages[:12]] == [f"旧探索 {index}" for index in range(12)]
+    assert isinstance(trimmed_messages[12], AIMessage)
+    assert trimmed_messages[12].tool_calls[0]["name"] == "start_combat"
     assert trimmed_messages[-1].content == "我反击。"
 
 
-def test_combat_projection_falls_back_to_detecting_start_combat_tool_message():
+def test_combat_budget_trim_protects_active_battle_span():
+    messages = [HumanMessage(content="旧探索 " + ("x" * 50_000)) for _ in range(40)]
+    combat_start = len(messages)
+    messages.extend([
+        AIMessage(content="", tool_calls=[{"name": "start_combat", "args": {"combatant_ids": ["wolf_1"]}, "id": "call_start"}]),
+        ToolMessage(content="战斗开始！第 1 回合。", tool_call_id="call_start", name="start_combat"),
+        HumanMessage(content="继续战斗。"),
+    ])
+
+    trimmed_messages = trim_model_messages(
+        messages,
+        COMBAT_AGENT_MODE,
+        state={"active_combat_message_start": combat_start},
+    )
+
+    assert any(isinstance(message, AIMessage) and message.tool_calls[0]["name"] == "start_combat" for message in trimmed_messages)
+    assert trimmed_messages[-1].content == "继续战斗。"
+
+
+def test_combat_projection_falls_back_to_detecting_start_combat_tool_message_under_budget():
     messages = [
         HumanMessage(content=f"旧探索 {index}")
         for index in range(8)
@@ -336,9 +357,9 @@ def test_combat_projection_falls_back_to_detecting_start_combat_tool_message():
 
     trimmed_messages = trim_model_messages(messages, COMBAT_AGENT_MODE, state={})
 
-    assert [message.content for message in trimmed_messages[:5]] == [f"旧探索 {index}" for index in range(3, 8)]
-    assert isinstance(trimmed_messages[5], AIMessage)
-    assert trimmed_messages[5].tool_calls[0]["name"] == "start_combat"
+    assert [message.content for message in trimmed_messages[:8]] == [f"旧探索 {index}" for index in range(8)]
+    assert isinstance(trimmed_messages[8], AIMessage)
+    assert trimmed_messages[8].tool_calls[0]["name"] == "start_combat"
 
 
 def test_post_combat_projection_collapses_archived_battle_to_single_summary():
@@ -374,8 +395,8 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
     assert projected_messages[-2].content.startswith("我检查哥布林尸体。")
     assert isinstance(projected_messages[-1], SystemMessage)
     assert "<runtime_state" in projected_messages[-1].content
-    assert 'source="hud"' in projected_messages[-1].content
-    assert "状态快照" in projected_messages[-1].content
+    assert 'source="state"' in projected_messages[-1].content
+    assert "状态快照" not in projected_messages[-1].content
 
 
 def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_messages_remain():

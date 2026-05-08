@@ -17,9 +17,14 @@ from app.services.tools._helpers import compute_ac
 
 
 COMBAT_ARCHIVE_MESSAGE_PREFIX = "[系统:战斗归档]"
-NARRATIVE_VISIBLE_MESSAGE_LIMIT = 40
-COMBAT_VISIBLE_MESSAGE_LIMIT = 25
-COMBAT_PRELUDE_MESSAGE_LIMIT = 5
+CONTEXT_COMPACTION_MESSAGE_PREFIX = "[系统:上下文预算归档]"
+MODEL_CONTEXT_TOKEN_LIMIT = 1_000_000
+CONTEXT_SOFT_COMPACT_TOKEN_BUDGET = 700_000
+CONTEXT_HARD_TRIM_TOKEN_BUDGET = 850_000
+CONTEXT_COMPACTION_RETENTION_RATIO = 0.3
+CONTEXT_COMPACTION_MAX_CHARS = 120_000
+CONTEXT_COMPACTION_MIN_CHARS = 1200
+APPROX_CHARS_PER_TOKEN = 2.0
 
 
 class ExternalContextProvider(Protocol):
@@ -50,7 +55,7 @@ class ContextAssembler:
     def assemble(self, state: GraphState, mode: str, *, base_system_prompt: str) -> AssembledContext:
         """把图状态投影为一次模型调用所需的完整上下文。"""
         hud_text = self.build_hud_text(state)
-        runtime_state_text = self.build_runtime_state_text(state, mode, hud_text)
+        runtime_state_text = self.build_runtime_state_text(state, mode)
         return AssembledContext(
             system_prompt=self.build_system_prompt(state, mode, base_system_prompt),
             hud_text=hud_text,
@@ -62,23 +67,29 @@ class ContextAssembler:
         # 中文注释：系统提示词只保留稳定规则，避免每轮状态变化破坏 DeepSeek 前缀缓存。
         return base_system_prompt
 
-    def build_runtime_state_text(self, state: GraphState, mode: str, hud_text: str) -> str:
-        """把每轮变化的记忆、战斗指令和 HUD 统一放到尾部运行时状态。"""
+    def build_runtime_state_text(self, state: GraphState, mode: str, hud_text: str = "") -> str:
+        """生成模型每轮必须看到的短状态帧，完整 HUD 只保留给前端和 trace。"""
         sections: list[str] = []
-        episodic_context = [item.strip() for item in state.get("episodic_context", []) if isinstance(item, str) and item.strip()]
-        if episodic_context:
-            sections.append("[近期情节记忆]\n" + "\n".join(f"- {item}" for item in episodic_context))
-        elif summary := state.get("conversation_summary"):
-            sections.append(f"[前情提要（必须铭记的游戏大纲）]\n{summary}")
+
+        sections.append("[事实优先级]\n本帧 > 最新工具返回 > 旧对话。旧 HUD、旧战报和旧资源数字只作历史叙事参考。")
+        sections.append(self._build_runtime_mode_frame(state, mode))
+
+        memory_frame = self._build_memory_frame(state)
+        if memory_frame:
+            sections.append(memory_frame)
 
         if mode == COMBAT_AGENT_MODE:
-            combat_brief = self._build_combat_brief(state)
+            combat_brief = self._build_combat_frame(state)
             if combat_brief:
-                sections.append(f"[战斗简报]\n{combat_brief}")
+                sections.append(combat_brief)
 
             turn_directive = self._build_combat_turn_directive(state)
             if turn_directive:
                 sections.append(f"[当前回合指令]\n{turn_directive}")
+        else:
+            narrative_frame = self._build_narrative_state_frame(state)
+            if narrative_frame:
+                sections.append(narrative_frame)
 
         if mode == NARRATIVE_AGENT_MODE and needs_opening_fighter_companion(state):
             sections.append(
@@ -95,7 +106,6 @@ class ContextAssembler:
         if adventure_anchor:
             sections.append(adventure_anchor)
 
-        sections.append(hud_text)
         return "\n\n".join(block for block in sections if block)
 
     def build_hud_text(self, state: GraphState) -> str:
@@ -178,7 +188,7 @@ class ContextAssembler:
                 continue
 
             if isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith("[系统:"):
-                if message.content.startswith(COMBAT_ARCHIVE_MESSAGE_PREFIX):
+                if message.content.startswith((COMBAT_ARCHIVE_MESSAGE_PREFIX, CONTEXT_COMPACTION_MESSAGE_PREFIX)):
                     projected_messages.append(message)
                     continue
                 projected_messages.append(clone_message_with_content(message, summarize_system_message(message.content)))
@@ -242,6 +252,90 @@ class ContextAssembler:
             lines.append("中立/其他: " + "；".join(other_side))
 
         return "\n".join(lines)
+
+    def _build_runtime_mode_frame(self, state: GraphState, mode: str) -> str:
+        """把当前模式和基础角色状态压成短帧，替代过去的大块 HUD。"""
+        lines = [f"模式: {mode}"]
+
+        player_dict = state_value_to_dict(state.get("player"))
+        if player_dict:
+            lines.append(
+                "玩家: "
+                f"{player_dict.get('name', player_dict.get('id', 'player'))} [ID:{player_dict.get('id', 'player')}] "
+                f"{format_player_priority_summary(player_dict)} "
+                f"conditions:{format_conditions(player_dict)}"
+            )
+        else:
+            lines.append("玩家: 尚未加载角色卡。")
+
+        adventure_dict = AdventureState.model_validate(state_value_to_dict(state.get("adventure")) or {}).model_dump()
+        lines.append(f"冒险节点: {adventure_dict['module_id']} / {adventure_dict['active_node_id']}")
+
+        return "[运行状态帧]\n" + "\n".join(lines)
+
+    def _build_memory_frame(self, state: GraphState) -> str:
+        """只保留少量近期记忆，避免记忆滚动成为长前缀的第一个变化点。"""
+        episodic_context = [
+            item.strip()
+            for item in state.get("episodic_context", [])
+            if isinstance(item, str) and item.strip()
+        ]
+        if episodic_context:
+            return "[近期情节记忆]\n" + "\n".join(f"- {item}" for item in episodic_context[-3:])
+        if summary := state.get("conversation_summary"):
+            return f"[前情提要]\n{compact_text(str(summary), 500)}"
+        return ""
+
+    def _build_narrative_state_frame(self, state: GraphState) -> str:
+        """探索态只给模型焦点摘要；完整地图和单位细节留给工具按需读取。"""
+        lines: list[str] = []
+        scene_data = dump_mapping_state(state.get("scene_units"))
+        if scene_data:
+            allies = [f'{unit.get("name", uid)}[ID:{uid}]' for uid, unit in scene_data.items() if unit.get("side") == "ally"]
+            enemies = [f'{unit.get("name", uid)}[ID:{uid}]' for uid, unit in scene_data.items() if unit.get("side") == "enemy"]
+            if allies:
+                lines.append("可见友方: " + "；".join(allies[:4]))
+            if enemies:
+                lines.append("可见敌对/怪物: " + "；".join(enemies[:6]))
+
+        space_data = state_value_to_dict(state.get("space"))
+        active_map = active_space_map_summary(space_data)
+        if active_map:
+            lines.append(active_map)
+        else:
+            lines.append("空间: 未建图；若叙事涉及位置、距离、范围、入场或移动，先建立或切换地图。")
+
+        lines.append("需要完整角色、单位、坐标、地图或节点原文时调用对应工具读取，不要沿用旧 HUD。")
+        return "[探索状态]\n" + "\n".join(lines)
+
+    def _build_combat_frame(self, state: GraphState) -> str:
+        """战斗态只暴露回合决策所需字段，避免完整参战 JSON 每轮扰动缓存。"""
+        combat_dict = state_value_to_dict(state.get("combat"))
+        if not combat_dict:
+            return ""
+
+        player_dict = state_value_to_dict(state.get("player"))
+        participants = dict(combat_dict.get("participants", {}))
+        if player_dict and player_dict.get("id"):
+            participants[player_dict["id"]] = player_dict
+
+        current_id = combat_dict.get("current_actor_id", "")
+        current_actor = participants.get(current_id, {})
+        lines = [
+            f"第 {combat_dict.get('round', '?')} 回合；当前行动者: {current_actor.get('name', current_id)} [ID:{current_id}] side={current_actor.get('side', '?')}",
+            f"先攻顺序: {combat_dict.get('initiative_order', [])}",
+        ]
+
+        if scene_summary := state.get("scene_summary"):
+            lines.append(f"当前局势: {scene_summary}")
+
+        for label, side in (("玩家侧", "player"), ("友方侧", "ally"), ("对立侧", "enemy")):
+            side_line = format_combat_side_snapshot(participants, side)
+            if side_line:
+                lines.append(f"{label}: {side_line}")
+
+        lines.append("若需要完整动作、坐标、距离或状态详情，调用 inspect_unit/manage_space；不要从旧战报推断。")
+        return "[战斗状态]\n" + "\n".join(lines)
 
     def _build_combat_turn_directive(self, state: GraphState) -> str:
         """用共享状态显式标注当前轮到谁决策，避免模型在战斗流里漂移。"""
@@ -349,34 +443,33 @@ def needs_opening_fighter_companion(state: GraphState) -> bool:
 
 
 def trim_model_messages(messages: list[BaseMessage], mode: str, state: GraphState | None = None) -> list[BaseMessage]:
+    """按 1M 上下文模型的预算裁剪；常规路径保持完整历史以换取稳定 KC 前缀。"""
     if mode == COMBAT_AGENT_MODE:
         return trim_combat_model_messages(messages, state)
 
-    keep_count = NARRATIVE_VISIBLE_MESSAGE_LIMIT if mode == NARRATIVE_AGENT_MODE else COMBAT_VISIBLE_MESSAGE_LIMIT
-    if len(messages) <= keep_count:
+    if estimate_messages_tokens(messages) <= CONTEXT_HARD_TRIM_TOKEN_BUDGET:
         return list(messages)
 
-    start_index = len(messages) - keep_count
-    while start_index > 0 and isinstance(messages[start_index], ToolMessage):
-        start_index -= 1
-
-    return list(messages[start_index:])
+    return trim_messages_to_token_budget(messages, CONTEXT_SOFT_COMPACT_TOKEN_BUDGET)
 
 
 def trim_combat_model_messages(messages: list[BaseMessage], state: GraphState | None = None) -> list[BaseMessage]:
-    """战斗态从开战点重建短上下文，让模式切换的 cache miss 尽量小。"""
+    """战斗态优先保留完整前史；只有接近上下文上限时才保护活跃战斗段做预算裁剪。"""
     if not messages:
         return []
 
+    if estimate_messages_tokens(messages) <= CONTEXT_HARD_TRIM_TOKEN_BUDGET:
+        return list(messages)
+
     combat_start = combat_window_start_index(messages, state)
     if combat_start is None:
-        return trim_recent_messages(messages, COMBAT_VISIBLE_MESSAGE_LIMIT)
+        return trim_messages_to_token_budget(messages, CONTEXT_SOFT_COMPACT_TOKEN_BUDGET)
 
-    prelude_start = max(0, combat_start - COMBAT_PRELUDE_MESSAGE_LIMIT)
-    while prelude_start > 0 and isinstance(messages[prelude_start], ToolMessage):
-        prelude_start -= 1
-
-    return list(messages[prelude_start:])
+    return trim_messages_to_token_budget(
+        messages,
+        CONTEXT_SOFT_COMPACT_TOKEN_BUDGET,
+        preserve_start_index=combat_start,
+    )
 
 
 def combat_window_start_index(messages: list[BaseMessage], state: GraphState | None) -> int | None:
@@ -394,15 +487,123 @@ def combat_window_start_index(messages: list[BaseMessage], state: GraphState | N
     return None
 
 
-def trim_recent_messages(messages: list[BaseMessage], keep_count: int) -> list[BaseMessage]:
-    """保留最近窗口，并向前补齐起始 ToolMessage 对应的 AI tool_call。"""
-    if len(messages) <= keep_count:
+def trim_messages_to_token_budget(
+    messages: list[BaseMessage],
+    target_token_budget: int,
+    *,
+    preserve_start_index: int | None = None,
+) -> list[BaseMessage]:
+    """超过硬预算后只丢弃最旧前缀；战斗中会尽量保护开战后的完整工具链。"""
+    if estimate_messages_tokens(messages) <= target_token_budget:
         return list(messages)
 
-    start_index = len(messages) - keep_count
+    if preserve_start_index is not None and 0 <= preserve_start_index < len(messages):
+        preserve_start_index = align_message_window_start(messages, preserve_start_index)
+        protected_messages = list(messages[preserve_start_index:])
+        protected_tokens = estimate_messages_tokens(protected_messages)
+        if protected_tokens >= target_token_budget:
+            return prepend_compaction_message(messages[:preserve_start_index], protected_messages)
+
+        prefix_budget = target_token_budget - protected_tokens
+        prefix_messages = list(messages[:preserve_start_index])
+        prefix_start = suffix_start_for_token_budget(prefix_messages, prefix_budget)
+        return prepend_compaction_message(
+            prefix_messages[:prefix_start],
+            [*prefix_messages[prefix_start:], *protected_messages],
+        )
+
+    start_index = suffix_start_for_token_budget(messages, target_token_budget)
+    return prepend_compaction_message(messages[:start_index], list(messages[start_index:]))
+
+
+def suffix_start_for_token_budget(messages: list[BaseMessage], token_budget: int) -> int:
+    """反向选择可放入预算的最长后缀，并避免窗口从悬空 ToolMessage 开始。"""
+    if not messages:
+        return 0
+
+    total_tokens = 0
+    start_index = len(messages) - 1
+    for index in range(len(messages) - 1, -1, -1):
+        message_tokens = estimate_message_tokens(messages[index])
+        if total_tokens and total_tokens + message_tokens > token_budget:
+            break
+        total_tokens += message_tokens
+        start_index = index
+
+    return align_message_window_start(messages, start_index)
+
+
+def align_message_window_start(messages: list[BaseMessage], start_index: int) -> int:
+    """窗口起点若落在工具结果上，向前补齐触发它的 AI tool_call。"""
     while start_index > 0 and isinstance(messages[start_index], ToolMessage):
         start_index -= 1
-    return list(messages[start_index:])
+    return start_index
+
+
+def estimate_messages_tokens(messages: list[BaseMessage]) -> int:
+    """用偏保守字符比估算 token，中文场景下宁可略早触发硬刹车。"""
+    return sum(estimate_message_tokens(message) for message in messages)
+
+
+def estimate_message_tokens(message: BaseMessage) -> int:
+    content_chars = len(message_content_to_text(getattr(message, "content", "")))
+    metadata_chars = len(getattr(message, "type", "")) + len(str(getattr(message, "name", "") or ""))
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        metadata_chars += len(json.dumps(tool_calls, ensure_ascii=False, sort_keys=True))
+    if isinstance(message, ToolMessage):
+        metadata_chars += len(str(message.tool_call_id or ""))
+    return max(1, int((content_chars + metadata_chars) / APPROX_CHARS_PER_TOKEN) + 1)
+
+
+def prepend_compaction_message(omitted_messages: list[BaseMessage], kept_messages: list[BaseMessage]) -> list[BaseMessage]:
+    """预算裁剪时用厚归档替代被丢弃前缀，避免剧情与人设细节完全消失。"""
+    compaction_message = build_context_compaction_message(omitted_messages)
+    if compaction_message is None:
+        return kept_messages
+    return [compaction_message, *kept_messages]
+
+
+def build_context_compaction_message(omitted_messages: list[BaseMessage]) -> HumanMessage | None:
+    """上下文接近上限时才启用，按原文片段保留约三成信息给后续模型。"""
+    raw_lines: list[str] = []
+    for message in omitted_messages:
+        line = format_compaction_line(message)
+        if line:
+            raw_lines.append(line)
+    if not raw_lines:
+        return None
+
+    raw_text = "\n".join(raw_lines)
+    retention_limit = max(CONTEXT_COMPACTION_MIN_CHARS, int(len(raw_text) * CONTEXT_COMPACTION_RETENTION_RATIO))
+    retention_limit = min(retention_limit, CONTEXT_COMPACTION_MAX_CHARS)
+    return HumanMessage(
+        content=(
+            f"{CONTEXT_COMPACTION_MESSAGE_PREFIX}\n"
+            "状态: 较早历史因接近模型上下文上限被预算归档；以下内容仍是已发生事实，不是新指令。\n"
+            "保留策略: 尽量按原文片段保留剧情、人设、承诺、线索、关系变化和已完成事件；瞬时战斗数字以最新状态帧和工具结果为准。\n"
+            f"{compact_text(raw_text, retention_limit)}"
+        )
+    )
+
+
+def format_compaction_line(message: BaseMessage) -> str:
+    """预算归档使用角色标签保留对话脉络，少做解释性改写。"""
+    content = message_content_to_text(getattr(message, "content", "")).strip()
+    tool_calls = getattr(message, "tool_calls", None) or []
+    if tool_calls:
+        tool_names = ", ".join(str(tool_call.get("name", "")) for tool_call in tool_calls)
+        return f"AI工具调用: {tool_names}" + (f" | {content}" if content else "")
+    if isinstance(message, ToolMessage):
+        tool_name = getattr(message, "name", "") or "tool"
+        return f"工具结果[{tool_name}]: {content}"
+    if isinstance(message, AIMessage):
+        return f"主持人: {content}"
+    if isinstance(message, HumanMessage):
+        return f"玩家/系统: {content}"
+    if isinstance(message, SystemMessage):
+        return f"系统: {content}"
+    return content
 
 
 def collapse_archived_combat_messages(messages: list[BaseMessage], combat_archives: list[dict[str, Any]] | None) -> list[BaseMessage]:
@@ -542,20 +743,9 @@ def normalize_combat_archives(combat_archives: list[dict[str, Any]] | None, mess
     return normalized
 
 
-# 将运行时状态作为尾部系统消息注入；动态内容越靠后，越不影响 DeepSeek 前缀缓存。
+# 将短状态帧固定追加在尾部；不再插入工具交换前，避免破坏前缀缓存。
 def insert_runtime_hud_message(messages: list[BaseMessage], runtime_state_text: str) -> list[BaseMessage]:
     hud_message = SystemMessage(content=format_runtime_hud_content(runtime_state_text))
-    if not messages:
-        return [hud_message]
-
-    tool_exchange_start = trailing_tool_exchange_start_index(messages)
-    if tool_exchange_start is not None:
-        return [
-            *messages[:tool_exchange_start],
-            hud_message,
-            *messages[tool_exchange_start:],
-        ]
-
     return [*messages, hud_message]
 
 
@@ -576,9 +766,9 @@ def trailing_tool_exchange_start_index(messages: list[BaseMessage]) -> int | Non
 
 def format_runtime_hud_content(hud_text: str) -> str:
     return (
-        "<runtime_state source=\"hud\" visibility=\"model_only\" role=\"state_snapshot\" audience=\"none\">\n"
+        "<runtime_state_frame source=\"state\" visibility=\"model_only\" role=\"state_snapshot\" audience=\"none\">\n"
         f"{hud_text}"
-        "</runtime_state>"
+        "</runtime_state_frame>"
     )
 
 
@@ -751,6 +941,36 @@ def format_space_summary(space: dict[str, Any]) -> str:
     else:
         lines.append("当前地图暂无已放置单位。")
     return "\n".join(lines)
+
+
+def active_space_map_summary(space: dict[str, Any]) -> str:
+    """短状态帧只提示地图存在与单位数量，坐标细节交给空间工具。"""
+    if not space or not space.get("maps"):
+        return ""
+
+    active_map_id = space.get("active_map_id", "")
+    maps = space.get("maps", {}) or {}
+    placements = space.get("placements", {}) or {}
+    active_map = maps.get(active_map_id, {})
+    placed_count = sum(1 for placement in placements.values() if placement.get("map_id") == active_map_id)
+    return (
+        f"空间: 当前地图 {active_map.get('name', active_map_id)} [ID:{active_map_id}]，"
+        f"已放置单位 {placed_count} 个；距离、范围和坐标以空间工具返回为准。"
+    )
+
+
+def format_combat_side_snapshot(participants: dict[str, Any], side: str) -> str:
+    """短战斗帧按阵营列出关键战斗状态，避免完整参战者 JSON 干扰缓存。"""
+    items: list[str] = []
+    for uid, combatant in participants.items():
+        if combatant.get("side") != side:
+            continue
+        items.append(
+            f"{combatant.get('name', uid)}[ID:{uid}, HP:{combatant.get('hp')}/{combatant.get('max_hp')}, "
+            f"AC:{compute_ac(combatant)}, resources:{format_resources(combatant)}, "
+            f"conditions:{format_conditions(combatant)}, actions:{format_actions(combatant)}]"
+        )
+    return "；".join(items)
 
 
 def format_adventure_summary(adventure: dict[str, Any] | None) -> str:

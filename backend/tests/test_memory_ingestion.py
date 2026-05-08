@@ -226,8 +226,37 @@ class MemoryIngestionPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("英雄击败哥布林并消耗 1 个 1 环法术位，现场暂时安全。", store.records[2]["payload"]["summary"])
         self.assertEqual(1, len(fake_llm.calls))
         self.assertIn("不要重复 HUD 已提供的当前玩家状态", fake_llm.calls[0]["system_prompt"])
+        self.assertIn("原始有效信息三成左右", fake_llm.calls[0]["system_prompt"])
         self.assertNotIn("movement_left", fake_llm.calls[0]["summary_input"])
         self.assertNotIn("action_available", fake_llm.calls[0]["summary_input"])
+
+    async def test_combat_archive_summary_keeps_longer_detail_budget(self):
+        store = _FakeStore()
+        pipeline = MemoryIngestionPipeline(store)
+        long_summary = "战斗已经结束。" + ("巴伦守住洞口，伊莲用魔法飞弹压制哥布林。" * 40)
+
+        await pipeline.ingest(
+            session_id="demo",
+            turn_id="turn-long-combat",
+            old_state={
+                "combat": {"round": 4, "participants": {"goblin_1": {}}},
+                "combat_archives": [],
+                "player": {"name": "巴伦", "resources": {}, "conditions": []},
+                "dead_units": {},
+            },
+            new_state={
+                "combat": None,
+                "combat_archives": [{"summary": long_summary, "start_index": 1, "end_index": 12}],
+                "player": {"name": "巴伦", "resources": {}, "conditions": []},
+                "dead_units": {"goblin_1": {}},
+            },
+            new_messages=[ToolMessage(content="共进行了 4 回合。", tool_call_id="call_end", name="end_combat")],
+            reply="战斗结束。",
+        )
+
+        turn_summary = store.records[2]["payload"]["summary"]
+        self.assertGreater(len(turn_summary), 240)
+        self.assertIn("伊莲用魔法飞弹压制哥布林", turn_summary)
 
     async def test_ingest_falls_back_to_rule_summary_when_model_summary_fails(self):
         store = _FakeStore()
