@@ -11,7 +11,6 @@ from app.memory.context_assembler import (
     ContextAssembler,
     build_runtime_state_message,
     message_content_to_text as _message_content_to_text,
-    trim_model_messages as _trim_projected_messages,
     state_value_to_dict as _state_value_to_dict,
 )
 from app.prompts import get_assistant_system_prompt
@@ -30,30 +29,6 @@ def _get_llm_service() -> LLMService:
 def _get_context_assembler() -> ContextAssembler:
     """统一缓存上下文装配器，避免在每轮调用里重复构造。"""
     return ContextAssembler()
-
-
-def _message_count(state: GraphState) -> int:
-    return len(state.get("messages", []))
-
-
-def _combat_archives_from_state(state: GraphState) -> list[dict]:
-    archives: list[dict] = []
-    for archive in state.get("combat_archives", []) or []:
-        if hasattr(archive, "model_dump"):
-            archives.append(archive.model_dump())
-        elif hasattr(archive, "items"):
-            archives.append(dict(archive))
-    return archives
-
-
-def _build_combat_archive(summary: str, start_index: int, end_index: int) -> dict:
-    safe_start = max(start_index, 0)
-    safe_end = max(end_index, safe_start)
-    return {
-        "summary": summary.strip(),
-        "start_index": safe_start,
-        "end_index": safe_end,
-    }
 
 
 def router_node(state: GraphState) -> dict:

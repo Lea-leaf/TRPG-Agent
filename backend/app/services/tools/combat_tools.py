@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 import d20
-from langchain_core.messages import BaseMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
@@ -43,96 +43,12 @@ def _message_count(state: dict | None) -> int:
     return len(messages)
 
 
-def _combat_archive_start_index(state: dict | None) -> int:
-    """战斗归档从触发 start_combat 的 AIMessage 开始，保证 tool_calls 与 ToolMessage 同生共死。"""
+def _active_combat_start_index(state: dict | None) -> int:
+    """记录活跃战斗起点，便于极端长上下文裁剪时保护完整战斗工具链。"""
     messages = state.get("messages") or [] if state else []
     if messages and getattr(messages[-1], "tool_calls", None):
         return len(messages) - 1
     return len(messages)
-
-
-def _combat_archives_from_state(state: dict | None) -> list[dict]:
-    if not state:
-        return []
-
-    raw_archives = state.get("combat_archives") or []
-    archives: list[dict] = []
-    for archive in raw_archives:
-        if hasattr(archive, "model_dump"):
-            archives.append(archive.model_dump())
-        elif hasattr(archive, "items"):
-            archives.append(dict(archive))
-    return archives
-
-
-def _build_combat_archive(summary: str, start_index: int, end_index: int) -> dict:
-    """归档只保留区间锚点与高密度摘要，供后续 prompt 折叠使用。"""
-    safe_start = max(start_index, 0)
-    safe_end = max(end_index, safe_start)
-    return {
-        "summary": summary.strip(),
-        "start_index": safe_start,
-        "end_index": safe_end,
-    }
-
-
-def _build_detailed_combat_archive_summary(base_summary: str, state: dict | None, start_index: int) -> str:
-    """战斗归档要保留足够经过，否则战后模型容易把已完成战斗误判成待执行任务。"""
-    messages = state.get("messages") or [] if state else []
-    if not messages or start_index >= len(messages):
-        return base_summary
-
-    raw_lines: list[str] = []
-    for message in messages[max(start_index, 0):]:
-        line = _archive_message_line(message)
-        if line:
-            raw_lines.append(line)
-    if not raw_lines:
-        return base_summary
-
-    raw_text = "\n".join(raw_lines)
-    detail_budget = max(1200, int(len(raw_text) * 0.3))
-    detail_text = _compact_archive_text(raw_text, detail_budget)
-    return (
-        f"{base_summary}\n"
-        "关键经过（已发生事实，约按原战斗记录三成以上预算保留）："
-        f"{detail_text}"
-    )
-
-
-def _archive_message_line(message: BaseMessage) -> str:
-    """把战斗区间内的消息转成归档文本，保留工具结果而不是只留最终一句。"""
-    tool_calls = getattr(message, "tool_calls", None) or []
-    content = _message_content_to_text(getattr(message, "content", "")).strip()
-    if tool_calls:
-        tool_names = ", ".join(str(tool_call.get("name", "")) for tool_call in tool_calls)
-        return f"工具调用: {tool_names}" + (f" | {content}" if content else "")
-    if isinstance(message, ToolMessage):
-        tool_name = getattr(message, "name", "") or "tool"
-        return f"工具结果[{tool_name}]: {content}"
-    return content
-
-
-def _message_content_to_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and item.get("text"):
-                parts.append(str(item["text"]))
-        return "\n".join(parts)
-    return str(content)
-
-
-def _compact_archive_text(text: str, limit: int) -> str:
-    """归档压缩只清理空白与硬截断，不改写事实以免制造新剧情。"""
-    compact = "\n".join(line.strip() for line in text.splitlines() if line.strip())
-    if len(compact) > limit:
-        return compact[: limit - 3].rstrip() + "..."
-    return compact
 
 
 def _remove_space_units(space_raw: dict | None, unit_ids: list[str]) -> dict | None:
@@ -540,7 +456,7 @@ def start_combat(
     update: dict = {
         "combat": combat_dict,
         "phase": "combat",
-        "active_combat_message_start": _combat_archive_start_index(state),
+        "active_combat_message_start": _active_combat_start_index(state),
         "messages": [
             ToolMessage(
                 content=(
@@ -800,13 +716,6 @@ def end_combat(
 
     if player_dict:
         update["player"] = player_dict
-
-    active_start = state.get("active_combat_message_start") if state else None
-    combat_archives = _combat_archives_from_state(state)
-    if isinstance(active_start, int):
-        archive_summary = _build_detailed_combat_archive_summary(summary, state, active_start)
-        combat_archives.append(_build_combat_archive(archive_summary, active_start, _message_count(state)))
-        update["combat_archives"] = combat_archives
 
     update["messages"] = [ToolMessage(content=summary, tool_call_id=tool_call_id)]
     return Command(update=update)

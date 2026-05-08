@@ -253,7 +253,7 @@ def analyze_trace(trace_path: Path, *, mode: str | None = None, limit: int | Non
             for message_index, message in enumerate(messages)
             if "<runtime_state" in str(message.get("content", ""))
         ]
-        archive_count = sum(1 for message in messages if "[系统:战斗归档]" in str(message.get("content", "")))
+        old_combat_archive_count = sum(1 for message in messages if "[系统:战斗归档]" in str(message.get("content", "")))
         response = (completed_payload.get("response") or {})
         tool_calls = [call.get("name") for call in response.get("tool_calls") or []]
 
@@ -262,7 +262,7 @@ def analyze_trace(trace_path: Path, *, mode: str | None = None, limit: int | Non
             f"mode={payload.get('mode')} phase={payload.get('phase')} "
             f"messages={len(messages)} tools={len(tools)} prompt_chars={len(full_text)} "
             f"prompt_tokens={prompt_tokens} hit={hit_tokens} miss={usage.get('cache_miss_tokens')} "
-            f"hit_ratio={hit_ratio:.2%} runtime={runtime_indexes} archives={archive_count} "
+            f"hit_ratio={hit_ratio:.2%} runtime={runtime_indexes} old_combat_archives={old_combat_archive_count} "
             f"tool_calls={tool_calls}"
         )
         print(f"   tool_names={', '.join(_tool_label(tool) for tool in tools)}")
