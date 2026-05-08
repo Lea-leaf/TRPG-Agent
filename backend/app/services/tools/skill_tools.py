@@ -14,7 +14,8 @@ from app.services.skills import load_skill_content
 @tool
 def load_skill(
     skill_id: str,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """加载一个项目内技能的完整说明。复杂工具使用前先调用本工具获取对应技能。"""
     content = load_skill_content(skill_id)
