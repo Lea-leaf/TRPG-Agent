@@ -39,6 +39,12 @@ _SKILLS: tuple[SkillSpec, ...] = (
         path=_SKILL_ROOT / "space_management" / "SKILL.md",
     ),
     SkillSpec(
+        skill_id="scene_unit_management",
+        name="场景单位管理",
+        description="说明友方创建、怪物生成和死亡单位档案清理流程。",
+        path=_SKILL_ROOT / "scene_unit_management" / "SKILL.md",
+    ),
+    SkillSpec(
         skill_id="adventure_module",
         name="冒险模组主持",
         description="说明 PDF 冒险节点读取、线索记录、事件记录和剧情书签推进流程。",

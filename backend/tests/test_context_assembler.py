@@ -191,6 +191,7 @@ class ContextAssemblerTests(unittest.TestCase):
                         "clues": [{"id": "goblin_trail", "label": "地精踪迹"}],
                         "events": [],
                         "dm_guidance": {"tactics": ["两近战两远程"], "xp": ["75 XP"]},
+                        "rules_overrides": [{"topic": "surprise", "rule": "新版突袭只让先攻劣势"}],
                         "candidate_exits": [{"id": "goblin_trail"}],
                     },
                     "available_exits": [{"id": "follow_goblin_trail", "available": False}],
@@ -206,6 +207,7 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertIn("轮到地精行动时", projected)
         self.assertIn("goblin_trail", projected)
+        self.assertIn("新版突袭只让先攻劣势", projected)
         self.assertIn("available_exits", projected)
 
     def test_archived_combat_expands_start_to_triggering_ai_tool_call(self):

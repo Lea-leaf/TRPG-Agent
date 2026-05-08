@@ -12,6 +12,7 @@ from langgraph.types import Command
 
 from app.allies.profiles import get_ally_profile
 from app.calculation.bestiary import spawn_combatants
+from app.services.skills import load_skill_content
 from app.space.geometry import build_space_state
 from app.space.geometry import validate_unit_distance as validate_space_unit_distance
 from app.services.tools._helpers import (
@@ -127,6 +128,128 @@ def _roll_initiative(unit: dict, *, surprised: bool) -> tuple[int, str]:
     return result.total, str(result)
 
 
+# 场景单位公共实现：聚合入口和旧工具共用，避免两套生成/清理逻辑漂移。
+def _spawn_ally_impl(
+    profile_id: str,
+    name: str | None,
+    unit_id: str | None,
+    state: dict | None,
+    tool_call_id: str | None,
+) -> Command:
+    try:
+        ally = get_ally_profile(profile_id)
+    except ValueError as exc:
+        return Command(update={"messages": [ToolMessage(content=str(exc), tool_call_id=tool_call_id)]})
+
+    if name:
+        ally["name"] = name
+    ally["id"] = unit_id or ally.get("id") or profile_id
+    ally["side"] = "ally"
+    prepare_character_for_combat(ally, side="ally", fallback_id=ally["id"])
+
+    scene_units: dict = state.get("scene_units") or {} if state else {}
+    scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else {}
+    scene_raw[ally["id"]] = ally
+
+    return Command(update={
+        "scene_units": scene_raw,
+        "messages": [
+            ToolMessage(content=f"友方 {ally['name']} [ID: {ally['id']}] 已加入场景。", tool_call_id=tool_call_id)
+        ],
+    })
+
+
+def _spawn_monsters_impl(
+    monster_index: str,
+    count: int,
+    faction: str,
+    state: dict | None,
+    tool_call_id: str | None,
+) -> Command:
+    try:
+        new_combatants = spawn_combatants(monster_index, count, faction)
+    except Exception as exc:
+        return Command(update={"messages": [ToolMessage(content=f"生成战斗单位失败: {exc}", tool_call_id=tool_call_id)]})
+
+    scene_units: dict = state.get("scene_units") or {} if state else {}
+    scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else {}
+
+    for combatant in new_combatants:
+        scene_raw[combatant.id] = combatant.model_dump()
+
+    names = [f"{combatant.name} [ID: {combatant.id}]" for combatant in new_combatants]
+    return Command(update={
+        "scene_units": scene_raw,
+        "messages": [
+            ToolMessage(
+                content=(
+                    f"成功在场景中生成了 {count} 只 {monster_index}: {', '.join(names)}。\n"
+                    "可用 start_combat 指定哪些单位参加战斗。"
+                ),
+                tool_call_id=tool_call_id,
+            )
+        ],
+    })
+
+
+def _clear_dead_units_impl(unit_ids: list[str] | None, state: dict | None, tool_call_id: str | None) -> Command:
+    dead_units: dict = state.get("dead_units") or {} if state else {}
+    dead_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in dead_units.items()} if hasattr(dead_units, "items") else {}
+
+    if not dead_raw:
+        return Command(update={"messages": [ToolMessage(content="当前没有死亡单位。", tool_call_id=tool_call_id)]})
+
+    if unit_ids:
+        removed = [uid for uid in unit_ids if uid in dead_raw]
+        for uid in removed:
+            del dead_raw[uid]
+        msg = f"已清除死亡单位: {', '.join(removed)}" if removed else "指定的 ID 不在死亡单位列表中。"
+    else:
+        count = len(dead_raw)
+        dead_raw.clear()
+        msg = f"已清除全部 {count} 个死亡单位。"
+
+    return Command(update={"dead_units": dead_raw, "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+
+
+@tool
+def manage_scene_units(
+    action: Literal["help", "spawn_ally", "spawn_monsters", "clear_dead_units"],
+    profile_id: str | None = None,
+    name: str | None = None,
+    unit_id: str | None = None,
+    monster_index: str | None = None,
+    count: int = 1,
+    faction: str = "enemy",
+    unit_ids: list[str] | None = None,
+    state: Annotated[dict, InjectedState] = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+) -> Command:
+    """统一管理场景单位池中的友方、怪物与死亡单位档案。
+    不确定模板、怪物 slug 或清理时机时先传 action="help" 读取场景单位技能说明。
+    参数示例：{"action": "spawn_ally", "profile_id": "fighter_companion"}；{"action": "spawn_monsters", "monster_index": "goblin", "count": 4}。
+
+    Args:
+        action: help 读取说明，spawn_ally 创建友方，spawn_monsters 创建怪物，clear_dead_units 清理死亡档案。
+        profile_id: 友方模板 ID，例如 fighter_companion、apprentice_wizard。
+        name: 可选友方显示名。
+        unit_id: 可选友方单位 ID。
+        monster_index: 怪物 Open5e slug，例如 goblin、wolf、bugbear。
+        count: 创建怪物数量。
+        faction: 怪物阵营，通常为 enemy、ally 或 neutral。
+        unit_ids: clear_dead_units 指定清理的死亡单位 ID；不传则清理全部。
+    """
+    if action == "help":
+        return Command(update={"messages": [
+            ToolMessage(content=load_skill_content("scene_unit_management"), tool_call_id=tool_call_id)
+        ]})
+    if action == "spawn_ally":
+        return _spawn_ally_impl(profile_id or "", name, unit_id, state, tool_call_id)
+    if action == "spawn_monsters":
+        return _spawn_monsters_impl(monster_index or "", count, faction, state, tool_call_id)
+    return _clear_dead_units_impl(unit_ids, state, tool_call_id)
+
+
 @tool
 def spawn_ally(
     profile_id: str,
@@ -144,30 +267,7 @@ def spawn_ally(
         name: 可选显示名；不传则使用模板默认名。
         unit_id: 可选单位 ID；不传则按模板 ID 自动生成稳定 ID。
     """
-    try:
-        ally = get_ally_profile(profile_id)
-    except ValueError as exc:
-        return Command(update={"messages": [ToolMessage(content=str(exc), tool_call_id=tool_call_id)]})
-
-    if name:
-        ally["name"] = name
-    ally["id"] = unit_id or ally.get("id") or profile_id
-    ally["side"] = "ally"
-    prepare_character_for_combat(ally, side="ally", fallback_id=ally["id"])
-
-    scene_units: dict = state.get("scene_units") or {}
-    scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else {}
-    scene_raw[ally["id"]] = ally
-
-    return Command(update={
-        "scene_units": scene_raw,
-        "messages": [
-            ToolMessage(
-                content=f"友方 {ally['name']} [ID: {ally['id']}] 已加入场景。",
-                tool_call_id=tool_call_id,
-            )
-        ],
-    })
+    return _spawn_ally_impl(profile_id, name, unit_id, state, tool_call_id)
 
 
 @tool
@@ -188,33 +288,7 @@ def spawn_monsters(
         count: 生成该单位的数量，例如 4。
         faction: 阵营，通常为 "enemy"、"ally" 或 "neutral"。
     """
-    try:
-        new_combatants = spawn_combatants(monster_index, count, faction)
-    except Exception as e:
-        return f"生成战斗单位失败: {str(e)}"
-
-    scene_units: dict = state.get("scene_units") or {}
-    if hasattr(scene_units, "items"):
-        scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()}
-    else:
-        scene_raw = {}
-
-    for c in new_combatants:
-        scene_raw[c.id] = c.model_dump()
-
-    names = [f"{c.name} [ID: {c.id}]" for c in new_combatants]
-
-    return Command(
-        update={
-            "scene_units": scene_raw,
-            "messages": [
-                ToolMessage(
-                    content=f"成功在场景中生成了 {count} 只 {monster_index}: {', '.join(names)}。\n可用 start_combat 指定哪些单位参加战斗。",
-                    tool_call_id=tool_call_id
-                )
-            ]
-        }
-    )
+    return _spawn_monsters_impl(monster_index, count, faction, state, tool_call_id)
 
 
 @tool
@@ -686,25 +760,4 @@ def clear_dead_units(
     Args:
         unit_ids: 要清除的死亡单位 ID 列表；为空或不传则清除全部。
     """
-    dead_units: dict = state.get("dead_units") or {}
-    dead_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in dead_units.items()} if hasattr(dead_units, "items") else {}
-
-    if not dead_raw:
-        return Command(update={"messages": [
-            ToolMessage(content="当前没有死亡单位。", tool_call_id=tool_call_id)
-        ]})
-
-    if unit_ids:
-        removed = [uid for uid in unit_ids if uid in dead_raw]
-        for uid in removed:
-            del dead_raw[uid]
-        msg = f"已清除死亡单位: {', '.join(removed)}" if removed else "指定的 ID 不在死亡单位列表中。"
-    else:
-        count = len(dead_raw)
-        dead_raw.clear()
-        msg = f"已清除全部 {count} 个死亡单位。"
-
-    return Command(update={
-        "dead_units": dead_raw,
-        "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)],
-    })
+    return _clear_dead_units_impl(unit_ids, state, tool_call_id)

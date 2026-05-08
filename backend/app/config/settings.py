@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     )
     llm_provider: str = "openai"
     llm_model: str = Field(
-        default="qwen3.6-27b",
+        default="deepseek-v4-flash",
         validation_alias=AliasChoices("TRPG_LLM_MODEL", "OPENAI_MODEL"),
     )
     llm_api_key: str = Field(

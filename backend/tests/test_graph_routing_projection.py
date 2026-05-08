@@ -298,6 +298,49 @@ def test_combat_projection_trims_more_aggressively_than_full_history():
     assert messages[0].content == "消息 0"
 
 
+def test_combat_projection_keeps_short_prelude_and_active_battle_span():
+    messages = [
+        HumanMessage(content=f"旧探索 {index}")
+        for index in range(12)
+    ]
+    messages.extend([
+        AIMessage(content="", tool_calls=[{"name": "start_combat", "args": {"combatant_ids": ["goblin_1"]}, "id": "call_start"}]),
+        ToolMessage(content="战斗开始！第 1 回合。", tool_call_id="call_start", name="start_combat"),
+        AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {"attacker_id": "goblin_1"}, "id": "call_attack"}]),
+        ToolMessage(content="Goblin 攻击英雄。", tool_call_id="call_attack", name="attack_action"),
+        HumanMessage(content="我反击。"),
+    ])
+
+    trimmed_messages = trim_model_messages(
+        messages,
+        COMBAT_AGENT_MODE,
+        state={"active_combat_message_start": 12},
+    )
+
+    assert [message.content for message in trimmed_messages[:5]] == [f"旧探索 {index}" for index in range(7, 12)]
+    assert isinstance(trimmed_messages[5], AIMessage)
+    assert trimmed_messages[5].tool_calls[0]["name"] == "start_combat"
+    assert trimmed_messages[-1].content == "我反击。"
+
+
+def test_combat_projection_falls_back_to_detecting_start_combat_tool_message():
+    messages = [
+        HumanMessage(content=f"旧探索 {index}")
+        for index in range(8)
+    ]
+    messages.extend([
+        AIMessage(content="", tool_calls=[{"name": "start_combat", "args": {"combatant_ids": ["wolf_1"]}, "id": "call_start"}]),
+        ToolMessage(content="战斗开始！第 1 回合。", tool_call_id="call_start", name="start_combat"),
+        HumanMessage(content="继续战斗。"),
+    ])
+
+    trimmed_messages = trim_model_messages(messages, COMBAT_AGENT_MODE, state={})
+
+    assert [message.content for message in trimmed_messages[:5]] == [f"旧探索 {index}" for index in range(3, 8)]
+    assert isinstance(trimmed_messages[5], AIMessage)
+    assert trimmed_messages[5].tool_calls[0]["name"] == "start_combat"
+
+
 def test_post_combat_projection_collapses_archived_battle_to_single_summary():
     state = {
         "phase": "exploration",
@@ -341,6 +384,19 @@ def test_tool_profiles_split_exploration_and_combat_visibility():
     assert "load_skill" not in combat_tools
     assert "weather" not in narrative_tools
     assert "weather" not in combat_tools
+    assert "manage_adventure" in narrative_tools
+    assert "manage_adventure" not in combat_tools
+    assert "load_adventure_node" not in narrative_tools
+    assert "search_adventure_nodes" not in narrative_tools
+    assert "switch_adventure_node" not in narrative_tools
+    assert "reveal_adventure_clue" not in narrative_tools
+    assert "mark_adventure_event" not in narrative_tools
+    assert "advance_adventure" not in narrative_tools
+    assert "manage_scene_units" in narrative_tools
+    assert "manage_scene_units" in combat_tools
+    assert "spawn_ally" not in narrative_tools
+    assert "spawn_monsters" not in narrative_tools
+    assert "clear_dead_units" not in narrative_tools
     assert "start_combat" in narrative_tools
     assert "start_combat" not in combat_tools
     assert "attack_action" in combat_tools
@@ -410,8 +466,8 @@ def test_adventure_module_skill_is_registered_for_on_demand_help():
     content = load_skill_content("adventure_module")
 
     assert "冒险模组主持技能" in content
-    assert "load_adventure_node" in content
-    assert "mark_adventure_event" in content
+    assert "manage_adventure" in content
+    assert 'action="mark_event"' in content
 
 
 def test_combat_brief_includes_conditions_attacks_and_scene_stakes():
@@ -549,7 +605,7 @@ def test_narrative_system_prompt_excludes_combat_only_guidelines():
     assert "不要主动输出整块角色卡" in prompt
     assert 'action="level_up"' not in prompt
     assert "character_state_management" not in prompt
-    assert "inspect_adventure_state(include_help=True)" in prompt
+    assert "冒险管理工具的 help 动作" in prompt
     assert "reveal_adventure_clue" not in prompt
     assert "search_adventure_nodes 能查到后期" not in prompt
 

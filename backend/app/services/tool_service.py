@@ -15,6 +15,7 @@ from app.services.tools.combat_tools import (  # noqa: F401
     clear_dead_units,
     end_combat,
     help_action,
+    manage_scene_units,
     next_turn,
     spawn_ally,
     spawn_monsters,
@@ -45,6 +46,7 @@ from app.services.tools.space_tools import (  # noqa: F401
     query_units_in_radius,
     switch_plane_map,
 )
+from app.services.tools.adventure_tools import manage_adventure  # noqa: F401
 
 # 旧名称兼容
 _build_player_combatant = prepare_player_for_combat

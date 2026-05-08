@@ -4,24 +4,29 @@
 
 ## 入口工具
 
-- `inspect_adventure_state`: 查看当前模组、当前节点、已知线索和已完成事件。
-- `load_adventure_node`: 读取当前或指定节点的 PDF 主持材料。涉及当前场景事实时优先调用它。
-- `search_adventure_nodes`: 按地点、NPC、线索、遭遇或玩家意图搜索 PDF 节点。玩家偏离当前节点、进入城镇支线或提到具体关键词时使用。
-- `switch_adventure_node`: 轻量切换剧情书签。只在玩家行动、已知线索、NPC 指引、地图、合理旅行或当前情景自然支持时使用。
-- `advance_adventure`: 沿当前节点的硬出口推进。适合开局和主线阶段出口条件已满足的场景。
-- `reveal_adventure_clue`: 记录玩家已经通过搜索、调查、审问、交涉或剧情互动获得的线索。
-- `mark_adventure_event`: 记录已经稳定发生的剧情事件，例如遭遇解决、NPC 获救、任务完成。
+统一使用 `manage_adventure`。旧的 `inspect_adventure_state`、`load_adventure_node`、`search_adventure_nodes`、`switch_adventure_node`、`advance_adventure`、`reveal_adventure_clue`、`mark_adventure_event` 只保留给历史调用兼容。
+
+## 动作速查
+
+- 查看进度：`action="inspect"`，可选 `include_help=true` 读取完整说明。
+- 读取节点：`action="load_node"`，可选 `node_id`；不传则读取当前节点。
+- 搜索节点：`action="search_nodes"`，传 `query`，可选 `limit`。
+- 切换书签：`action="switch_node"`，传 `node_id`，可选 `reason`。
+- 沿出口推进：`action="advance"`，传 `option_id`。
+- 记录线索：`action="reveal_clue"`，传 `clue_id`。
+- 记录事件：`action="mark_event"`，传 `event_id`。
+- 查看说明：`action="help"`。
 
 ## 使用流程
 
-- 当前场景缺少事实依据时，先 `load_adventure_node`。不要凭记忆补模组内容。
-- 玩家意图指向别的地点、NPC、支线或秘密关键词时，先 `search_adventure_nodes`，再按需要 `load_adventure_node`。
+- 当前场景缺少事实依据时，先 `action="load_node"`。不要凭记忆补模组内容。
+- 玩家意图指向别的地点、NPC、支线或秘密关键词时，先 `action="search_nodes"`，再按需要 `action="load_node"`。
 - 工具返回的 `player_visible_intro` 可改写给玩家；`secrets`、`dm_guidance` 和未发现线索只作为主持依据，不要直接泄露。
 - `available_exits` 表示硬出口是否满足；它不是唯一选择列表。合理绕行、调查、返回城镇、休整或角色扮演都可以自然处理。
 - 搜索能查到后期和秘密节点，但搜索可见不等于玩家可达。未获得方向或线索时，不要直接切换；用叙事说明缺少路径，并引导玩家从当前线索调查。
-- 玩家真实获得线索后立刻 `reveal_adventure_clue`，这样后续出口和 HUD 才能反映进度。
-- 玩家真实完成稳定事件后再 `mark_adventure_event`。不要因为 NPC 提到目标、玩家打算去做或剧情可能发生就提前记录。
-- 玩家进入已查到且合理可达的新场景时，用 `switch_adventure_node` 更新书签；如果当前节点提供满足条件的硬出口，优先用 `advance_adventure`。
+- 玩家真实获得线索后立刻 `action="reveal_clue"`，这样后续出口和 HUD 才能反映进度。
+- 玩家真实完成稳定事件后再 `action="mark_event"`。不要因为 NPC 提到目标、玩家打算去做或剧情可能发生就提前记录。
+- 玩家进入已查到且合理可达的新场景时，用 `action="switch_node"` 更新书签；如果当前节点提供满足条件的硬出口，优先用 `action="advance"`。
 
 ## 和其他系统配合
 
@@ -33,4 +38,4 @@
 
 ## 完整性边界
 
-当前数据已包含完整 PDF 候选节点和少量人工硬出口。它能支持一场“资料可查、书签可推进”的完整冒险主持，但后续地下城房间级路线主要依赖 `search_adventure_nodes` 与 `switch_adventure_node`，不是全自动图遍历。遇到细粒度房间探索时，按玩家自然行动检索并切换到对应节点。
+当前数据已包含完整 PDF 候选节点和少量人工硬出口。它能支持一场“资料可查、书签可推进”的完整冒险主持，但后续地下城房间级路线主要依赖 `search_nodes` 与 `switch_node`，不是全自动图遍历。遇到细粒度房间探索时，按玩家自然行动检索并切换到对应节点。

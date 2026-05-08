@@ -98,6 +98,7 @@ def build_combat_pair(history_pairs: int) -> tuple[dict[str, Any], dict[str, Any
         "phase": "combat",
         "scene_summary": "哥布林守着洞穴窄口。",
         "messages": base_messages,
+        "active_combat_message_start": history_pairs * 2,
         "player": {"id": "player_hero", "name": "英雄", "side": "player", "hp": 8, "max_hp": 12, "ac": 14, "attacks": [{"name": "Longsword"}]},
         "combat": combat,
     }
@@ -111,6 +112,7 @@ def build_combat_pair(history_pairs: int) -> tuple[dict[str, Any], dict[str, Any
             ToolMessage(content="进入 Goblin 的回合。", tool_call_id="call_4", name="next_turn"),
             HumanMessage(content="继续。"),
         ],
+        "active_combat_message_start": history_pairs * 2,
         "player": {"id": "player_hero", "name": "英雄", "side": "player", "hp": 8, "max_hp": 12, "ac": 14, "attacks": [{"name": "Longsword"}]},
         "combat": {
             **combat,
