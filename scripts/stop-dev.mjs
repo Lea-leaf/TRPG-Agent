@@ -2,8 +2,12 @@ import { execFileSync } from 'node:child_process'
 
 const devPorts = new Set(['5173', '8000'])
 
-// 只处理监听中的开发端口，避免误杀同端口的短暂连接记录。
-function listDevListeners() {
+function addListener(listeners, pid, localPort) {
+  if (!listeners.has(pid)) listeners.set(pid, new Set())
+  listeners.get(pid).add(localPort)
+}
+
+function listDevListenersViaNetstat() {
   const output = execFileSync('netstat', ['-ano'], { encoding: 'utf8' })
   const listeners = new Map()
 
@@ -15,14 +19,52 @@ function listDevListeners() {
     const pid = columns[4]
     if (!localPort || !devPorts.has(localPort)) continue
 
-    if (!listeners.has(pid)) listeners.set(pid, new Set())
-    listeners.get(pid).add(localPort)
+    addListener(listeners, pid, localPort)
   }
 
   return listeners
 }
 
-// 打印进程名能让端口冲突一眼看出是不是旧的前后端实例。
+function listDevListenersViaPowerShell() {
+  const output = execFileSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess | ConvertTo-Json -Compress',
+    ],
+    { encoding: 'utf8' },
+  ).trim()
+
+  const rows = output ? JSON.parse(output) : []
+  const entries = Array.isArray(rows) ? rows : [rows]
+  const listeners = new Map()
+
+  for (const row of entries) {
+    const localPort = String(row?.LocalPort ?? '')
+    const pid = String(row?.OwningProcess ?? '')
+    if (!localPort || !pid || !devPorts.has(localPort)) continue
+
+    addListener(listeners, pid, localPort)
+  }
+
+  return listeners
+}
+
+function listDevListeners() {
+  try {
+    return listDevListenersViaNetstat()
+  } catch (error) {
+    if (error?.code !== 'EPERM' && error?.code !== 'ENOENT') throw error
+    try {
+      return listDevListenersViaPowerShell()
+    } catch {
+      console.warn('Unable to inspect dev ports; skipping pre-stop.')
+      return new Map()
+    }
+  }
+}
+
 function describeProcess(pid) {
   try {
     const output = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
@@ -35,13 +77,12 @@ function describeProcess(pid) {
   }
 }
 
-// 杀掉进程树，避免 pnpm/cmd/node/python 只停掉其中一层后留下真正监听端口的子进程。
 function stopProcessTree(pid, ports) {
   console.log(`Stopping ${describeProcess(pid)} on port(s): ${[...ports].join(', ')}`)
 
   try {
     execFileSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'inherit' })
-  } catch (error) {
+  } catch {
     console.warn(`Failed to stop pid=${pid}; verifying ports before failing.`)
   }
 }

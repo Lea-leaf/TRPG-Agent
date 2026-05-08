@@ -32,8 +32,9 @@ def use_monster_action(
     action_id: str | None = None,
     advantage: str = "normal",
     target_point: dict[str, float] | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """执行怪物/NPC结构化动作，LLM 只负责选择动作，规则结算在工具内完成。
     参数示例：

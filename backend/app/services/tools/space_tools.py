@@ -208,8 +208,9 @@ def _create_plane_map_command(
     grid_size: float = 5,
     description: str = "",
     activate: bool = True,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """创建地图的共享实现，保证新旧工具入口行为一致。"""
     space = build_space_state(state.get("space") if state else None)
@@ -238,8 +239,9 @@ def _create_plane_map_command(
 
 def _switch_plane_map_command(
     map_id: str,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """切换地图的共享实现，旧工具只作为兼容入口保留。"""
     space = build_space_state(state.get("space") if state else None)
@@ -262,8 +264,9 @@ def _place_unit_command(
     facing_deg: float = 0,
     footprint_radius: float = 2.5,
     reason: str = "",
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """剧情摆放的共享实现，和战斗移动保持明确边界。"""
     raw_unit_id = unit_id
@@ -303,8 +306,9 @@ def _move_unit_command(
     unit_id: str,
     x: float,
     y: float,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """战斗移动的共享实现，集中维护移动力扣减规则。"""
     raw_unit_id = unit_id
@@ -367,8 +371,9 @@ def _approach_unit_command(
     target_id: str,
     desired_distance: float | None = None,
     attack_name: str | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """沿直线靠近目标到指定距离；当前没有障碍物系统，先保持极简路径语义。"""
     raw_unit_id = unit_id
@@ -470,8 +475,9 @@ def _approach_unit_command(
 def _remove_unit_command(
     unit_id: str | None = None,
     unit_ids: list[str] | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """把单位从当前空间中彻底移除；这是死亡结算、撤离和场景回收的正式出口。"""
     space = build_space_state(state.get("space") if state else None)
@@ -497,8 +503,9 @@ def _remove_unit_command(
 def _measure_distance_command(
     source_id: str,
     target_id: str,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """测距的共享实现，避免技能入口和旧工具结果漂移。"""
     raw_source_id = source_id
@@ -530,8 +537,9 @@ def _query_units_in_radius_command(
     y: float,
     radius: float,
     map_id: str | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """范围查询的共享实现，供 AoE 和光环判断复用。"""
     space = build_space_state(state.get("space") if state else None)
@@ -568,8 +576,9 @@ def manage_space(
     ],
     payload: dict | None = None,
     reason: str = "",
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """平面空间管理技能。用于地图、单位落点、移动、测距和范围查询。
     如不确定 action 或 payload 写法，先用 action="help" 查看完整技能说明。
@@ -679,8 +688,9 @@ def create_plane_map(
     grid_size: float = 5,
     description: str = "",
     activate: bool = True,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：创建一张没有 z 轴概念的平面地图。新模型可见入口是 manage_space。"""
     return _create_plane_map_command(name, width, height, grid_size, description, activate, state, tool_call_id)
@@ -689,8 +699,9 @@ def create_plane_map(
 @tool
 def switch_plane_map(
     map_id: str,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：切换当前剧情所在的平面地图。新模型可见入口是 manage_space。"""
     return _switch_plane_map_command(map_id, state, tool_call_id)
@@ -705,8 +716,9 @@ def place_unit(
     facing_deg: float = 0,
     footprint_radius: float = 2.5,
     reason: str = "",
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：剧情摆放、传送和初始入场。新模型可见入口是 manage_space。"""
     return _place_unit_command(unit_id, x, y, map_id, facing_deg, footprint_radius, reason, state, tool_call_id)
@@ -717,8 +729,9 @@ def move_unit(
     unit_id: str,
     x: float,
     y: float,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：移动单位并在战斗中扣除移动力。新模型可见入口是 manage_space。"""
     return _move_unit_command(unit_id, x, y, state, tool_call_id)
@@ -728,8 +741,9 @@ def move_unit(
 def measure_distance(
     source_id: str,
     target_id: str,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：测量两个已放置单位之间的平面距离。新模型可见入口是 manage_space。"""
     return _measure_distance_command(source_id, target_id, state, tool_call_id)
@@ -741,8 +755,9 @@ def query_units_in_radius(
     y: float,
     radius: float,
     map_id: str | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：查询当前平面某点半径内的单位。新模型可见入口是 manage_space。"""
     return _query_units_in_radius_command(x, y, radius, map_id, state, tool_call_id)
@@ -752,8 +767,9 @@ def query_units_in_radius(
 def remove_unit(
     unit_id: str | None = None,
     unit_ids: list[str] | None = None,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """兼容旧调用：从空间中直接移除一个或多个单位。新模型可见入口是 manage_space。"""
     return _remove_unit_command(unit_id, unit_ids, state, tool_call_id)

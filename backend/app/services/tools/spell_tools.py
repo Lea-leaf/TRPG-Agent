@@ -272,8 +272,9 @@ def cast_spell(
     slot_level: int = 0,
     target_point: dict[str, float] | None = None,
     end_concentration: bool = False,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
+    *,
+    state: Annotated[dict, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
     """施放法术，或主动结束当前专注。
     本工具会写回命中、伤害、治疗、资源与状态结果。

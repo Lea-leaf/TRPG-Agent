@@ -249,6 +249,7 @@ onUnmounted(() => {
 .timestamp {
   font-size: 11px;
   color: #6c6c70;
+  display: none; 
 }
 
 .message-bubble {
