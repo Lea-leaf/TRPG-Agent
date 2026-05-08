@@ -94,6 +94,7 @@ def _invoke_assistant(state: GraphState, mode: str) -> dict:
         phase=phase,
         system_prompt=assembled_context.system_prompt,
         hud_text=assembled_context.hud_text,
+        runtime_state_text=assembled_context.runtime_state_text,
         messages=assembled_context.model_input_messages,
         tools=tools,
     )

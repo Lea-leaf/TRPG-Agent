@@ -106,6 +106,10 @@ def serialize_message(message: BaseMessage) -> dict[str, Any]:
     if response_metadata:
         payload["response_metadata"] = _json_safe(response_metadata)
 
+    usage_metadata = getattr(message, "usage_metadata", None)
+    if usage_metadata:
+        payload["usage_metadata"] = _json_safe(usage_metadata)
+
     return payload
 
 
@@ -225,6 +229,7 @@ def start_llm_trace(
     phase: str | None,
     system_prompt: str,
     hud_text: str,
+    runtime_state_text: str,
     messages: list[BaseMessage],
     tools: list[Any],
     trace_dir: str | Path | None = None,
@@ -242,6 +247,7 @@ def start_llm_trace(
             "phase": phase,
             "system_prompt": system_prompt,
             "hud_text": hud_text,
+            "runtime_state_text": runtime_state_text,
             "messages": [serialize_message(message) for message in messages],
             "available_tools": [serialize_tool(tool) for tool in tools],
         },
@@ -379,6 +385,12 @@ def render_trace_markdown(session_id: str, events: list[dict[str, Any]]) -> str:
             lines.append("")
             lines.append("```text")
             lines.append(str(payload.get("hud_text", "")))
+            lines.append("```")
+            lines.append("")
+            lines.append("### Runtime State")
+            lines.append("")
+            lines.append("```text")
+            lines.append(str(payload.get("runtime_state_text", "")))
             lines.append("```")
             lines.append("")
             lines.append("### Model Input Messages")

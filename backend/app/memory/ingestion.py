@@ -119,6 +119,7 @@ class MemoryIngestionPipeline:
             phase=phase,
             system_prompt=system_prompt,
             hud_text="",
+            runtime_state_text="",
             messages=[HumanMessage(content=summary_input)],
             tools=[],
             trace_dir=self._trace_dir,

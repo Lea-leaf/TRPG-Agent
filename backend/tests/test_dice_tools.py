@@ -54,3 +54,4 @@ def test_request_dice_roll_supports_disadvantage_for_surprise_context():
     assert payload["advantage"] == "disadvantage"
     assert payload["surprise"] is True
     assert "新版突袭先攻" in payload["note"]
+    assert "不要逐单位重复掷骰" in payload["note"]

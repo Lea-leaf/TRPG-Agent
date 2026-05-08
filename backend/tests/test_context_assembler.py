@@ -24,20 +24,21 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIn("玩家刚踏入地牢入口。", assembled.system_prompt)
+        self.assertEqual("基础规则", assembled.system_prompt)
         self.assertNotIn("[可按需加载的技能]", assembled.system_prompt)
         self.assertNotIn("character_state_management", assembled.system_prompt)
-        self.assertIn("[扩展上下文]", assembled.system_prompt)
-        self.assertIn("外部上下文:narrative", assembled.system_prompt)
+        self.assertIn("玩家刚踏入地牢入口。", assembled.runtime_state_text)
+        self.assertIn("[扩展上下文]", assembled.runtime_state_text)
+        self.assertIn("外部上下文:narrative", assembled.runtime_state_text)
         self.assertIn("状态快照", assembled.hud_text)
-        self.assertIsInstance(assembled.model_input_messages[-2], SystemMessage)
-        self.assertIn("<runtime_state", assembled.model_input_messages[-2].content)
-        self.assertIn('source="hud"', assembled.model_input_messages[-2].content)
-        self.assertIn('visibility="model_only"', assembled.model_input_messages[-2].content)
-        self.assertNotIn("复述", assembled.model_input_messages[-2].content)
-        self.assertNotIn("解释", assembled.model_input_messages[-2].content)
-        self.assertIn("状态快照", assembled.model_input_messages[-2].content)
-        self.assertEqual("我看看四周。", assembled.model_input_messages[-1].content)
+        self.assertEqual("我看看四周。", assembled.model_input_messages[-2].content)
+        self.assertIsInstance(assembled.model_input_messages[-1], SystemMessage)
+        self.assertIn("<runtime_state", assembled.model_input_messages[-1].content)
+        self.assertIn('source="hud"', assembled.model_input_messages[-1].content)
+        self.assertIn('visibility="model_only"', assembled.model_input_messages[-1].content)
+        self.assertNotIn("复述", assembled.model_input_messages[-1].content)
+        self.assertNotIn("解释", assembled.model_input_messages[-1].content)
+        self.assertIn("状态快照", assembled.model_input_messages[-1].content)
         self.assertIn("[当前平面空间]", assembled.hud_text)
         self.assertIn("当前没有平面地图", assembled.hud_text)
 
@@ -51,9 +52,9 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIn("[近期情节记忆]", assembled.system_prompt)
-        self.assertIn("玩家刚进入地牢。", assembled.system_prompt)
-        self.assertNotIn("这是旧摘要", assembled.system_prompt)
+        self.assertIn("[近期情节记忆]", assembled.runtime_state_text)
+        self.assertIn("玩家刚进入地牢。", assembled.runtime_state_text)
+        self.assertNotIn("这是旧摘要", assembled.runtime_state_text)
 
     def test_opening_prompt_requests_fighter_companion_when_missing(self):
         assembler = ContextAssembler()
@@ -64,8 +65,8 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIn("[开局友方准则]", assembled.system_prompt)
-        self.assertIn("fighter_companion", assembled.system_prompt)
+        self.assertIn("[开局友方准则]", assembled.runtime_state_text)
+        self.assertIn("fighter_companion", assembled.runtime_state_text)
 
     def test_opening_prompt_skips_when_ally_exists(self):
         assembler = ContextAssembler()
@@ -77,7 +78,62 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertNotIn("[开局友方准则]", assembled.system_prompt)
+        self.assertNotIn("[开局友方准则]", assembled.runtime_state_text)
+
+    def test_hud_marks_ally_scene_unit_id_as_start_combat_input(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="开战。")],
+            "scene_units": {
+                "fighter_companion": {
+                    "id": "fighter_companion",
+                    "name": "米拉",
+                    "side": "ally",
+                    "hp": 12,
+                    "max_hp": 12,
+                },
+                "goblin_1": {"id": "goblin_1", "name": "Goblin", "side": "enemy", "hp": 7, "max_hp": 7},
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("start_combat 的非玩家参战 ID 来源", assembled.hud_text)
+        self.assertIn("敌人和友方都必须显式列入 combatant_ids", assembled.hud_text)
+        self.assertIn('start_combat.combatant_ids 可直接使用 "fighter_companion"', assembled.hud_text)
+        self.assertIn('start_combat.combatant_ids 可直接使用 "goblin_1"', assembled.hud_text)
+
+    def test_narrative_runtime_state_periodically_anchors_adventure_node(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content=f"探索 {index}") for index in range(4)],
+            "adventure": {"module_id": "lost_mine", "active_node_id": "goblin_ambush"},
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("[冒险节点校准]", assembled.runtime_state_text)
+        self.assertIn("goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("不要因为多轮闲聊而脱离当前模组进度", assembled.runtime_state_text)
+
+    def test_adventure_node_anchor_skips_combat_mode(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content=f"继续 {index}") for index in range(4)],
+            "adventure": {"module_id": "lost_mine", "active_node_id": "goblin_ambush"},
+            "combat": {
+                "round": 1,
+                "current_actor_id": "goblin_1",
+                "initiative_order": ["goblin_1"],
+                "participants": {
+                    "goblin_1": {"name": "Goblin", "side": "enemy", "hp": 7, "max_hp": 7, "ac": 15}
+                },
+            },
+        }
+
+        assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
+
+        self.assertNotIn("[冒险节点校准]", assembled.runtime_state_text)
 
     def test_assemble_trims_without_starting_from_tool_message(self):
         assembler = ContextAssembler()
@@ -219,9 +275,10 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
-        self.assertIn("[战斗简报]", assembled.system_prompt)
-        self.assertIn("[当前回合指令]", assembled.system_prompt)
-        self.assertIn("Goblin", assembled.system_prompt)
+        self.assertEqual("战斗规则", assembled.system_prompt)
+        self.assertIn("[战斗简报]", assembled.runtime_state_text)
+        self.assertIn("[当前回合指令]", assembled.runtime_state_text)
+        self.assertIn("Goblin", assembled.runtime_state_text)
 
     def test_combat_context_lists_monster_actions(self):
         assembler = ContextAssembler()
@@ -250,9 +307,9 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
-        self.assertIn("actions:Scimitar(scimitar, attack)", assembled.system_prompt)
+        self.assertIn("actions:Scimitar(scimitar, attack)", assembled.runtime_state_text)
         self.assertIn("actions=[Scimitar(scimitar, attack)", assembled.hud_text)
-        self.assertNotIn("attacks:[", assembled.system_prompt)
+        self.assertNotIn("attacks:[", assembled.runtime_state_text)
 
     def test_combat_context_separates_allies_and_projects_resources(self):
         assembler = ContextAssembler()
@@ -286,13 +343,13 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
-        self.assertIn("友方侧: 伊莲", assembled.system_prompt)
-        self.assertIn("对立侧: Goblin", assembled.system_prompt)
-        self.assertIn("spell_slot_lv1=2/3", assembled.system_prompt)
+        self.assertIn("友方侧: 伊莲", assembled.runtime_state_text)
+        self.assertIn("对立侧: Goblin", assembled.runtime_state_text)
+        self.assertIn("spell_slot_lv1=2/3", assembled.runtime_state_text)
         self.assertIn("magic_missile", assembled.hud_text)
         self.assertIn("reaction=可用: shield", assembled.hud_text)
-        self.assertIn("当前是友方单位 伊莲", assembled.system_prompt)
-        self.assertIn("以该友方单位 ID 作为行动者/施法者", assembled.system_prompt)
+        self.assertIn("当前是友方单位 伊莲", assembled.runtime_state_text)
+        self.assertIn("以该友方单位 ID 作为行动者/施法者", assembled.runtime_state_text)
 
     def test_hud_includes_planar_space_summary(self):
         assembler = ContextAssembler()
@@ -348,6 +405,60 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("magic_missile", projected)
         self.assertIn("arcane_ward", projected)
         self.assertIn("long_notes", projected)
+
+    def test_cast_spell_projection_keeps_multi_target_hp_results(self):
+        tool_message = ToolMessage(
+            content=(
+                "伊莲 施放 魔法飞弹（1环）— 3 枚飞弹!\n"
+                "  → Goblin A: 2枚 [1d4+1 (2), 1d4+1 (3)] = 5 力场伤害\n"
+                "  Goblin A HP: 7 → 2\n"
+                "  → Goblin B: 1枚 [1d4+1 (4)] = 4 力场伤害\n"
+                "  Goblin B HP: 7 → 3\n"
+                "（剩余1环法术位: 2）"
+            ),
+            tool_call_id="call_spell",
+            name="cast_spell",
+        )
+
+        projected = summarize_tool_message(tool_message)
+
+        self.assertIn("Goblin A HP: 7 → 2", projected)
+        self.assertIn("Goblin B HP: 7 → 3", projected)
+        self.assertIn("剩余1环法术位", projected)
+
+    def test_attack_projection_keeps_hp_resolution_line(self):
+        tool_message = ToolMessage(
+            content=(
+                "Goblin 2 使用 [Scimitar] 攻击 巴伦!\n"
+                "命中骰: 2d20kh1 (10, 14)+ 4 = 18 vs AC 16\n"
+                "伤害骰: 1d6 (6)+ 2 = 8 → 8 点 slashing 伤害\n"
+                "巴伦 HP: 12 → 4"
+            ),
+            tool_call_id="call_attack",
+            name="use_monster_action",
+        )
+
+        projected = summarize_tool_message(tool_message)
+
+        self.assertIn("巴伦 HP: 12 → 4", projected)
+        self.assertIn("已经由工具写回", projected)
+        self.assertIn("不得再次扣减", projected)
+
+    def test_any_tool_projection_keeps_hp_resolution_line(self):
+        tool_message = ToolMessage(
+            content=(
+                "巴伦饮下治疗药水。\n"
+                "治疗骰: 2d4+2 = 7\n"
+                "巴伦 HP: 4 → 11"
+            ),
+            tool_call_id="call_state",
+            name="modify_character_state",
+        )
+
+        projected = summarize_tool_message(tool_message)
+
+        self.assertIn("巴伦 HP: 4 → 11", projected)
+        self.assertIn("不得再次扣减、治疗或改写 HP", projected)
 
 
 if __name__ == "__main__":

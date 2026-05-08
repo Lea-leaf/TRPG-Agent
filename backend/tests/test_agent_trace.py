@@ -31,6 +31,7 @@ def test_agent_trace_persists_full_prompt_and_response(tmp_path: Path):
         phase="combat",
         system_prompt="战斗规则",
         hud_text="实时 HUD",
+        runtime_state_text="实时运行态",
         messages=[HumanMessage(content="我攻击哥布林")],
         tools=[SimpleNamespace(name="attack_action", description="执行一次攻击")],
         trace_dir=tmp_path,
@@ -46,6 +47,12 @@ def test_agent_trace_persists_full_prompt_and_response(tmp_path: Path):
         response=AIMessage(
             content="让我先为你执行攻击。",
             tool_calls=[{"name": "attack_action", "args": {"attacker_id": "player_hero"}, "id": "call_1"}],
+            usage_metadata={
+                "input_tokens": 1200,
+                "output_tokens": 40,
+                "total_tokens": 1240,
+                "input_token_details": {"cache_read": 600},
+            },
         ),
         trace_dir=tmp_path,
     )
@@ -70,8 +77,10 @@ def test_agent_trace_persists_full_prompt_and_response(tmp_path: Path):
     llm_start = events[-3]["payload"]
     llm_done = events[-2]["payload"]
     assert llm_start["system_prompt"] == "战斗规则"
+    assert llm_start["runtime_state_text"] == "实时运行态"
     assert llm_start["messages"][0]["content"] == "我攻击哥布林"
     assert llm_done["response"]["tool_calls"][0]["name"] == "attack_action"
+    assert llm_done["response"]["usage_metadata"]["input_token_details"]["cache_read"] == 600
 
 
 def test_export_trace_report_writes_markdown_file(tmp_path: Path):
@@ -86,6 +95,7 @@ def test_export_trace_report_writes_markdown_file(tmp_path: Path):
                 "phase": "exploration",
                 "system_prompt": "基础规则",
                 "hud_text": "当前玩家状态",
+                "runtime_state_text": "当前玩家状态",
                 "messages": [{"role": "human", "content": "我推开门。"}],
                 "available_tools": [{"name": "roll_dice", "description": "掷骰子"}],
             },
