@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.builder import build_graph
@@ -145,13 +145,15 @@ def test_graph_continues_after_tool_message_until_llm_stops_calling_tools():
                 )
             if len(self.calls) == 2:
                 assert isinstance(messages[-2], ToolMessage)
-                assert isinstance(messages[-1], SystemMessage)
+                assert isinstance(messages[-1], HumanMessage)
+                assert str(messages[-1].content).startswith("[系统:运行状态帧]")
                 return AIMessage(
                     content="",
                     tool_calls=[{"name": "request_dice_roll", "args": {"reason": "second", "formula": "1d1"}, "id": "call_2"}],
                 )
             assert isinstance(messages[-2], ToolMessage)
-            assert isinstance(messages[-1], SystemMessage)
+            assert isinstance(messages[-1], HumanMessage)
+            assert str(messages[-1].content).startswith("[系统:运行状态帧]")
             return AIMessage(content="done", tool_calls=[])
 
     fake_service = _LoopingLLMService()
@@ -282,12 +284,8 @@ def test_model_projection_summarizes_tool_messages_without_mutating_transcript()
     projected_messages = _build_model_input_messages(state, COMBAT_AGENT_MODE)
 
     assert tool_message.content.startswith("Goblin 使用 [Scimitar]")
-    assert isinstance(projected_messages[-3], AIMessage)
-    assert projected_messages[-2].content.startswith("[工具:attack_action]")
-    assert isinstance(projected_messages[-1], SystemMessage)
-    assert "<runtime_state_frame" in projected_messages[-1].content
-    assert 'source="state"' in projected_messages[-1].content
-    assert "状态快照" not in projected_messages[-1].content
+    assert isinstance(projected_messages[-2], AIMessage)
+    assert projected_messages[-1].content.startswith("[工具:attack_action]")
     assert state["messages"][-1].content == tool_message.content
 
 
@@ -386,17 +384,13 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
 
     projected_messages = _build_model_input_messages(state, NARRATIVE_AGENT_MODE)
 
-    assert len(projected_messages) == 4
+    assert len(projected_messages) == 3
     assert projected_messages[1].content.startswith("[系统:战斗归档]")
     assert "状态: 已完成并归档" in projected_messages[1].content
     assert "不要再次开始同一场战斗" in projected_messages[1].content
     assert "英雄在 2 回合内击败哥布林" in projected_messages[1].content
     assert "Goblin 使用 [Scimitar]" not in projected_messages[1].content
-    assert projected_messages[-2].content.startswith("我检查哥布林尸体。")
-    assert isinstance(projected_messages[-1], SystemMessage)
-    assert "<runtime_state" in projected_messages[-1].content
-    assert 'source="state"' in projected_messages[-1].content
-    assert "状态快照" not in projected_messages[-1].content
+    assert projected_messages[-1].content.startswith("我检查哥布林尸体。")
 
 
 def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_messages_remain():
@@ -434,7 +428,7 @@ def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_m
     assert "正式启动战斗流程" in projected_text
     assert "突袭检定 raw=12" in projected_text
     assert "现在进入正式战斗" not in projected_text
-    assert projected_messages[-2].content == "我检查路障。"
+    assert projected_messages[-1].content == "我检查路障。"
 
 
 def test_tool_profiles_split_exploration_and_combat_visibility():
@@ -653,6 +647,8 @@ def test_combat_assistant_records_full_prompt_trace(mock_get_llm_service, mock_s
     assert start_kwargs["runtime_state_text"]
     assert any("继续战斗" in str(message.content) for message in start_kwargs["messages"])
     assert "<runtime_state" in str(start_kwargs["messages"][-1].content)
+    assert result["messages"][0].content.startswith("[系统:运行状态帧]")
+    assert result["messages"][1].content == "哥布林向你逼近。"
 
 
 def test_narrative_system_prompt_excludes_combat_only_guidelines():
@@ -711,7 +707,8 @@ def test_combat_assistant_node_invokes_llm_with_monster_turn_directive_and_comba
     with patch("app.graph.nodes._get_llm_service", return_value=fake_service):
         result = combat_assistant_node(state)
 
-    assert result["messages"][0].tool_calls[0]["name"] == "attack_action"
+    assert result["messages"][0].content.startswith("[系统:运行状态帧]")
+    assert result["messages"][1].tool_calls[0]["name"] == "attack_action"
     llm_call = fake_service.calls[0]
     assert llm_call["mode"] == COMBAT_AGENT_MODE
     assert {tool.name for tool in llm_call["tools"]} == {tool.name for tool in get_tool_profile("combat")}

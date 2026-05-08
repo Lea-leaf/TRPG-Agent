@@ -22,6 +22,7 @@ from app.memory.context_assembler import (
     CONTEXT_SOFT_COMPACT_TOKEN_BUDGET,
     MODEL_CONTEXT_TOKEN_LIMIT,
     ContextAssembler,
+    build_runtime_state_message,
     estimate_messages_tokens,
 )
 from app.prompts import get_assistant_system_prompt
@@ -142,7 +143,11 @@ def build_combat_pair(history_pairs: int) -> tuple[dict[str, Any], dict[str, Any
 def assemble_payload(state: dict[str, Any], mode: str) -> list[dict[str, Any]]:
     assembler = ContextAssembler()
     assembled = assembler.assemble(state, mode, base_system_prompt=get_assistant_system_prompt(mode))
-    messages = [SystemMessage(content=assembled.system_prompt), *assembled.model_input_messages]
+    messages = [
+        SystemMessage(content=assembled.system_prompt),
+        *assembled.model_input_messages,
+        build_runtime_state_message(assembled.runtime_state_text),
+    ]
     payload = [serialize_message(message) for message in messages]
     payload.append(
         {
@@ -193,7 +198,7 @@ def inspect(mode: str, min_prefix_chars: int, history_pairs: int) -> int:
     prefix_len = common_prefix_len(text_a, text_b)
     runtime_index_a = runtime_state_index(payload_a)
     runtime_index_b = runtime_state_index(payload_b)
-    runtime_after_last_human = runtime_index_a > last_human_index(payload_a) and runtime_index_b > last_human_index(payload_b)
+    runtime_before_tool_schema = runtime_index_a == len(payload_a) - 2 and runtime_index_b == len(payload_b) - 2
     prefix_ratio = prefix_len / max(min(len(text_a), len(text_b)), 1)
 
     print(f"mode: {mode}")
@@ -209,23 +214,16 @@ def inspect(mode: str, min_prefix_chars: int, history_pairs: int) -> int:
     print(f"common_prefix_ratio: {prefix_ratio:.3f}")
     print(f"runtime_state_message_index_a: {runtime_index_a}/{len(payload_a) - 1}")
     print(f"runtime_state_message_index_b: {runtime_index_b}/{len(payload_b) - 1}")
-    print(f"runtime_state_after_last_human: {runtime_after_last_human}")
+    print(f"runtime_state_before_tool_schema: {runtime_before_tool_schema}")
 
     if prefix_len < min_prefix_chars:
         print(f"FAIL: common prefix is below {min_prefix_chars} chars")
         return 1
-    if not runtime_after_last_human:
-        print("FAIL: runtime state does not follow the latest user-visible intent")
+    if not runtime_before_tool_schema:
+        print("FAIL: runtime state is not the final model message before tool schema")
         return 1
     print("PASS: context shape is cache-friendly")
     return 0
-
-
-def last_human_index(payload: list[dict[str, Any]]) -> int:
-    for index in range(len(payload) - 1, -1, -1):
-        if payload[index].get("role") == "human":
-            return index
-    return -1
 
 
 def main() -> int:

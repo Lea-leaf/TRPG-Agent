@@ -7,7 +7,7 @@ from copy import copy
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from app.adventures.models import AdventureState
 from app.adventures.store import get_adventure_store
@@ -18,6 +18,7 @@ from app.services.tools._helpers import compute_ac
 
 COMBAT_ARCHIVE_MESSAGE_PREFIX = "[系统:战斗归档]"
 CONTEXT_COMPACTION_MESSAGE_PREFIX = "[系统:上下文预算归档]"
+RUNTIME_STATE_MESSAGE_PREFIX = "[系统:运行状态帧]"
 MODEL_CONTEXT_TOKEN_LIMIT = 1_000_000
 CONTEXT_SOFT_COMPACT_TOKEN_BUDGET = 700_000
 CONTEXT_HARD_TRIM_TOKEN_BUDGET = 850_000
@@ -73,10 +74,6 @@ class ContextAssembler:
 
         sections.append("[事实优先级]\n本帧 > 最新工具返回 > 旧对话。旧 HUD、旧战报和旧资源数字只作历史叙事参考。")
         sections.append(self._build_runtime_mode_frame(state, mode))
-
-        memory_frame = self._build_memory_frame(state)
-        if memory_frame:
-            sections.append(memory_frame)
 
         if mode == COMBAT_AGENT_MODE:
             combat_brief = self._build_combat_frame(state)
@@ -188,7 +185,7 @@ class ContextAssembler:
                 continue
 
             if isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith("[系统:"):
-                if message.content.startswith((COMBAT_ARCHIVE_MESSAGE_PREFIX, CONTEXT_COMPACTION_MESSAGE_PREFIX)):
+                if message.content.startswith((COMBAT_ARCHIVE_MESSAGE_PREFIX, CONTEXT_COMPACTION_MESSAGE_PREFIX, RUNTIME_STATE_MESSAGE_PREFIX)):
                     projected_messages.append(message)
                     continue
                 projected_messages.append(clone_message_with_content(message, summarize_system_message(message.content)))
@@ -197,7 +194,7 @@ class ContextAssembler:
             projected_messages.append(message)
 
         repaired_messages = repair_tool_call_sequence(projected_messages)
-        return insert_runtime_hud_message(repaired_messages, runtime_state_text)
+        return repaired_messages
 
     def _build_combat_brief(self, state: GraphState) -> str:
         combat_dict = state_value_to_dict(state.get("combat"))
@@ -263,7 +260,8 @@ class ContextAssembler:
                 "玩家: "
                 f"{player_dict.get('name', player_dict.get('id', 'player'))} [ID:{player_dict.get('id', 'player')}] "
                 f"{format_player_priority_summary(player_dict)} "
-                f"conditions:{format_conditions(player_dict)}"
+                f"conditions:{format_conditions(player_dict)} "
+                f"magic:[{format_magic(player_dict)}]"
             )
         else:
             lines.append("玩家: 尚未加载角色卡。")
@@ -272,19 +270,6 @@ class ContextAssembler:
         lines.append(f"冒险节点: {adventure_dict['module_id']} / {adventure_dict['active_node_id']}")
 
         return "[运行状态帧]\n" + "\n".join(lines)
-
-    def _build_memory_frame(self, state: GraphState) -> str:
-        """只保留少量近期记忆，避免记忆滚动成为长前缀的第一个变化点。"""
-        episodic_context = [
-            item.strip()
-            for item in state.get("episodic_context", [])
-            if isinstance(item, str) and item.strip()
-        ]
-        if episodic_context:
-            return "[近期情节记忆]\n" + "\n".join(f"- {item}" for item in episodic_context[-3:])
-        if summary := state.get("conversation_summary"):
-            return f"[前情提要]\n{compact_text(str(summary), 500)}"
-        return ""
 
     def _build_narrative_state_frame(self, state: GraphState) -> str:
         """探索态只给模型焦点摘要；完整地图和单位细节留给工具按需读取。"""
@@ -297,6 +282,9 @@ class ContextAssembler:
                 lines.append("可见友方: " + "；".join(allies[:4]))
             if enemies:
                 lines.append("可见敌对/怪物: " + "；".join(enemies[:6]))
+            magic_units = format_scene_magic_snapshots(scene_data)
+            if magic_units:
+                lines.append("可用法术单位: " + magic_units)
 
         space_data = state_value_to_dict(state.get("space"))
         active_map = active_space_map_summary(space_data)
@@ -601,8 +589,6 @@ def format_compaction_line(message: BaseMessage) -> str:
         return f"主持人: {content}"
     if isinstance(message, HumanMessage):
         return f"玩家/系统: {content}"
-    if isinstance(message, SystemMessage):
-        return f"系统: {content}"
     return content
 
 
@@ -743,33 +729,23 @@ def normalize_combat_archives(combat_archives: list[dict[str, Any]] | None, mess
     return normalized
 
 
-# 将短状态帧固定追加在尾部；不再插入工具交换前，避免破坏前缀缓存。
-def insert_runtime_hud_message(messages: list[BaseMessage], runtime_state_text: str) -> list[BaseMessage]:
-    hud_message = SystemMessage(content=format_runtime_hud_content(runtime_state_text))
-    return [*messages, hud_message]
-
-
-def trailing_tool_exchange_start_index(messages: list[BaseMessage]) -> int | None:
-    """工具回填后保持 AI tool_calls 与 ToolMessage 相邻，避免续跑模型误判工具链已结束。"""
-    if not messages or not isinstance(messages[-1], ToolMessage):
-        return None
-
-    first_tool_index = len(messages) - 1
-    while first_tool_index > 0 and isinstance(messages[first_tool_index - 1], ToolMessage):
-        first_tool_index -= 1
-
-    ai_index = first_tool_index - 1
-    if ai_index >= 0 and isinstance(messages[ai_index], AIMessage) and messages[ai_index].tool_calls:
-        return ai_index
-    return None
-
-
 def format_runtime_hud_content(hud_text: str) -> str:
     return (
+        f"{RUNTIME_STATE_MESSAGE_PREFIX}\n"
+        "本帧为追加式状态快照；只有最后一条运行状态帧有效，旧运行状态帧只用于缓存前缀，不得引用旧 HP、资源、坐标或回合。\n"
         "<runtime_state_frame source=\"state\" visibility=\"model_only\" role=\"state_snapshot\" audience=\"none\">\n"
         f"{hud_text}"
         "</runtime_state_frame>"
     )
+
+
+def build_runtime_state_message(runtime_state_text: str) -> HumanMessage:
+    """把当前短状态帧写入真实消息历史，让 DeepSeek KC 看到 append-only 前缀。"""
+    return HumanMessage(content=format_runtime_hud_content(runtime_state_text))
+
+
+def is_runtime_state_message(message: BaseMessage) -> bool:
+    return isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith(RUNTIME_STATE_MESSAGE_PREFIX)
 
 
 def is_internal_system_human_message(message: HumanMessage) -> bool:
@@ -968,9 +944,22 @@ def format_combat_side_snapshot(participants: dict[str, Any], side: str) -> str:
         items.append(
             f"{combatant.get('name', uid)}[ID:{uid}, HP:{combatant.get('hp')}/{combatant.get('max_hp')}, "
             f"AC:{compute_ac(combatant)}, resources:{format_resources(combatant)}, "
-            f"conditions:{format_conditions(combatant)}, actions:{format_actions(combatant)}]"
+            f"conditions:{format_conditions(combatant)}, magic:{format_magic(combatant)}, actions:{format_actions(combatant)}]"
         )
     return "；".join(items)
+
+
+def format_scene_magic_snapshots(units: dict[str, Any]) -> str:
+    """探索期也要暴露可施法单位；法术是行动选项，不应藏到完整 inspect 之后。"""
+    items: list[str] = []
+    for uid, unit in units.items():
+        magic = format_magic(unit)
+        if magic == "无":
+            continue
+        items.append(
+            f"{unit.get('name', uid)}[ID:{uid}, resources:{format_resources(unit)}, magic:{magic}]"
+        )
+    return "；".join(items[:6])
 
 
 def format_adventure_summary(adventure: dict[str, Any] | None) -> str:
