@@ -174,11 +174,12 @@ class MemoryIngestionPipeline:
     def _build_summary_system_prompt(self) -> str:
         return (
             "你负责把单轮 TRPG 交互压缩成供后续模型使用的近期情节记忆。\n"
-            "只输出 1 到 3 句自然中文，不要项目符号，不要解释，不要加‘摘要’或‘总结’前缀。\n"
+            "输出自然中文短段落，不要项目符号，不要解释，不要加‘摘要’或‘总结’前缀。\n"
             "只保留对后续叙事仍有价值的稳定事实：剧情推进、关系或立场变化、关键发现、重要承诺、未解决风险、战斗结果、持久资源消耗、持久状态变化。\n"
             "不要重复 HUD 已提供的当前玩家状态；不要描述当前 HP、临时 HP、AC、先攻、行动经济、移动力、当前回合、即时站位。\n"
             "不要复述逐次掷骰、逐条工具调用、细碎伤害数字，避免把短期战报污染成长期记忆。\n"
-            "如果本轮主要是战斗结束，优先总结战斗结果与后续影响。\n"
+            "如果本轮主要是战斗结束，优先总结战斗结果、关键经过、角色表现、资源与状态后果，以及战后场景线索。\n"
+            "战斗结束摘要可以更厚，尽量保留原始有效信息三成左右，避免后续模型误以为刚才的战斗没有发生。\n"
             "如果没有值得长期保留的新信息，返回空字符串。"
         )
 
@@ -209,8 +210,8 @@ class MemoryIngestionPipeline:
             if summary.startswith(prefix):
                 summary = summary[len(prefix):].strip()
 
-        if len(summary) > 240:
-            summary = summary[:237].rstrip("，。； ") + "..."
+        if len(summary) > 1200:
+            summary = summary[:1197].rstrip("，。； ") + "..."
         return summary
 
     def _normalize_messages(self, new_messages: list[BaseMessage]) -> list[dict[str, Any]]:
@@ -363,7 +364,7 @@ class MemoryIngestionPipeline:
         else:
             return ""
 
-        return str(latest_archive.get("summary", "")).strip()[:240]
+        return str(latest_archive.get("summary", "")).strip()[:1200]
 
     def _message_role_and_kind(self, message: BaseMessage) -> tuple[str, str]:
         if isinstance(message, ToolMessage):

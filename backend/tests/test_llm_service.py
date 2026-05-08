@@ -88,6 +88,17 @@ class LLMServiceTests(unittest.TestCase):
         mock_summary_client.invoke.assert_called_once()
         mock_main_client.invoke.assert_not_called()
 
+    def test_summary_client_is_created_lazily(self):
+        mock_client = MagicMock()
+
+        with patch("app.services.llm_service.ChatOpenAI", return_value=mock_client) as mock_chat_openai:
+            with patch("app.services.llm_service.settings") as mock_settings:
+                configure_llm_settings(mock_settings)
+
+                LLMService()
+
+        self.assertEqual(1, mock_chat_openai.call_count)
+
     def test_deepseek_v4_defaults_to_disabled_thinking(self):
         # DeepSeek V4 thinking 模式的工具链路要求回传 reasoning_content，默认关闭以保持 LangChain 消息流稳定。
         with patch("app.services.llm_service.ChatOpenAI") as mock_chat_openai:

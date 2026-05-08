@@ -1,4 +1,3 @@
-import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -40,29 +39,6 @@ class FakeGraph:
         self.last_config = config
         self.state_updates.append(values)
         self.values = {**self.values, **values}
-
-
-class FakeMemoryPipeline:
-    def __init__(self):
-        self.calls = []
-        self.called = asyncio.Event()
-
-    async def ingest(self, **kwargs):
-        self.calls.append(kwargs)
-        self.called.set()
-
-    async def close(self):
-        return None
-
-
-class FakeEpisodicStore:
-    def __init__(self, summaries=None):
-        self.summaries = summaries or []
-        self.calls = []
-
-    async def fetch_recent_summaries(self, session_id: str, limit: int = 4):
-        self.calls.append({"session_id": session_id, "limit": limit})
-        return list(self.summaries)
 
 
 class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -114,34 +90,19 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(80, graph.last_config["recursion_limit"])
         self.assertEqual("查一下北京", graph.last_input["messages"][0].content)
 
-    async def test_process_turn_schedules_memory_ingestion_without_changing_reply(self):
-        graph = FakeGraph({"messages": [AIMessage(content="好的。", tool_calls=[])]})
-        memory_pipeline = FakeMemoryPipeline()
-        service = ChatSessionService(graph=graph, memory_pipeline=memory_pipeline)
-
-        result = await service.process_turn(message="继续", session_id="s-memory")
-        await asyncio.wait_for(memory_pipeline.called.wait(), timeout=1)
-        await service.aclose()
-
-        self.assertEqual("好的。", result["reply"])
-        self.assertEqual("s-memory", memory_pipeline.calls[0]["session_id"])
-        self.assertEqual("好的。", memory_pipeline.calls[0]["reply"])
-        self.assertEqual(1, len(memory_pipeline.calls[0]["new_messages"]))
-
-    async def test_process_turn_injects_recent_episodic_context_before_graph_run(self):
+    async def test_process_turn_clears_hot_episodic_context_before_graph_run(self):
         graph = FakeGraph({"messages": [AIMessage(content="继续推进。", tool_calls=[])]})
-        episodic_store = FakeEpisodicStore(["玩家已经发现密门。", "上一轮消耗了一个 1 环法术位。"])
-        service = ChatSessionService(graph=graph, episodic_store=episodic_store)
+        graph.values = {
+            "messages": [],
+            "episodic_context": ["旧热摘要不应继续注入。"],
+        }
+        service = ChatSessionService(graph=graph)
 
         result = await service.process_turn(message="继续", session_id="episodic-demo")
 
         self.assertEqual("继续推进。", result["reply"])
-        self.assertEqual("episodic-demo", episodic_store.calls[0]["session_id"])
         self.assertEqual("episodic-demo", graph.state_updates[0]["session_id"])
-        self.assertEqual(
-            ["玩家已经发现密门。", "上一轮消耗了一个 1 环法术位。"],
-            graph.state_updates[0]["episodic_context"],
-        )
+        self.assertEqual([], graph.state_updates[0]["episodic_context"])
 
     async def test_process_turn_generates_session_id_when_missing(self):
         graph = FakeGraph({"messages": [AIMessage(content="ok", tool_calls=[])]})
