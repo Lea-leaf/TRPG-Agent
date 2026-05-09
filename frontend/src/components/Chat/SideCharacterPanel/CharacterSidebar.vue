@@ -33,6 +33,7 @@
 
     <div class="panel-scrollable-content">
       <SpaceMap
+        v-show="activePanel !== 'inventory'"
         :space="space"
         :player="externalPlayer"
         :combat="combat"
@@ -48,7 +49,10 @@
         :external-player="externalPlayer"
         :combat="combat"
       />
-      <InventoryPanel v-else />
+      <InventoryPanel
+        v-else
+        :external-player="externalPlayer"
+      />
     </div>
   </div>
 </template>

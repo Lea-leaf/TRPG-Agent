@@ -100,15 +100,6 @@
       <div class="empty-state empty-state-compact">暂无已知法术</div>
     </div>
 
-    <details v-if="player.weapons?.length" class="weapons-section">
-      <summary class="section-title">武器</summary>
-      <div class="weapons-list">
-        <div v-for="(weapon, idx) in player.weapons" :key="idx" class="weapon-item">
-          <span class="weapon-name">{{ translateWeaponName(weapon.name) }}</span>
-          <span class="weapon-detail">{{ weapon.damage_dice }} {{ weapon.damage_type }}</span>
-        </div>
-      </div>
-    </details>
   </div>
 
   <div v-else class="empty-state">
@@ -119,7 +110,7 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import { useCharacterState, type PlayerState, ABILITY_LIST, formatConditionName } from '../../../Services_/characterStateService'
-import { translateWeaponName, translateSpellName, translateResourceName } from '../../../Services_/nameTranslator'
+import { translateSpellName, translateResourceName } from '../../../Services_/nameTranslator'
 
 const props = defineProps<{
   externalPlayer: PlayerState | null
@@ -357,46 +348,6 @@ details summary::-webkit-details-marker {
   border-radius: 16px;
   font-size: 12px;
   border: 0.5px solid rgba(139, 92, 246, 0.3);
-}
-
-.weapons-section {
-  margin-top: 8px;
-}
-
-.weapons-section summary {
-  cursor: pointer;
-  list-style: none;
-}
-
-.weapons-section summary::-webkit-details-marker {
-  display: none;
-}
-
-.weapons-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.weapon-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: rgba(0, 0, 0, 0.3);
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-.weapon-name {
-  color: #e5e5ea;
-  font-weight: 500;
-}
-
-.weapon-detail {
-  color: #a1a1aa;
-  font-family: monospace;
 }
 
 .hp-changed {
