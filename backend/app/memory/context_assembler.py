@@ -171,7 +171,7 @@ class ContextAssembler:
         return "\n\n=== 状态快照 ===\n" + "\n\n".join(sections) + "\n===========================\n"
 
     def build_model_input_messages(self, state: GraphState, mode: str, runtime_state_text: str) -> list[BaseMessage]:
-        # 中文注释：DeepSeek KC 成本可接受时，战后也保留原始战斗记录，避免摘要过弱导致模型误以为战斗未发生。
+        # DeepSeek KC 成本可接受时，战后也保留原始战斗记录，避免摘要过弱导致模型误以为战斗未发生。
         source_messages = list(state.get("messages", []))
         trimmed_messages = trim_model_messages(source_messages, mode, state=state)
         projected_messages: list[BaseMessage] = []
@@ -407,9 +407,10 @@ class ContextAssembler:
         return (
             "[冒险节点校准]\n"
             f"当前仍处于模组 {adventure_dict['module_id']} 的节点 {adventure_dict['active_node_id']}。"
+            "本轮回应前先校对玩家行动与当前节点的关系：应优先沿当前节点给出可执行后果、线索或下一步压力。"
             "若本轮将新增或改变剧情事实、线索、出口、遭遇结果、已完成事件或节点进度，"
             "必须先调用冒险工具读取或更新节点状态；若只是闲聊、规则解释或战斗内动作结算，不调用。"
-            "不要因为多轮闲聊而脱离当前模组进度或提前揭露未获得的信息。"
+            "不要顺着即兴逻辑游离到未建立的地点、NPC 或主线，也不要提前揭露未获得的信息。"
         )
 
 
@@ -912,7 +913,7 @@ def format_adventure_summary(adventure: dict[str, Any] | None) -> str:
     ]
     if exit_labels:
         lines.append("当前节点出口: " + "；".join(exit_labels))
-    lines.append("若本轮涉及剧情事实、线索或推进，先调用冒险工具读取或更新节点状态。")
+    lines.append("每次探索回应都必须贴合当前节点；若本轮涉及剧情事实、线索或推进，先调用冒险工具读取或更新节点状态。")
     return "\n".join(lines)
 
 
