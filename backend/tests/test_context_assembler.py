@@ -1,10 +1,10 @@
 import json
 import unittest
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
-from app.memory.context_assembler import ContextAssembler, summarize_tool_message
+from app.memory.context_assembler import ContextAssembler, build_runtime_state_message, summarize_tool_message, trim_model_messages
 
 
 class _StaticContextProvider:
@@ -13,7 +13,7 @@ class _StaticContextProvider:
 
 
 class ContextAssemblerTests(unittest.TestCase):
-    def test_assemble_includes_summary_external_context_and_hud(self):
+    def test_assemble_includes_external_context_and_hud_without_hot_summary(self):
         assembler = ContextAssembler(external_context_provider=_StaticContextProvider())
         state = {
             "conversation_summary": "玩家刚踏入地牢入口。",
@@ -27,22 +27,23 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertEqual("基础规则", assembled.system_prompt)
         self.assertNotIn("[可按需加载的技能]", assembled.system_prompt)
         self.assertNotIn("character_state_management", assembled.system_prompt)
-        self.assertIn("玩家刚踏入地牢入口。", assembled.runtime_state_text)
+        self.assertNotIn("玩家刚踏入地牢入口。", assembled.runtime_state_text)
         self.assertIn("[扩展上下文]", assembled.runtime_state_text)
         self.assertIn("外部上下文:narrative", assembled.runtime_state_text)
         self.assertIn("状态快照", assembled.hud_text)
-        self.assertEqual("我看看四周。", assembled.model_input_messages[-2].content)
-        self.assertIsInstance(assembled.model_input_messages[-1], SystemMessage)
-        self.assertIn("<runtime_state", assembled.model_input_messages[-1].content)
-        self.assertIn('source="hud"', assembled.model_input_messages[-1].content)
-        self.assertIn('visibility="model_only"', assembled.model_input_messages[-1].content)
-        self.assertNotIn("复述", assembled.model_input_messages[-1].content)
-        self.assertNotIn("解释", assembled.model_input_messages[-1].content)
-        self.assertIn("状态快照", assembled.model_input_messages[-1].content)
+        self.assertEqual("我看看四周。", assembled.model_input_messages[-1].content)
+        runtime_message = build_runtime_state_message(assembled.runtime_state_text)
+        self.assertIn("<runtime_state_frame", runtime_message.content)
+        self.assertIn("[系统:运行状态帧]", runtime_message.content)
+        self.assertIn('source="state"', runtime_message.content)
+        self.assertIn('visibility="model_only"', runtime_message.content)
+        self.assertNotIn("复述", runtime_message.content)
+        self.assertNotIn("解释", runtime_message.content)
+        self.assertNotIn("=== 状态快照 ===", runtime_message.content)
         self.assertIn("[当前平面空间]", assembled.hud_text)
         self.assertIn("当前没有平面地图", assembled.hud_text)
 
-    def test_episodic_context_precedes_summary_fallback(self):
+    def test_episodic_context_is_not_injected_into_runtime_state(self):
         assembler = ContextAssembler()
         state = {
             "conversation_summary": "这是旧摘要，不应在有 episodic context 时继续注入。",
@@ -52,8 +53,8 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIn("[近期情节记忆]", assembled.runtime_state_text)
-        self.assertIn("玩家刚进入地牢。", assembled.runtime_state_text)
+        self.assertNotIn("[近期情节记忆]", assembled.runtime_state_text)
+        self.assertNotIn("玩家刚进入地牢。", assembled.runtime_state_text)
         self.assertNotIn("这是旧摘要", assembled.runtime_state_text)
 
     def test_opening_prompt_requests_fighter_companion_when_missing(self):
@@ -79,6 +80,40 @@ class ContextAssemblerTests(unittest.TestCase):
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
         self.assertNotIn("[开局友方准则]", assembled.runtime_state_text)
+
+    def test_narrative_runtime_state_lists_player_and_scene_unit_spells(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="我准备探索。")],
+            "player": {
+                "id": "player_hero",
+                "name": "英雄",
+                "side": "player",
+                "hp": 10,
+                "max_hp": 12,
+                "resources": {"spell_slot_lv1": 1},
+                "known_spells": ["magic_missile", "shield"],
+                "known_cantrips": ["fire_bolt"],
+            },
+            "scene_units": {
+                "apprentice_wizard": {
+                    "id": "apprentice_wizard",
+                    "name": "伊莲",
+                    "side": "ally",
+                    "resources": {"spell_slot_lv1": 2},
+                    "resource_caps": {"spell_slot_lv1": 3},
+                    "known_spells": ["magic_missile"],
+                    "known_cantrips": ["ray_of_frost"],
+                },
+                "goblin_1": {"id": "goblin_1", "name": "Goblin", "side": "enemy"},
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("magic:[spells=magic_missile,shield; cantrips=fire_bolt]", assembled.runtime_state_text)
+        self.assertIn("可用法术单位: 伊莲[ID:apprentice_wizard", assembled.runtime_state_text)
+        self.assertIn("spells=magic_missile; cantrips=ray_of_frost", assembled.runtime_state_text)
 
     def test_hud_marks_ally_scene_unit_id_as_start_combat_input(self):
         assembler = ContextAssembler()
@@ -114,6 +149,7 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertIn("[冒险节点校准]", assembled.runtime_state_text)
         self.assertIn("goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("必须先调用冒险工具读取或更新节点状态", assembled.runtime_state_text)
         self.assertIn("不要因为多轮闲聊而脱离当前模组进度", assembled.runtime_state_text)
 
     def test_adventure_node_anchor_skips_combat_mode(self):
@@ -135,7 +171,7 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertNotIn("[冒险节点校准]", assembled.runtime_state_text)
 
-    def test_assemble_trims_without_starting_from_tool_message(self):
+    def test_assemble_keeps_full_history_under_large_context_budget(self):
         assembler = ContextAssembler()
         messages = [HumanMessage(content="旧消息")]
         messages.append(AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {}, "id": "call_1"}]))
@@ -144,12 +180,32 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble({"messages": messages}, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        self.assertIsInstance(assembled.model_input_messages[0], AIMessage)
+        self.assertEqual("旧消息", assembled.model_input_messages[0].content)
         tool_messages = [message for message in assembled.model_input_messages if isinstance(message, ToolMessage)]
         self.assertEqual(1, len(tool_messages))
         self.assertIn("[工具:attack_action]", tool_messages[0].content)
 
-    def test_hud_preserves_trailing_tool_exchange_for_followup_call(self):
+    def test_budget_trim_never_starts_from_tool_message(self):
+        messages = [HumanMessage(content="旧消息")]
+        messages.append(AIMessage(content="", tool_calls=[{"name": "attack_action", "args": {}, "id": "call_1"}]))
+        messages.append(ToolMessage(content="Goblin 使用弯刀攻击。\n英雄 HP: 18 -> 13", tool_call_id="call_1", name="attack_action"))
+        messages.extend(HumanMessage(content="x" * 50_000) for _ in range(40))
+
+        trimmed = trim_model_messages(messages, NARRATIVE_AGENT_MODE)
+
+        self.assertFalse(isinstance(trimmed[0], ToolMessage))
+
+    def test_budget_trim_inserts_thick_context_archive(self):
+        messages = [HumanMessage(content=f"重要人设线索 {index}: 巴伦害怕深水但信守承诺。" + ("x" * 50_000)) for index in range(40)]
+
+        trimmed = trim_model_messages(messages, NARRATIVE_AGENT_MODE)
+
+        self.assertIsInstance(trimmed[0], HumanMessage)
+        self.assertIn("[系统:上下文预算归档]", trimmed[0].content)
+        self.assertIn("重要人设线索", trimmed[0].content)
+        self.assertIn("巴伦害怕深水但信守承诺", trimmed[0].content)
+
+    def test_model_input_preserves_trailing_tool_exchange_without_ephemeral_runtime_state(self):
         assembler = ContextAssembler()
         state = {
             "messages": [
@@ -164,10 +220,8 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="combat rules")
 
-        self.assertIsInstance(assembled.model_input_messages[-3], SystemMessage)
         self.assertIsInstance(assembled.model_input_messages[-2], AIMessage)
         self.assertIsInstance(assembled.model_input_messages[-1], ToolMessage)
-        self.assertIn("<runtime_state", assembled.model_input_messages[-3].content)
         self.assertIn("[工具:attack_action]", assembled.model_input_messages[-1].content)
 
     def test_adventure_node_tool_projection_keeps_structured_material(self):
@@ -210,7 +264,7 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("新版突袭只让先攻劣势", projected)
         self.assertIn("available_exits", projected)
 
-    def test_archived_combat_expands_start_to_triggering_ai_tool_call(self):
+    def test_combat_archive_metadata_no_longer_collapses_model_history(self):
         assembler = ContextAssembler()
         state = {
             "messages": [
@@ -232,17 +286,11 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        dangling_tool_call_messages = [
-            message for message in assembled.model_input_messages
-            if isinstance(message, AIMessage) and message.tool_calls
-        ]
-        self.assertEqual([], dangling_tool_call_messages)
-        self.assertTrue(any(
-            isinstance(message, HumanMessage)
-            and isinstance(message.content, str)
-            and message.content.startswith("[系统:战斗归档]")
-            for message in assembled.model_input_messages
-        ))
+        projected_text = "\n".join(str(message.content) for message in assembled.model_input_messages)
+        self.assertNotIn("[系统:战斗归档]", projected_text)
+        self.assertIn("战斗开始！第 1 回合。", projected_text)
+        self.assertIn("共进行了 1 回合。 倒下: Wolf", projected_text)
+        self.assertEqual("我检查四周。", assembled.model_input_messages[-1].content)
 
     def test_projection_strips_legacy_dangling_tool_call(self):
         assembler = ContextAssembler()
@@ -278,7 +326,7 @@ class ContextAssemblerTests(unittest.TestCase):
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
         self.assertEqual("战斗规则", assembled.system_prompt)
-        self.assertIn("[战斗简报]", assembled.runtime_state_text)
+        self.assertIn("[战斗状态]", assembled.runtime_state_text)
         self.assertIn("[当前回合指令]", assembled.runtime_state_text)
         self.assertIn("Goblin", assembled.runtime_state_text)
 
@@ -348,6 +396,7 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("友方侧: 伊莲", assembled.runtime_state_text)
         self.assertIn("对立侧: Goblin", assembled.runtime_state_text)
         self.assertIn("spell_slot_lv1=2/3", assembled.runtime_state_text)
+        self.assertIn("magic:spells=magic_missile,shield; cantrips=fire_bolt", assembled.runtime_state_text)
         self.assertIn("magic_missile", assembled.hud_text)
         self.assertIn("reaction=可用: shield", assembled.hud_text)
         self.assertIn("当前是友方单位 伊莲", assembled.runtime_state_text)

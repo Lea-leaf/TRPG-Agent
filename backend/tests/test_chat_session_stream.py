@@ -38,27 +38,6 @@ class _FakeGraph:
         self.state_updates.append(values)
 
 
-class _BlockingMemoryPipeline:
-    def __init__(self):
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
-
-    async def ingest(self, **kwargs):
-        self.started.set()
-        await self.release.wait()
-
-    async def close(self):
-        return None
-
-
-class _FakeEpisodicStore:
-    def __init__(self, summaries=None):
-        self.summaries = summaries or []
-
-    async def fetch_recent_summaries(self, session_id: str, limit: int = 4):
-        return list(self.summaries)
-
-
 def _parse_sse_event(raw_event: str) -> tuple[str, object]:
     lines = [line for line in raw_event.strip().splitlines() if line]
     event_name = lines[0].split(": ", 1)[1]
@@ -186,7 +165,7 @@ def test_stream_ignores_hidden_tool_message_but_keeps_pending_action():
     assert "dice_roll" not in event_names
 
 
-def test_stream_emits_done_without_waiting_for_memory_ingestion():
+def test_stream_emits_done_without_memory_ingestion():
     initial_state = _FakeState({"messages": []})
     final_state = _FakeState({"messages": [AIMessage(content="处理完毕。", tool_calls=[])]})
     graph = _FakeGraph(
@@ -198,15 +177,10 @@ def test_stream_emits_done_without_waiting_for_memory_ingestion():
             }
         }],
     )
-    memory_pipeline = _BlockingMemoryPipeline()
-    service = ChatSessionService(graph, memory_pipeline=memory_pipeline)
+    service = ChatSessionService(graph)
 
     async def _collect_events():
-        raw_events = [event async for event in service.process_turn_stream(session_id="demo", message="继续")]
-        await asyncio.wait_for(memory_pipeline.started.wait(), timeout=1)
-        memory_pipeline.release.set()
-        await service.aclose()
-        return raw_events
+        return [event async for event in service.process_turn_stream(session_id="demo", message="继续")]
 
     raw_events = asyncio.run(_collect_events())
     event_names = [_parse_sse_event(event)[0] for event in raw_events]
@@ -268,15 +242,15 @@ def test_stream_keeps_ai_text_even_when_message_contains_tool_calls():
     ]
 
 
-def test_stream_injects_recent_episodic_context_before_graph_stream():
-    initial_state = _FakeState({"messages": []})
+def test_stream_clears_hot_episodic_context_before_graph_stream():
+    initial_state = _FakeState({"messages": [], "episodic_context": ["旧热摘要不应继续注入。"]})
     final_state = _FakeState({"messages": []})
     graph = _FakeGraph(
         initial_state=initial_state,
         final_state=final_state,
         chunks=[],
     )
-    service = ChatSessionService(graph, episodic_store=_FakeEpisodicStore(["上一轮已经确认地板有陷阱。"]))
+    service = ChatSessionService(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="stream-demo", message="继续")]
@@ -284,6 +258,6 @@ def test_stream_injects_recent_episodic_context_before_graph_stream():
     raw_events = asyncio.run(_collect_events())
     event_names = [_parse_sse_event(event)[0] for event in raw_events]
 
-    assert graph.state_updates[0]["episodic_context"] == ["上一轮已经确认地板有陷阱。"]
+    assert graph.state_updates[0]["episodic_context"] == []
     assert graph.last_stream_config["recursion_limit"] == 80
     assert event_names[-1] == "done"

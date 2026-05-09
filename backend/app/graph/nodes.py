@@ -9,8 +9,8 @@ from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
 from app.graph.state import GraphState
 from app.memory.context_assembler import (
     ContextAssembler,
+    build_runtime_state_message,
     message_content_to_text as _message_content_to_text,
-    trim_model_messages as _trim_projected_messages,
     state_value_to_dict as _state_value_to_dict,
 )
 from app.prompts import get_assistant_system_prompt
@@ -29,30 +29,6 @@ def _get_llm_service() -> LLMService:
 def _get_context_assembler() -> ContextAssembler:
     """统一缓存上下文装配器，避免在每轮调用里重复构造。"""
     return ContextAssembler()
-
-
-def _message_count(state: GraphState) -> int:
-    return len(state.get("messages", []))
-
-
-def _combat_archives_from_state(state: GraphState) -> list[dict]:
-    archives: list[dict] = []
-    for archive in state.get("combat_archives", []) or []:
-        if hasattr(archive, "model_dump"):
-            archives.append(archive.model_dump())
-        elif hasattr(archive, "items"):
-            archives.append(dict(archive))
-    return archives
-
-
-def _build_combat_archive(summary: str, start_index: int, end_index: int) -> dict:
-    safe_start = max(start_index, 0)
-    safe_end = max(end_index, safe_start)
-    return {
-        "summary": summary.strip(),
-        "start_index": safe_start,
-        "end_index": safe_end,
-    }
 
 
 def router_node(state: GraphState) -> dict:
@@ -76,6 +52,8 @@ def _invoke_assistant(state: GraphState, mode: str) -> dict:
     assembler = _get_context_assembler()
     base_system_prompt = get_assistant_system_prompt(mode)
     assembled_context = assembler.assemble(state, mode, base_system_prompt=base_system_prompt)
+    runtime_state_message = build_runtime_state_message(assembled_context.runtime_state_text)
+    invocation_messages = [*assembled_context.model_input_messages, runtime_state_message]
     tools = get_tool_profile(mode)
     session_id = str(state.get("session_id") or "detached")
     phase = state.get("phase")
@@ -95,14 +73,14 @@ def _invoke_assistant(state: GraphState, mode: str) -> dict:
         system_prompt=assembled_context.system_prompt,
         hud_text=assembled_context.hud_text,
         runtime_state_text=assembled_context.runtime_state_text,
-        messages=assembled_context.model_input_messages,
+        messages=invocation_messages,
         tools=tools,
     )
     started_perf = perf_counter()
 
     try:
         response = _get_llm_service().invoke_with_tools(
-            messages=assembled_context.model_input_messages,
+            messages=invocation_messages,
             tools=tools,
             system_prompt=assembled_context.system_prompt,
             mode=mode,
@@ -139,7 +117,7 @@ def _invoke_assistant(state: GraphState, mode: str) -> dict:
 
     output = response.content if isinstance(response.content, str) and not response.tool_calls else ""
     return {
-        "messages": [response],
+        "messages": [runtime_state_message, response],
         "output": output,
     }
 

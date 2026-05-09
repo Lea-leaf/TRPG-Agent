@@ -27,6 +27,7 @@ class LLMService:
         if base_url and base_url.strip():
             client_kwargs["base_url"] = base_url.strip()
 
+        self._client_kwargs = client_kwargs
         self._client = self._build_client(
             client_kwargs,
             model=settings.llm_model,
@@ -34,15 +35,7 @@ class LLMService:
             timeout=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
         )
-
-        summary_model = (settings.memory_summary_model or "").strip() or settings.llm_model
-        self._summary_client = self._build_client(
-            client_kwargs,
-            model=summary_model,
-            temperature=settings.memory_summary_temperature,
-            timeout=settings.memory_summary_timeout_seconds,
-            max_retries=settings.memory_summary_max_retries,
-        )
+        self._summary_client: ChatOpenAI | None = None
 
     def _build_client(
         self,
@@ -117,7 +110,7 @@ class LLMService:
     # 中文注释：记忆摘要必须走无工具、低温度的独立调用，避免被主 agent 的工具规划噪声污染。
     def invoke_summary(self, summary_input: str, *, system_prompt: str) -> str:
         try:
-            response = self._summary_client.invoke(
+            response = self._get_summary_client().invoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=summary_input)]
             )
             return self._message_content_to_text(getattr(response, "content", "")).strip()
@@ -147,4 +140,17 @@ class LLMService:
                     parts.append(str(item))
             return "\n".join(parts)
         return str(content)
+
+    # 中文注释：热路径已移除 memory_summary，摘要客户端只给离线脚本或手动维护任务按需创建。
+    def _get_summary_client(self) -> ChatOpenAI:
+        if self._summary_client is None:
+            summary_model = (settings.memory_summary_model or "").strip() or settings.llm_model
+            self._summary_client = self._build_client(
+                self._client_kwargs,
+                model=summary_model,
+                temperature=settings.memory_summary_temperature,
+                timeout=settings.memory_summary_timeout_seconds,
+                max_retries=settings.memory_summary_max_retries,
+            )
+        return self._summary_client
 

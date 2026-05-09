@@ -43,7 +43,7 @@ class MemoryIngestionPipeline:
         """把一轮对话拆成消息记录、稳定事件与派生摘要三个层次。"""
         normalized_messages = self._normalize_messages(new_messages)
         stable_events = self._extract_stable_events(old_state, new_state)
-        combat_summary = self._extract_latest_combat_summary(old_state, new_state)
+        combat_summary = self._extract_combat_end_summary(normalized_messages, stable_events)
         rule_turn_summary = self._build_turn_summary(normalized_messages, stable_events, reply, combat_summary)
         turn_summary = await self._compress_turn_summary(
             session_id=session_id,
@@ -174,11 +174,12 @@ class MemoryIngestionPipeline:
     def _build_summary_system_prompt(self) -> str:
         return (
             "你负责把单轮 TRPG 交互压缩成供后续模型使用的近期情节记忆。\n"
-            "只输出 1 到 3 句自然中文，不要项目符号，不要解释，不要加‘摘要’或‘总结’前缀。\n"
+            "输出自然中文短段落，不要项目符号，不要解释，不要加‘摘要’或‘总结’前缀。\n"
             "只保留对后续叙事仍有价值的稳定事实：剧情推进、关系或立场变化、关键发现、重要承诺、未解决风险、战斗结果、持久资源消耗、持久状态变化。\n"
             "不要重复 HUD 已提供的当前玩家状态；不要描述当前 HP、临时 HP、AC、先攻、行动经济、移动力、当前回合、即时站位。\n"
             "不要复述逐次掷骰、逐条工具调用、细碎伤害数字，避免把短期战报污染成长期记忆。\n"
-            "如果本轮主要是战斗结束，优先总结战斗结果与后续影响。\n"
+            "如果本轮主要是战斗结束，优先总结战斗结果、关键经过、角色表现、资源与状态后果，以及战后场景线索。\n"
+            "战斗结束摘要可以更厚，尽量保留原始有效信息三成左右，避免后续模型误以为刚才的战斗没有发生。\n"
             "如果没有值得长期保留的新信息，返回空字符串。"
         )
 
@@ -193,7 +194,7 @@ class MemoryIngestionPipeline:
     ) -> str:
         payload = {
             "stable_events": stable_events,
-            "combat_archive_summary": combat_summary,
+            "combat_end_summary": combat_summary,
             "assistant_reply": reply.strip(),
             "recent_messages": normalized_messages[-6:],
             "rule_summary_draft": rule_turn_summary,
@@ -209,8 +210,8 @@ class MemoryIngestionPipeline:
             if summary.startswith(prefix):
                 summary = summary[len(prefix):].strip()
 
-        if len(summary) > 240:
-            summary = summary[:237].rstrip("，。； ") + "..."
+        if len(summary) > 1200:
+            summary = summary[:1197].rstrip("，。； ") + "..."
         return summary
 
     def _normalize_messages(self, new_messages: list[BaseMessage]) -> list[dict[str, Any]]:
@@ -349,21 +350,20 @@ class MemoryIngestionPipeline:
 
         return " ".join(lines[:4]).strip()
 
-    def _extract_latest_combat_summary(self, old_state: dict[str, Any], new_state: dict[str, Any]) -> str:
-        old_archives = old_state.get("combat_archives") or []
-        new_archives = new_state.get("combat_archives") or []
-        if len(new_archives) <= len(old_archives):
+    def _extract_combat_end_summary(
+        self,
+        normalized_messages: list[dict[str, Any]],
+        stable_events: list[dict[str, Any]],
+    ) -> str:
+        """战斗结束记忆来自本轮工具结果，不再依赖战斗归档字段。"""
+        if not any(event["type"] == "combat_ended" for event in stable_events):
             return ""
 
-        latest_archive = new_archives[-1]
-        if hasattr(latest_archive, "model_dump"):
-            latest_archive = latest_archive.model_dump()
-        elif hasattr(latest_archive, "items"):
-            latest_archive = dict(latest_archive)
-        else:
-            return ""
+        for message in reversed(normalized_messages):
+            if message.get("kind") == "tool_result" and message.get("tool_name") == "end_combat":
+                return str(message.get("content", "")).strip()[:1200]
 
-        return str(latest_archive.get("summary", "")).strip()[:240]
+        return ""
 
     def _message_role_and_kind(self, message: BaseMessage) -> tuple[str, str]:
         if isinstance(message, ToolMessage):
@@ -384,7 +384,8 @@ class MemoryIngestionPipeline:
         if isinstance(message, ToolMessage):
             lines = [line.strip() for line in content.splitlines() if line.strip()]
             preview = " | ".join(lines[:3])
-            return preview[:180]
+            limit = 1200 if getattr(message, "name", "") == "end_combat" else 180
+            return preview[:limit]
 
         if isinstance(message, HumanMessage) and content.startswith("[系统:"):
             lines = [line.strip() for line in content.splitlines() if line.strip()]

@@ -15,13 +15,10 @@ from app.adventures.models import AdventureState
 from app.config.settings import settings
 from app.graph.builder import build_graph
 from app.memory.checkpointer import close_checkpointer, get_checkpointer
-from app.memory.episodic_store import EpisodicStore
-from app.memory.ingestion import MemoryIngestionPipeline
-from app.services.llm_service import LLMService
+from app.memory.context_assembler import is_runtime_state_message
 from app.services.session_store import purge_chat_session_data, touch_chat_session
 from app.services.tools._helpers import compute_ac
 from app.utils.agent_trace import trace_chat_error, trace_chat_request, trace_chat_result
-from app.utils.logger import logger
 
 
 _CHAT_SESSION_SERVICE: ChatSessionService | None = None
@@ -34,13 +31,8 @@ class ChatSessionService:
     def __init__(
         self,
         graph: Any,
-        memory_pipeline: MemoryIngestionPipeline | None = None,
-        episodic_store: EpisodicStore | None = None,
     ) -> None:
         self._graph = graph
-        self._memory_pipeline = memory_pipeline
-        self._episodic_store = episodic_store
-        self._memory_tasks: dict[str, asyncio.Task[None]] = {}
 
     def _graph_config(self, session_id: str) -> dict[str, Any]:
         """统一声明 LangGraph 运行参数；工具串行化后复杂场景需要更多图步数。"""
@@ -59,14 +51,12 @@ class ChatSessionService:
         current_session_id = session_id or str(uuid4())
         config = self._graph_config(current_session_id)
         old_state = None
-        old_snapshot: dict[str, Any] = {}
 
         # 在图运行前，记录当前最后一条消息的 ID 作为界标（baseline）。
         # 该界标是最安全的锚点，因为后续即使发生了压缩，也只会清除更古老的历史，不会清除本界标。
         baseline_msg_id = None
         try:
             old_state = await self._graph.aget_state(config)
-            old_snapshot = self._snapshot_state(old_state)
             old_msgs = old_state.values.get("messages", []) if old_state and hasattr(old_state, "values") else []
             if old_msgs and hasattr(old_msgs[-1], "id"):
                 baseline_msg_id = old_msgs[-1].id
@@ -108,7 +98,6 @@ class ChatSessionService:
 
         state = await self._graph.aget_state(config)
         new_messages = self._extract_new_messages(state, baseline_msg_id)
-        new_snapshot = self._snapshot_state(state)
         
         player_data = None
         combat_data = None
@@ -145,14 +134,6 @@ class ChatSessionService:
             new_message_count=len(new_messages),
         )
         await touch_chat_session(session_id=current_session_id, message=message, reply=reply)
-        self._schedule_memory_ingestion(
-            session_id=current_session_id,
-            old_snapshot=old_snapshot,
-            new_snapshot=new_snapshot,
-            new_messages=new_messages,
-            reply=reply,
-        )
-
         return {
             "reply": reply,
             "plan": None,
@@ -222,6 +203,8 @@ class ChatSessionService:
         """只拼接本轮真正对用户可见的 AI 文本回复。"""
         reply_parts: list[str] = []
         for msg in new_messages:
+            if is_runtime_state_message(msg):
+                continue
             if isinstance(msg, AIMessage) and msg.content:
                 if isinstance(msg.content, str):
                     reply_parts.append(msg.content)
@@ -270,64 +253,17 @@ class ChatSessionService:
             return {key: self._state_value_to_dict(item) for key, item in value.items()}
         return value
 
-    def _schedule_memory_ingestion(
-        self,
-        *,
-        session_id: str,
-        old_snapshot: dict[str, Any],
-        new_snapshot: dict[str, Any],
-        new_messages: list[Any],
-        reply: str,
-    ) -> None:
-        """把记忆摄取移到后台串行执行，避免阻塞当前回合响应。"""
-        if self._memory_pipeline is None:
-            return
-
-        turn_id = getattr(new_messages[-1], "id", None) or f"turn:{uuid4()}"
-        previous_task = self._memory_tasks.get(session_id)
-
-        async def _run_ingestion() -> None:
-            if previous_task is not None:
-                try:
-                    await previous_task
-                except Exception:
-                    logger.exception(f"Previous memory ingestion failed for session {session_id}")
-
-            await self._memory_pipeline.ingest(
-                session_id=session_id,
-                turn_id=str(turn_id),
-                old_state=old_snapshot,
-                new_state=new_snapshot,
-                new_messages=list(new_messages),
-                reply=reply,
-            )
-
-        task = asyncio.create_task(_run_ingestion(), name=f"memory-ingest:{session_id}")
-        self._memory_tasks[session_id] = task
-
-        def _cleanup(done_task: asyncio.Task[None]) -> None:
-            try:
-                done_task.result()
-            except Exception:
-                logger.exception(f"Memory ingestion failed for session {session_id}")
-
-            if self._memory_tasks.get(session_id) is done_task:
-                self._memory_tasks.pop(session_id, None)
-
-        task.add_done_callback(_cleanup)
-
     async def _apply_runtime_context(self, config: dict[str, Any], session_id: str) -> None:
-        """在图执行前注入派生上下文，统一覆盖普通消息、resume 与 reaction 三种入口。"""
+        """在图执行前注入稳定运行上下文，避免旧热摘要继续扰动模型前缀。"""
         if not hasattr(self._graph, "aupdate_state"):
             return
 
-        episodic_context = await self._load_episodic_context(session_id)
         existing_state = await self._graph.aget_state(config)
         await self._graph.aupdate_state(
             config,
             {
                 "session_id": session_id,
-                "episodic_context": episodic_context,
+                "episodic_context": [],
                 "adventure": self._current_or_default_adventure(existing_state),
             },
         )
@@ -338,23 +274,9 @@ class ChatSessionService:
             return self._state_value_to_dict(state.values["adventure"])
         return AdventureState().model_dump()
 
-    async def _load_episodic_context(self, session_id: str) -> list[str]:
-        """读取最近的回合摘要，作为热路径的长期情节记忆输入。"""
-        if self._episodic_store is None:
-            return []
-
-        summaries = await self._episodic_store.fetch_recent_summaries(session_id, limit=4)
-        return [summary[:300] for summary in summaries if summary]
-
     async def aclose(self) -> None:
-        """关闭后台记忆资源，避免测试或热重载遗留挂起任务。"""
-        tasks = list(self._memory_tasks.values())
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            self._memory_tasks.clear()
-
-        if self._memory_pipeline is not None:
-            await self._memory_pipeline.close()
+        """保留异步关闭接口，方便 FastAPI 生命周期统一调用。"""
+        return None
 
     # ── SSE 流式推送 ───────────────────────────────────────────
 
@@ -401,7 +323,6 @@ class ChatSessionService:
         config = self._graph_config(current_session_id)
 
         old_state = await self._graph.aget_state(config)
-        old_snapshot = self._snapshot_state(old_state)
         old_messages = old_state.values.get("messages", []) if hasattr(old_state, "values") else []
         baseline_msg_id = getattr(old_messages[-1], "id", None) if old_messages else None
         pending_before_run = self._get_pending_action(old_state)
@@ -496,6 +417,8 @@ class ChatSessionService:
                             yield self._sse_event("tool_message", payload)
 
                     elif isinstance(msg, HumanMessage) and isinstance(msg.content, str) and msg.content.startswith("[系统:"):
+                        if is_runtime_state_message(msg):
+                            continue
                         attack_roll = self._extract_attack_roll_payload(msg)
                         if attack_roll:
                             yield self._sse_event("dice_roll", {
@@ -572,14 +495,6 @@ class ChatSessionService:
         await touch_chat_session(session_id=current_session_id, message=message, reply=reply)
         yield self._sse_event("pending_action", pending)
 
-        self._schedule_memory_ingestion(
-            session_id=current_session_id,
-            old_snapshot=old_snapshot,
-            new_snapshot=self._snapshot_state(state),
-            new_messages=new_messages,
-            reply=reply,
-        )
-
         yield self._sse_event("done", {"session_id": current_session_id})
 
     # ── 历史消息恢复 ──────────────────────────────────────────
@@ -642,11 +557,7 @@ class ChatSessionService:
         }
 
     async def delete_session(self, session_id: str) -> dict[str, int]:
-        """删除会话前等待该会话后台记忆写入结束，避免清理后又写回旧摘要。"""
-        task = self._memory_tasks.pop(session_id, None)
-        if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
-
+        """删除会话持久化数据。"""
         return await purge_chat_session_data(session_id)
 
 
@@ -662,12 +573,8 @@ async def get_chat_session_service() -> ChatSessionService:
             return _CHAT_SESSION_SERVICE
 
         graph = build_graph(checkpointer=await get_checkpointer(settings.memory_db_path))
-        episodic_store = EpisodicStore(settings.memory_db_path)
-        memory_pipeline = MemoryIngestionPipeline(episodic_store, llm_service=LLMService())
         _CHAT_SESSION_SERVICE = ChatSessionService(
             graph=graph,
-            memory_pipeline=memory_pipeline,
-            episodic_store=episodic_store,
         )
         return _CHAT_SESSION_SERVICE
 
