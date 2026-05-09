@@ -33,6 +33,12 @@ _SKILLS: tuple[SkillSpec, ...] = (
         path=_SKILL_ROOT / "character_progression" / "SKILL.md",
     ),
     SkillSpec(
+        skill_id="class_actions",
+        name="职业动作",
+        description="说明回气、动作如潮、战斗大师战技选择与战技使用流程。",
+        path=_SKILL_ROOT / "class_actions" / "SKILL.md",
+    ),
+    SkillSpec(
         skill_id="space_management",
         name="平面空间管理",
         description="说明地图创建、切换、单位落点、战斗移动、测距和范围查询流程。",

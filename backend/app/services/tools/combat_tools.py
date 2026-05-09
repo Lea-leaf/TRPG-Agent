@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
 import d20
@@ -25,9 +26,11 @@ from app.services.tools._helpers import (
     canonicalize_player_space,
     clear_player_combat_fields,
     choose_attack,
+    consume_action_resource,
     available_attack_names,
     get_all_combatants,
     get_combatant,
+    has_action_resource,
     prepare_player_for_combat,
     prepare_character_for_combat,
     roll_attack_hit,
@@ -91,8 +94,27 @@ def _resolve_surprised_ids(raw_ids: list[str], all_units: dict[str, dict], playe
         if unit_id in all_units:
             surprised.add(unit_id)
         else:
-            missing.append(str(raw_id))
+              missing.append(str(raw_id))
     return surprised, missing
+
+
+def _normalize_string_list_arg(field_name: str, value: list[str] | str | None, tool_call_id: str | None) -> list[str] | Command:
+    """兼容模型把字符串列表参数误序列化为 JSON 字符串的工具调用形态。"""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return Command(update={"messages": [
+            ToolMessage(content=f"{field_name} 必须是字符串列表或可解析为字符串列表的 JSON 字符串。", tool_call_id=tool_call_id)
+        ]})
+    if not isinstance(parsed, list):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{field_name} 必须是字符串列表，不能是 {type(parsed).__name__}。", tool_call_id=tool_call_id)
+        ]})
+    return [str(item) for item in parsed]
 
 
 def _roll_initiative(unit: dict, *, surprised: bool) -> tuple[int, str]:
@@ -159,7 +181,7 @@ def _spawn_monsters_impl(
             ToolMessage(
                 content=(
                     f"成功在场景中生成了 {count} 只 {monster_index}: {', '.join(names)}。\n"
-                    "可用 start_combat 指定哪些单位参加战斗。"
+                    "已生成单位；不要再次生成同类单位，下一步应使用 manage_space 放置单位，或使用 start_combat 开战。"
                 ),
                 tool_call_id=tool_call_id,
             )
@@ -306,7 +328,7 @@ def help_action(
         return _reject(f"现在不是 {actor.get('name', actor_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
     if actor.get("hp", 0) <= 0:
         return _reject(f"{actor.get('name', actor_id)} 已经倒下，无法执行援助。")
-    if not actor.get("action_available", True):
+    if not has_action_resource(actor, "action"):
         return _reject(f"{actor.get('name', actor_id)} 本回合的动作已用尽。")
     if target.get("hp", 0) > 0:
         return _reject(f"{target.get('name', target_id)} 仍有 HP，不需要急救稳定。")
@@ -328,7 +350,7 @@ def help_action(
     proficient = "medicine" in {str(item).lower() for item in actor.get("skill_proficiencies", [])}
     bonus = wis_mod + (prof if proficient else 0)
     result = d20.roll(f"1d20{bonus:+d}")
-    actor["action_available"] = False
+    consume_action_resource(actor, "action")
 
     lines = [
         f"{actor.get('name', actor_id)} 使用援助动作急救 {target.get('name', target_id)}。",
@@ -356,7 +378,7 @@ def help_action(
 @tool
 def start_combat(
     combatant_ids: list[str],
-    surprised_ids: list[str] | None = None,
+    surprised_ids: list[str] | str | None = None,
     *,
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
@@ -372,6 +394,10 @@ def start_combat(
         combatant_ids: 从场景单位池中参加本次战斗的非玩家单位 ID 列表；敌人和友方都要放进来，不要把玩家 ID 放进来。
         surprised_ids: 被突袭的单位 ID；这些单位先攻检定用劣势。可用 "player" 指代当前玩家。
     """
+    surprised_ids = _normalize_string_list_arg("surprised_ids", surprised_ids, tool_call_id)
+    if isinstance(surprised_ids, Command):
+        return surprised_ids
+
     scene_units: dict = state.get("scene_units") or {}
     if hasattr(scene_units, "items"):
         scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()}
@@ -482,6 +508,7 @@ def attack_action(
     target_id: str,
     attack_name: str | None = None,
     advantage: Literal["normal", "advantage", "disadvantage"] = "normal",
+    maneuver_id: str | None = None,
     *,
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
@@ -496,6 +523,7 @@ def attack_action(
         target_id: 目标单位 ID。
         attack_name: 使用的攻击名称或动作名；不确定时可省略，让工具使用第一个攻击方式。
         advantage: 攻击优劣势，只能是 "normal"、"advantage" 或 "disadvantage"。
+        maneuver_id: 可选命中后战技，目前支持 "trip_attack"、"menacing_attack"、"pushing_attack"；只有攻击命中后才会消耗卓越骰并结算效果。
     """
     combat_raw = state.get("combat")
     if not combat_raw:
@@ -528,7 +556,7 @@ def attack_action(
         return _reject(f"{attacker.get('name', attacker_id)} 已经倒下，无法攻击；若这是玩家回合，应先进行死亡豁免。")
     if target.get("hp", 0) <= 0 and not tracks_death_saves(target):
         return _reject(f"目标 {target.get('name', target_id)} 已经倒下，无法攻击。")
-    if not attacker.get("action_available", True):
+    if not has_action_resource(attacker, "action"):
         return _reject(f"{attacker.get('name', attacker_id)} 本回合的动作已用尽。")
 
     chosen_attack = choose_attack(attacker, attack_name)
@@ -540,6 +568,8 @@ def attack_action(
         return _reject(distance_error)
 
     roll_info = roll_attack_hit(attacker, target, attack_name, advantage, state)
+    if maneuver_id:
+        roll_info["maneuver_id"] = maneuver_id
     auto_reaction_lines = apply_automatic_hit_reaction(target, attacker, roll_info, state)
 
     if (

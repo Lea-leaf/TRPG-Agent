@@ -496,6 +496,8 @@ def test_modify_character_state_progression_help_returns_growth_skill():
     assert "角色成长与子职技能" in content
     assert 'action="level_up"' in content
     assert 'action="choose_fighter_archetype"' in content
+    assert "target_id=该友方ID" in content
+    assert "choose_feat" in content
 
 
 def test_manage_space_help_returns_skill_instructions():
@@ -520,6 +522,19 @@ def test_adventure_module_skill_is_registered_for_on_demand_help():
     assert "冒险模组主持技能" in content
     assert "manage_adventure" in content
     assert 'action="mark_event"' in content
+
+
+def test_class_actions_skill_is_registered_for_real_dialogue_triggers():
+    """职业动作技能说明覆盖玩家自然语言中的回气、动作如潮和战技选择。"""
+    from app.services.skills import load_skill_content
+
+    content = load_skill_content("class_actions")
+
+    assert "职业动作技能" in content
+    assert "我使用回气" in content
+    assert "我使用动作如潮" in content
+    assert "我选择摔绊攻击、精准攻击、恐吓攻击作为战技" in content
+    assert 'action_id="choose_maneuvers"' in content
 
 
 def test_combat_brief_includes_conditions_attacks_and_scene_stakes():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -48,6 +49,25 @@ def _invalid_payload_message(action: str, payload: dict) -> str | None:
     if invalid:
         return f"空间操作参数无效：action={action} 不支持 payload 字段 {', '.join(invalid)}。本次未执行；使用 action=\"help\" 查看完整说明。"
     return None
+
+
+def _normalize_space_payload(value: dict | str | None, tool_call_id: str | None) -> dict | Command:
+    """兼容模型把 payload 对象误序列化为 JSON 字符串的工具调用形态。"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return Command(update={"messages": [
+            ToolMessage(content="payload 必须是对象或可解析为对象的 JSON 字符串。", tool_call_id=tool_call_id)
+        ]})
+    if not isinstance(parsed, dict):
+        return Command(update={"messages": [
+            ToolMessage(content=f"payload 必须是对象，不能是 {type(parsed).__name__}。", tool_call_id=tool_call_id)
+        ]})
+    return parsed
 
 
 def _space_to_update(space: SpaceState) -> dict:
@@ -574,7 +594,7 @@ def manage_space(
         "measure_distance",
         "query_radius",
     ],
-    payload: dict | None = None,
+    payload: dict | str | None = None,
     reason: str = "",
     *,
     state: Annotated[dict, InjectedState] = None,
@@ -593,7 +613,9 @@ def manage_space(
         payload: 对应动作的参数字典；字段名必须放在 payload 内，不要放在顶层参数。
         reason: 本次空间变化的叙事原因，例如 "玩家进入洞口，需要建立探索地图"。
     """
-    payload = payload or {}
+    payload = _normalize_space_payload(payload, tool_call_id)
+    if isinstance(payload, Command):
+        return payload
 
     # 空间工具的详细手册按需返回，避免模型常驻吞下整组参数说明。
     if action == "help":

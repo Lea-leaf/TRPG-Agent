@@ -1,6 +1,6 @@
 # 角色成长与子职技能
 
-当玩家角色获得经验、升级，或需要选择职业成长分支时使用本技能。成长会永久改变角色卡；如果玩家只是在询问规则或比较选项，不要执行状态写入。
+当玩家角色或角色型友方获得经验、升级，或需要选择职业成长分支时使用本技能。成长会永久改变角色卡；如果玩家只是在询问规则或比较选项，不要执行状态写入。
 
 ## 入口工具
 
@@ -11,9 +11,18 @@
 ## 动作速查
 
 - 增加经验：`action="grant_xp"`，传 `payload={"amount": 经验值}`，可选 `reason` 或 `payload.reason`。
-- 玩家升级：`action="level_up"`，不需要额外 payload。
+- 角色升级：`action="level_up"`，不需要额外 payload。
 - 法师奥术传承：`action="choose_arcane_tradition"`，传 `payload={"tradition": "abjuration"}` 或 `{"tradition": "evocation"}`。
 - 战士武术范型：`action="choose_fighter_archetype"`，传 `payload={"archetype": "champion"}`、`{"archetype": "battle_master"}` 或 `{"archetype": "eldritch_knight"}`。
+- 选择专长：`action="choose_feat"`，传 `payload={"feat": "tough"}` 或 `{"feat": "sharpshooter"}`。
+
+## 目标 ID
+
+- `target_id="player"` 表示当前玩家角色。
+- `target_id` 也可以是 `scene_units` 或 `combat.participants` 中的友方角色 ID，例如 `fighter_companion`、`sildar`、`apprentice_wizard`。
+- 友方角色可以使用 `grant_xp`、`level_up`、`choose_fighter_archetype`、`choose_arcane_tradition` 和 `choose_feat`。
+- 对友方成长时，必须显式传 `target_id=该友方ID`；不要因为目标不是玩家就放弃调用工具。
+- 普通怪物或敌方单位不是角色型成长目标；工具会拒绝这类目标。
 
 ## 升级约束
 
@@ -32,6 +41,6 @@
 
 ## 使用原则
 
-- 成长流程只改玩家角色；怪物临时强化、治疗、资源恢复仍属于角色状态调整。
+- 成长流程只改玩家角色或角色型友方；怪物临时强化、治疗、资源恢复仍属于角色状态调整。
 - 升级后的 HP、法术位、职业资源和职业特性由工具统一结算，不要用普通 `changes` 手动拼出同一结果。
 - 子职选择一旦写入，不要重复覆盖；如果玩家想重选，应先明确这是一次角色重置或剧情许可的重训。

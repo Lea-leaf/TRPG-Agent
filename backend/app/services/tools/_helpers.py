@@ -12,9 +12,11 @@ import re
 
 import d20
 
+from app.conditions._base import create_condition, upsert_condition
 from app.equipment.weapons import resolve_weapon_data
 from app.conditions import get_combat_effects, get_condition_module, tick_conditions
 from app.graph.state import AttackInfo
+from app.services.class_features.registry import get_critical_threshold
 
 
 # ── 战斗覆盖字段 ────────────────────────────────────────────────
@@ -22,7 +24,7 @@ from app.graph.state import AttackInfo
 COMBAT_OVERLAY_KEYS = frozenset({
     "id", "side", "initiative", "proficiency_bonus", "attacks",
     "surprised",
-    "action_available", "bonus_action_available", "reaction_available",
+    "action_available", "extra_action_available", "bonus_action_available", "reaction_available",
     "speed", "movement_left",
 })
 
@@ -328,7 +330,13 @@ def _apply_zero_hp_damage_hooks(
     lines.append(f"  [不死坚韧] CON 豁免 DC {dc}: {roll_text}，成功，HP 保持为 1。")
 
 
-def prepare_character_for_combat(unit_dict: dict, *, side: str, fallback_id: str | None = None) -> dict:
+def prepare_character_for_combat(
+    unit_dict: dict,
+    *,
+    side: str,
+    fallback_id: str | None = None,
+    reset_action_economy: bool = True,
+) -> dict:
     """把玩家或友方这类角色型单位叠加成可参战状态，共享武器与动作经济规则。"""
     modifiers = unit_dict.get("modifiers", {})
     prof = int(unit_dict.get("proficiency_bonus", 2) or 2)
@@ -395,15 +403,26 @@ def prepare_character_for_combat(unit_dict: dict, *, side: str, fallback_id: str
                 "sequence": [action_id, action_id],
             },
         ]
-    unit_dict["action_available"] = True
-    unit_dict["bonus_action_available"] = True
-    unit_dict["reaction_available"] = True
+    if reset_action_economy:
+        # 成长刷新也会复用本函数，因此只有入战/回合初始化时才重置动作经济。
+        unit_dict["action_available"] = True
+        unit_dict["extra_action_available"] = False
+        unit_dict["bonus_action_available"] = True
+        unit_dict["reaction_available"] = True
+    else:
+        unit_dict.setdefault("action_available", True)
+        unit_dict.setdefault("extra_action_available", False)
+        unit_dict.setdefault("bonus_action_available", True)
+        unit_dict.setdefault("reaction_available", True)
     unit_dict.setdefault("death_save_successes", 0)
     unit_dict.setdefault("death_save_failures", 0)
     unit_dict.setdefault("is_stable", False)
     unit_dict.setdefault("is_dead", False)
     unit_dict["speed"] = int(unit_dict.get("speed", 30) or 30)
-    unit_dict["movement_left"] = unit_dict["speed"]
+    if reset_action_economy:
+        unit_dict["movement_left"] = unit_dict["speed"]
+    else:
+        unit_dict["movement_left"] = min(unit_dict.get("movement_left", unit_dict["speed"]), unit_dict["speed"])
     sync_ac_state(unit_dict)
     return unit_dict
 
@@ -459,6 +478,33 @@ ACTION_LABELS = {
     "bonus_action": "附赠动作",
     "reaction": "反应",
 }
+
+ACTION_RESOURCE_KEYS = {
+    "action": "action_available",
+    "bonus_action": "bonus_action_available",
+    "reaction": "reaction_available",
+}
+
+
+def has_action_resource(actor: dict, action_type: str = "action") -> bool:
+    """统一判断动作经济；动作如潮提供的额外动作只补普通动作。"""
+    if action_type == "action":
+        return bool(actor.get("action_available", True)) or bool(actor.get("extra_action_available", False))
+    return bool(actor.get(ACTION_RESOURCE_KEYS[action_type], True))
+
+
+def consume_action_resource(actor: dict, action_type: str = "action") -> str:
+    """统一消耗动作经济，普通动作优先消耗本回合动作，再消耗额外动作。"""
+    if action_type == "action":
+        if actor.get("action_available", True):
+            actor["action_available"] = False
+            return "action_available"
+        actor["extra_action_available"] = False
+        return "extra_action_available"
+
+    key = ACTION_RESOURCE_KEYS[action_type]
+    actor[key] = False
+    return key
 
 SAVE_LABELS = {
     "str": "STR",
@@ -946,7 +992,7 @@ def roll_attack_hit(
     target_ac = compute_ac(target)
 
     # 勇士范型的精通重击只改变武器攻击的重击阈值，天然 1 仍优先失败。
-    crit_threshold = 19 if "improved_critical" in attacker.get("class_features", []) else 20
+    crit_threshold = get_critical_threshold(attacker, base=20)
     if natural == 1:
         hit, crit = False, False
     elif natural >= crit_threshold:
@@ -1000,7 +1046,7 @@ def apply_attack_damage(
     返回格式与旧 resolve_single_attack 一致: (lines, damage, hp_change, extra_info)。"""
 
     if roll_info.get("blocked"):
-        attacker["action_available"] = False
+        consume_action_resource(attacker, "action")
         return [roll_info["block_reason"]], 0, None, {"hit": False, "crit": False}
 
     lines: list[str] = list(roll_info["lines"])
@@ -1039,14 +1085,183 @@ def apply_attack_damage(
             crit=crit,
         )
         lines.extend(damage_lines)
+        maneuver_damage, maneuver_hp_change, maneuver_lines = apply_attack_maneuver(attacker, target, roll_info)
+        if maneuver_hp_change:
+            hp_change = maneuver_hp_change
+        damage_dealt += maneuver_damage
+        lines.extend(maneuver_lines)
     else:
         lines.append("未命中！" if natural != 1 else "严重失误！攻击完全落空！")
 
     remove_consume_on_attacked_conditions(target)
     lines.extend(remove_action_breaking_conditions(attacker, event="attack"))
 
-    attacker["action_available"] = False
+    consume_action_resource(attacker, "action")
     return lines, damage_dealt, hp_change, extra_info
+
+
+def apply_attack_maneuver(attacker: dict, target: dict, roll_info: dict) -> tuple[int, dict | None, list[str]]:
+    """处理攻击命中后声明的战技；共享卓越骰消耗与追加伤害流程。"""
+    maneuver_id = roll_info.get("maneuver_id")
+    if maneuver_id == "trip_attack":
+        return apply_trip_attack_maneuver(attacker, target, roll_info)
+    if maneuver_id == "menacing_attack":
+        return apply_menacing_attack_maneuver(attacker, target, roll_info)
+    if maneuver_id == "pushing_attack":
+        return apply_pushing_attack_maneuver(attacker, target, roll_info)
+    return 0, None, []
+
+
+def _consume_superiority_damage(
+    attacker: dict,
+    target: dict,
+    roll_info: dict,
+    maneuver_id: str,
+    maneuver_name: str,
+) -> tuple[int, dict | None, list[str], bool]:
+    """战斗大师命中后战技的共同前半段：校验、消耗卓越骰、追加伤害。"""
+    actor_name = attacker.get("name", "角色")
+    lines: list[str] = []
+    resources = attacker.setdefault("resources", {})
+    uses = int(resources.get("superiority_dice", 0) or 0)
+
+    if attacker.get("fighter_archetype") != "battle_master":
+        return 0, None, [f"  [{maneuver_name}] {actor_name} 不是战斗大师，战技未生效。"], False
+    if maneuver_id not in attacker.get("maneuvers", []):
+        return 0, None, [f"  [{maneuver_name}] {actor_name} 尚未选择{maneuver_name}，战技未生效。"], False
+    if uses <= 0:
+        return 0, None, [f"  [{maneuver_name}] {actor_name} 的卓越骰已用尽，战技未生效。"], False
+
+    superiority_die = str(attacker.get("superiority_die") or "1d8")
+    damage_roll = d20.roll(superiority_die)
+    resources["superiority_dice"] = uses - 1
+    lines.append(f"  [{maneuver_name}] 消耗 1 枚卓越骰（{uses} → {uses - 1}）。")
+    lines.append(f"  [{maneuver_name}] 卓越骰伤害: {damage_roll} → {damage_roll.total} 点 {roll_info.get('dmg_type', '')} 伤害")
+
+    _, hp_change, damage_lines = apply_damage_to_target(
+        target,
+        damage_roll.total,
+        damage_type=str(roll_info.get("dmg_type") or ""),
+        crit=False,
+    )
+    lines.extend(f"  {line}" for line in damage_lines)
+    return damage_roll.total, hp_change, lines, True
+
+
+def apply_trip_attack_maneuver(attacker: dict, target: dict, roll_info: dict) -> tuple[int, dict | None, list[str]]:
+    """摔绊攻击在命中后追加卓越骰伤害，并让大型或更小目标进行力量豁免。"""
+    target_name = target.get("name", "目标")
+    actor_name = attacker.get("name", "角色")
+    damage, hp_change, lines, ok = _consume_superiority_damage(
+        attacker, target, roll_info, "trip_attack", "摔绊攻击"
+    )
+    if not ok:
+        return damage, hp_change, lines
+
+    if not _battle_master_can_affect_large_or_smaller(target):
+        lines.append(f"  [摔绊攻击] {target_name} 体型过大，不能被该战技击倒。")
+        return damage, hp_change, lines
+
+    save_dc = int(attacker.get("maneuver_save_dc", 0) or 0)
+    save_roll, auto_fail_reason, disadvantaged = roll_actor_save(target, "str")
+    if auto_fail_reason:
+        upsert_condition(target, create_condition("prone", source_id=attacker.get("id", actor_name)), replace_existing=True)
+        lines.append(f"  [摔绊攻击] {target_name} STR 豁免自动失败（{auto_fail_reason}），陷入倒地。")
+        return damage, hp_change, lines
+
+    roll_text = f"{save_roll}（劣势）" if disadvantaged else str(save_roll)
+    if save_roll.total < save_dc:
+        upsert_condition(target, create_condition("prone", source_id=attacker.get("id", actor_name)), replace_existing=True)
+        lines.append(f"  [摔绊攻击] {target_name} STR 豁免 DC {save_dc}: {roll_text}，失败，陷入倒地。")
+    else:
+        lines.append(f"  [摔绊攻击] {target_name} STR 豁免 DC {save_dc}: {roll_text}，成功，未倒地。")
+
+    return damage, hp_change, lines
+
+
+def apply_menacing_attack_maneuver(attacker: dict, target: dict, roll_info: dict) -> tuple[int, dict | None, list[str]]:
+    """恐吓攻击命中后追加卓越骰伤害，目标感知豁免失败则恐慌到你下一回合结束。"""
+    target_name = target.get("name", "目标")
+    actor_name = attacker.get("name", "角色")
+    damage, hp_change, lines, ok = _consume_superiority_damage(
+        attacker, target, roll_info, "menacing_attack", "恐吓攻击"
+    )
+    if not ok:
+        return damage, hp_change, lines
+
+    save_dc = int(attacker.get("maneuver_save_dc", 0) or 0)
+    save_roll, auto_fail_reason, disadvantaged = roll_actor_save(target, "wis")
+    if auto_fail_reason:
+        upsert_condition(target, create_condition("frightened", source_id=attacker.get("id", actor_name), duration=1), replace_existing=True)
+        lines.append(f"  [恐吓攻击] {target_name} WIS 豁免自动失败（{auto_fail_reason}），陷入恐慌。")
+        return damage, hp_change, lines
+
+    roll_text = f"{save_roll}（劣势）" if disadvantaged else str(save_roll)
+    if save_roll.total < save_dc:
+        upsert_condition(target, create_condition("frightened", source_id=attacker.get("id", actor_name), duration=1), replace_existing=True)
+        lines.append(f"  [恐吓攻击] {target_name} WIS 豁免 DC {save_dc}: {roll_text}，失败，陷入恐慌。")
+    else:
+        lines.append(f"  [恐吓攻击] {target_name} WIS 豁免 DC {save_dc}: {roll_text}，成功，未恐慌。")
+    return damage, hp_change, lines
+
+
+def apply_pushing_attack_maneuver(attacker: dict, target: dict, roll_info: dict) -> tuple[int, dict | None, list[str]]:
+    """推撞攻击命中后追加卓越骰伤害，目标力量豁免失败则记录待推动 15 尺。"""
+    target_name = target.get("name", "目标")
+    actor_id = str(attacker.get("id") or attacker.get("name") or "")
+    damage, hp_change, lines, ok = _consume_superiority_damage(
+        attacker, target, roll_info, "pushing_attack", "推撞攻击"
+    )
+    if not ok:
+        return damage, hp_change, lines
+
+    if not _battle_master_can_affect_large_or_smaller(target):
+        lines.append(f"  [推撞攻击] {target_name} 体型过大，不能被该战技推动。")
+        return damage, hp_change, lines
+
+    save_dc = int(attacker.get("maneuver_save_dc", 0) or 0)
+    save_roll, auto_fail_reason, disadvantaged = roll_actor_save(target, "str")
+    failed = bool(auto_fail_reason)
+    roll_text = ""
+    if not auto_fail_reason:
+        roll_text = f"{save_roll}（劣势）" if disadvantaged else str(save_roll)
+        failed = save_roll.total < save_dc
+
+    if failed:
+        target["forced_movement_pending"] = {
+            "type": "push",
+            "source_id": actor_id,
+            "distance_feet": 15,
+            "direction": "away_from_source",
+        }
+        if auto_fail_reason:
+            lines.append(f"  [推撞攻击] {target_name} STR 豁免自动失败（{auto_fail_reason}），应被推离至多 15 尺。")
+        else:
+            lines.append(f"  [推撞攻击] {target_name} STR 豁免 DC {save_dc}: {roll_text}，失败，应被推离至多 15 尺。")
+    else:
+        lines.append(f"  [推撞攻击] {target_name} STR 豁免 DC {save_dc}: {roll_text}，成功，未被推动。")
+    return damage, hp_change, lines
+
+
+def _battle_master_can_affect_large_or_smaller(target: dict) -> bool:
+    """PHB 中摔绊/推撞只影响大型或更小目标；缺少体型数据时按常见怪物默认允许。"""
+    raw_size = str(target.get("size") or "").strip().lower()
+    if not raw_size:
+        return True
+    size_order = {
+        "tiny": 1,
+        "小型": 2,
+        "small": 2,
+        "medium": 3,
+        "中型": 3,
+        "large": 4,
+        "大型": 4,
+        "huge": 5,
+        "巨型": 5,
+        "gargantuan": 6,
+        "超巨型": 6,
+    }
+    return size_order.get(raw_size, 3) <= size_order["large"]
 
 
 def resolve_single_attack(
@@ -1281,6 +1496,7 @@ def _process_turn_start_conditions(actor: dict, all_combatants: dict[str, dict])
     lines.extend(_process_turn_start_condition_hooks(actor, all_combatants))
 
     actor["action_available"] = True
+    actor["extra_action_available"] = False
     actor["bonus_action_available"] = True
     actor["reaction_available"] = True
     from app.services.tools.monster_action_resolvers import roll_action_recharges
@@ -1288,6 +1504,7 @@ def _process_turn_start_conditions(actor: dict, all_combatants: dict[str, dict])
     sync_movement_state(actor, reset_to_current_speed=True)
     if actor.get("hp", 0) <= 0:
         actor["action_available"] = False
+        actor["extra_action_available"] = False
         actor["bonus_action_available"] = False
         actor["reaction_available"] = False
         actor["movement_left"] = 0

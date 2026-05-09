@@ -43,6 +43,8 @@ from app.services.tools.space_tools import (
     switch_plane_map,
 )
 from app.services.tools.monster_action_tools import use_monster_action
+from app.services.tools.class_action_tools import use_class_action
+from app.services.tools.class_feature_tools import use_class_feature
 from app.services.tools.adventure_tools import (
     advance_adventure,
     inspect_adventure_state,
@@ -86,6 +88,7 @@ _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
     start_combat,
     end_combat,
     cast_spell,
+    use_class_action,
     inspect_unit,
     consult_rules_handbook,
     manage_space,
@@ -94,6 +97,8 @@ _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
 _COMBAT_TOOLS: tuple[BaseTool, ...] = (
     request_dice_roll,
     modify_character_state,
+    use_class_action,
+    use_class_feature,
     attack_action,
     help_action,
     manage_scene_units,
@@ -125,6 +130,8 @@ _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
     level_up,
     choose_arcane_tradition,
     choose_fighter_archetype,
+    use_class_action,
+    use_class_feature,
     create_plane_map,
     switch_plane_map,
     place_unit,

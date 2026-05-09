@@ -10,10 +10,12 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from app.services.tools._helpers import (
+    consume_action_resource,
     compute_ac,
     get_combatant,
     get_condition_action_block_reason,
     get_player_identity,
+    has_action_resource,
     is_player_reference,
     canonicalize_player_space,
     refresh_arcane_ward_on_abjuration,
@@ -372,14 +374,12 @@ def cast_spell(
             return _reject(f"{caster.get('name')} 已经倒下，无法施法；若这是玩家回合，应先进行死亡豁免。")
         if casting_time in ("action", "bonus_action") and combat_dict and combat_dict.get("current_actor_id") != caster["id"]:
             return _reject(f"当前不是 {caster.get('name')} 的回合。")
-        action_map = {"action": "action_available", "bonus_action": "bonus_action_available", "reaction": "reaction_available"}
-        action_key = action_map[casting_time]
-        if not caster.get(action_key, True):
+        if not has_action_resource(caster, casting_time):
             label = {"action": "动作", "bonus_action": "附赠动作", "reaction": "反应"}[casting_time]
             return _reject(f"本回合的{label}已用尽。")
         if block_reason := get_condition_action_block_reason(caster, casting_time):
             return _reject(block_reason)
-        caster[action_key] = False
+        consume_action_resource(caster, casting_time)
 
     # 解析目标
     targets: list[dict] = []

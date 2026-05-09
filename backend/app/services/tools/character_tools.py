@@ -13,7 +13,17 @@ from langgraph.types import Command
 
 from app.calculation.abilities import ability_to_modifier
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
+from app.services.class_features import (
+    BATTLE_MASTER_FEATURE_IDS,
+    BATTLE_MASTER_MANEUVER_SAVE_ABILITY,
+    BATTLE_MASTER_MANEUVER_SAVE_DC_BONUS,
+    BATTLE_MASTER_SUPERIORITY_DICE,
+    BATTLE_MASTER_SUPERIORITY_DIE,
+    ELDRITCH_KNIGHT_FEATURE_IDS,
+    sync_eldritch_knight_spellcasting,
+)
 from app.conditions import remove_condition_by_id, upsert_condition
+from app.services.feats import apply_feat, available_feat_ids
 from app.services.skills import load_skill_content
 from app.services.tools._helpers import (
     apply_death_save_failures_from_damage,
@@ -23,6 +33,7 @@ from app.services.tools._helpers import (
     get_player_identity,
     is_player_reference,
     mark_unit_dying,
+    prepare_character_for_combat,
     record_death_save_roll,
     reset_death_save_state,
     sync_ac_state,
@@ -46,6 +57,25 @@ _STATE_CHANGE_KEY_HINTS = {
     "hp": "HP 请使用 set_hp（设为指定值）或 hp_delta（增减值）",
     "resources": "资源请使用 set_resource（设为指定值/上限）或 resource_delta（增减值）",
 }
+
+
+def _normalize_tool_mapping(field_name: str, value: dict | str | None, tool_call_id: str | None) -> dict | Command:
+    """把模型工具调用中的对象参数归一化，避免 JSON 字符串卡死真实对话流程。"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return Command(update={"messages": [
+            ToolMessage(content=f"{field_name} 必须是对象或可解析为对象的 JSON 字符串。", tool_call_id=tool_call_id)
+        ]})
+    if not isinstance(parsed, dict):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{field_name} 必须是对象，不能是 {type(parsed).__name__}。", tool_call_id=tool_call_id)
+        ]})
+    return parsed
 
 
 def _get_resource_caps(target: dict, player_dict: dict | None = None) -> dict[str, int]:
@@ -106,7 +136,7 @@ def load_character_profile(
 @tool
 def modify_character_state(
     target_id: str = "player",
-    changes: dict | None = None,
+    changes: dict | str | None = None,
     action: Literal[
         "help",
         "update",
@@ -114,13 +144,14 @@ def modify_character_state(
         "level_up",
         "choose_arcane_tradition",
         "choose_fighter_archetype",
+        "choose_feat",
         "apply_condition",
         "remove_condition",
         "record_death_save",
         "stabilize",
         "revive",
     ] = "update",
-    payload: dict | None = None,
+    payload: dict | str | None = None,
     reason: str = "",
     *,
     state: Annotated[dict, InjectedState] = None,
@@ -128,6 +159,7 @@ def modify_character_state(
 ) -> Command:
     """角色状态调整与成长入口。用于 HP/AC/能力值/资源/状态效果、死亡豁免与复活，以及经验、升级、子职选择。
     不要用它重放攻击、施法、怪物动作工具刚刚结算过的结果。
+    成长动作支持玩家和角色型友方；对友方使用时必须把 target_id 设为 scene_units 或 combat.participants 中的友方 ID。
     如不确定 action、changes 或 payload 的写法，先用 action="help" 查看状态说明；
     成长流程用 action="help", payload={"topic": "progression"} 查看完整说明。
     参数示例：
@@ -137,15 +169,25 @@ def modify_character_state(
     - 记录死亡豁免：{"target_id": "player", "action": "record_death_save", "payload": {"roll_total": 13}}
     - 复活玩家：{"target_id": "player", "action": "revive", "payload": {"hp": 1}, "reason": "治疗药水"}
     - 获得经验：{"action": "grant_xp", "payload": {"amount": 75, "reason": "击败地精伏击"}}
+    - 友方获得经验：{"target_id": "fighter_companion", "action": "grant_xp", "payload": {"amount": 900, "reason": "同伴奖励"}}
+    - 友方升级：{"target_id": "fighter_companion", "action": "level_up"}
+    - 友方选择战士范型：{"target_id": "fighter_companion", "action": "choose_fighter_archetype", "payload": {"archetype": "battle_master"}}
+    - 友方选择专长：{"target_id": "fighter_companion", "action": "choose_feat", "payload": {"feat": "tough"}}
 
     Args:
-        target_id: 目标单位 ID；玩家角色的 ID 就是玩家名字，也兼容 "player" 表示当前玩家。
+        target_id: 目标单位 ID；"player" 表示当前玩家，也可传场景或战斗中的友方角色 ID。
         changes: action="update" 时的状态变更字典，常用 hp_delta、set_hp、resource_delta、set_resource、add_condition、remove_condition。
         action: 状态调整动作；常用 "update"、"record_death_save"、"revive"、"apply_condition"、"remove_condition"、"grant_xp"、"level_up"。
         payload: 非 update 动作的参数；不要把 update 的 changes 字段塞到 payload。
         reason: 修改原因，会进入工具结果，便于回合记录。
     """
-    payload = payload or {}
+    # 工具调用边界兼容：部分模型会把对象参数序列化成 JSON 字符串，入口处统一归一化。
+    payload = _normalize_tool_mapping("payload", payload, tool_call_id)
+    if isinstance(payload, Command):
+        return payload
+    changes = _normalize_tool_mapping("changes", changes, tool_call_id)
+    if isinstance(changes, Command):
+        return changes
 
     # 复杂说明仍由统一工具按需返回，模型可见工具面保持稳定。
     if action == "help":
@@ -157,13 +199,15 @@ def modify_character_state(
 
     # 角色成长类动作收口在同一个工具里，减少模型可见工具数量。
     if action == "grant_xp":
-        return _grant_xp_command(int(payload["amount"]), str(payload.get("reason", reason)), state, tool_call_id)
+        return _grant_xp_command(target_id, int(payload["amount"]), str(payload.get("reason", reason)), state, tool_call_id)
     if action == "level_up":
-        return _level_up_command(state, tool_call_id)
+        return _level_up_command(target_id, state, tool_call_id)
     if action == "choose_arcane_tradition":
-        return _choose_arcane_tradition_command(str(payload["tradition"]), state, tool_call_id)
+        return _choose_arcane_tradition_command(target_id, str(payload["tradition"]), state, tool_call_id)
     if action == "choose_fighter_archetype":
-        return _choose_fighter_archetype_command(str(payload["archetype"]), state, tool_call_id)
+        return _choose_fighter_archetype_command(target_id, str(payload["archetype"]), state, tool_call_id)
+    if action == "choose_feat":
+        return _choose_feat_command(target_id, str(payload["feat"]), state, tool_call_id)
 
     # 状态效果通过 changes 复用既有状态写入路径，避免维护两套目标定位逻辑。
     if action == "apply_condition":
@@ -481,7 +525,7 @@ _WIZARD_LEVEL_TABLE: dict[int, dict] = {
 }
 
 
-# 战士升级表只覆盖当前需求的 1-3 级，3 级范型由独立动作选择。
+# 战士升级表只覆盖当前 1-5 级目标，3 级范型由独立动作选择。
 _FIGHTER_LEVEL_TABLE: dict[int, dict] = {
     2: {
         "class_features": ["action_surge"],
@@ -489,6 +533,12 @@ _FIGHTER_LEVEL_TABLE: dict[int, dict] = {
     },
     3: {
         "choose_archetype": True,
+    },
+    4: {
+        "class_features": ["ability_score_improvement"],
+    },
+    5: {
+        "class_features": ["extra_attack"],
     },
 }
 
@@ -545,6 +595,7 @@ def _apply_wizard_level_up(player_dict: dict, new_level: int) -> list[str]:
     from app.calculation.proficiency import calculate_proficiency_bonus
     new_prof = calculate_proficiency_bonus(new_level)
     old_prof = calculate_proficiency_bonus(new_level - 1)
+    player_dict["proficiency_bonus"] = new_prof
     if new_prof != old_prof:
         lines.append(f"  熟练加值: +{old_prof} → +{new_prof}")
 
@@ -585,6 +636,11 @@ def _apply_fighter_level_up(player_dict: dict, new_level: int) -> list[str]:
         lines.append("  [必须选择武术范型：勇士(champion) / 战斗大师(battle_master) / 奥法骑士(eldritch_knight)]")
         lines.append('  先使用 modify_character_state，action="choose_fighter_archetype" 完成选择，再继续后续流程')
 
+    from app.calculation.proficiency import calculate_proficiency_bonus
+    player_dict["proficiency_bonus"] = calculate_proficiency_bonus(new_level)
+    player_dict["level"] = new_level
+    lines.extend(sync_eldritch_knight_spellcasting(player_dict))
+
     return lines
 
 
@@ -592,6 +648,78 @@ def _get_player_dict(state: dict) -> dict | None:
     """统一读取玩家状态，兼容 Pydantic 与普通 dict。"""
     player_raw = state.get("player")
     return player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
+
+
+def _resolve_growth_target(state: dict, target_id: str) -> tuple[dict | None, str, dict]:
+    """成长系统只处理玩家和角色型友方，避免把普通怪物误当角色卡升级。"""
+    player_dict = _get_player_dict(state)
+    update: dict = {}
+
+    if is_player_reference(player_dict, target_id):
+        return player_dict, "player", update
+
+    combat_raw = state.get("combat")
+    if combat_raw:
+        combat_dict = combat_raw.model_dump() if hasattr(combat_raw, "model_dump") else dict(combat_raw)
+        target = get_combatant(combat_dict, player_dict, target_id)
+        if target:
+            update["combat"] = combat_dict
+            return target, "combat", update
+
+    scene_units = state.get("scene_units") or {}
+    scene_raw = {
+        k: v.model_dump() if hasattr(v, "model_dump") else dict(v)
+        for k, v in scene_units.items()
+    } if hasattr(scene_units, "items") else {}
+    if target_id in scene_raw:
+        update["scene_units"] = scene_raw
+        return scene_raw[target_id], "scene", update
+
+    return None, "", update
+
+
+def _is_growth_character(target: dict | None) -> bool:
+    """成长目标必须是玩家或友方角色，且拥有职业字段。"""
+    if not target:
+        return False
+    side = target.get("side", "player")
+    return side in {"player", "ally"} and bool(target.get("role_class"))
+
+
+def _growth_role_class(target: dict) -> str:
+    """友方模板使用英文职业 ID，这里统一成升级表使用的中文职业名。"""
+    role_class = str(target.get("role_class", "")).strip().lower()
+    aliases = {
+        "fighter": "战士",
+        "wizard": "法师",
+        "战士": "战士",
+        "法师": "法师",
+    }
+    return aliases.get(role_class, str(target.get("role_class", "")))
+
+
+def _build_character_growth_update(
+    target: dict,
+    target_source: str,
+    base_update: dict,
+    messages: list[ToolMessage],
+) -> dict:
+    """按角色当前位置回写成长结果，避免玩家、场景、战斗维护多套写回规则。"""
+    prepare_character_for_combat(
+        target,
+        side=target.get("side", "ally"),
+        fallback_id=target.get("id"),
+        reset_action_economy=False,
+    )
+    update = dict(base_update)
+    if target_source == "player":
+        update["player"] = target
+    elif target_source == "combat":
+        update["combat"]["participants"][target["id"]] = target
+    elif target_source == "scene":
+        update["scene_units"][target["id"]] = target
+    update["messages"] = messages
+    return update
 
 
 def _missing_player_message(tool_call_id: str | None) -> Command:
@@ -602,47 +730,61 @@ def _missing_player_message(tool_call_id: str | None) -> Command:
 
 
 def _grant_xp_command(
+    target_id: str,
     amount: int,
     reason: str,
     state: dict,
     tool_call_id: str | None,
 ) -> Command:
-    """为玩家增加经验，达到门槛时提示继续调用统一状态调整工具升级。"""
-    player_dict = _get_player_dict(state)
-    if not player_dict:
-        return _missing_player_message(tool_call_id)
+    """为玩家或角色型友方增加经验，先打通成长目标定位。"""
+    target, source, base_update = _resolve_growth_target(state, target_id)
+    if not target:
+        return Command(update={"messages": [
+            ToolMessage(content=f"找不到成长目标 '{target_id}'。", tool_call_id=tool_call_id)
+        ]})
+    if not _is_growth_character(target):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{target.get('name', target_id)} 不是可升级的玩家或友方角色。", tool_call_id=tool_call_id)
+        ]})
 
-    old_xp = player_dict.get("xp", 0)
+    old_xp = target.get("xp", 0)
     new_xp = old_xp + amount
-    player_dict["xp"] = new_xp
+    target["xp"] = new_xp
 
-    current_level = player_dict.get("level", 1)
+    current_level = target.get("level", 1)
     next_threshold = XP_THRESHOLDS.get(current_level + 1)
 
     lines = [f"[经验值] {reason}" if reason else "[经验值]"]
-    lines.append(f"  {player_dict.get('name', '?')}: XP {old_xp} → {new_xp}")
+    lines.append(f"  {target.get('name', '?')}: XP {old_xp} → {new_xp}")
 
     if next_threshold and new_xp >= next_threshold:
         lines.append(
-            f'  ★ XP 已达到 {current_level + 1} 级门槛（{next_threshold}）！'
+            f'  ☑ XP 已达到 {current_level + 1} 级门槛（{next_threshold}）！'
             '可以使用 modify_character_state，action="level_up" 升级。'
         )
 
-    return Command(update={
-        "player": player_dict,
-        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
-    })
+    return Command(update=_build_character_growth_update(
+        target,
+        source,
+        base_update,
+        [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    ))
 
+def _level_up_command(target_id: str, state: dict, tool_call_id: str | None) -> Command:
+    """按当前职业升级表推进指定角色等级。"""
+    target, source, base_update = _resolve_growth_target(state, target_id)
+    if not target:
+        return Command(update={"messages": [
+            ToolMessage(content=f"找不到成长目标 '{target_id}'。", tool_call_id=tool_call_id)
+        ]})
+    if not _is_growth_character(target):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{target.get('name', target_id)} 不是可升级的玩家或友方角色。", tool_call_id=tool_call_id)
+        ]})
 
-def _level_up_command(state: dict, tool_call_id: str | None) -> Command:
-    """按当前职业升级表推进玩家等级。"""
-    player_dict = _get_player_dict(state)
-    if not player_dict:
-        return _missing_player_message(tool_call_id)
-
-    current_level = player_dict.get("level", 1)
+    current_level = target.get("level", 1)
     new_level = current_level + 1
-    xp = player_dict.get("xp", 0)
+    xp = target.get("xp", 0)
     threshold = XP_THRESHOLDS.get(new_level)
 
     if not threshold:
@@ -655,14 +797,14 @@ def _level_up_command(state: dict, tool_call_id: str | None) -> Command:
             ToolMessage(content=f"XP 不足：当前 {xp}，升到 {new_level} 级需要 {threshold}。", tool_call_id=tool_call_id)
         ]})
 
-    role_class = player_dict.get("role_class", "")
-    lines = [f"[升级] {player_dict.get('name', '?')}: {current_level} → {new_level} 级"]
+    role_class = _growth_role_class(target)
+    lines = [f"[升级] {target.get('name', '?')}: {current_level} → {new_level} 级"]
 
     if role_class == "法师":
-        level_lines = _apply_wizard_level_up(player_dict, new_level)
+        level_lines = _apply_wizard_level_up(target, new_level)
         lines.extend(level_lines)
     elif role_class == "战士":
-        level_lines = _apply_fighter_level_up(player_dict, new_level)
+        level_lines = _apply_fighter_level_up(target, new_level)
         lines.extend(level_lines)
     else:
         lines.append(f"  当前仅支持法师和战士升级，{role_class} 的升级表尚未实现。")
@@ -670,37 +812,46 @@ def _level_up_command(state: dict, tool_call_id: str | None) -> Command:
             ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)
         ]})
 
-    player_dict["level"] = new_level
+    target["level"] = new_level
 
-    return Command(update={
-        "player": player_dict,
-        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
-    })
+    return Command(update=_build_character_growth_update(
+        target,
+        source,
+        base_update,
+        [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    ))
 
 
 def _choose_fighter_archetype_command(
+    target_id: str,
     archetype: str,
     state: dict,
     tool_call_id: str | None,
 ) -> Command:
     """为 3 级战士写入武术范型，并授予当前版本支持的范型字段。"""
-    player_dict = _get_player_dict(state)
-    if not player_dict:
-        return _missing_player_message(tool_call_id)
+    target, source, base_update = _resolve_growth_target(state, target_id)
+    if not target:
+        return Command(update={"messages": [
+            ToolMessage(content=f"找不到成长目标 '{target_id}'。", tool_call_id=tool_call_id)
+        ]})
+    if not _is_growth_character(target):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{target.get('name', target_id)} 不是可升级的玩家或友方角色。", tool_call_id=tool_call_id)
+        ]})
 
-    if player_dict.get("role_class") != "战士":
+    if _growth_role_class(target) != "战士":
         return Command(update={"messages": [
             ToolMessage(content="仅战士可选择武术范型。", tool_call_id=tool_call_id)
         ]})
 
-    if player_dict.get("level", 1) < 3:
+    if target.get("level", 1) < 3:
         return Command(update={"messages": [
             ToolMessage(content="战士达到 3 级后才能选择武术范型。", tool_call_id=tool_call_id)
         ]})
 
-    if player_dict.get("fighter_archetype"):
+    if target.get("fighter_archetype"):
         return Command(update={"messages": [
-            ToolMessage(content=f"已选择武术范型: {player_dict['fighter_archetype']}。", tool_call_id=tool_call_id)
+            ToolMessage(content=f"已选择武术范型: {target['fighter_archetype']}。", tool_call_id=tool_call_id)
         ]})
 
     archetype = archetype.strip().lower()
@@ -710,8 +861,8 @@ def _choose_fighter_archetype_command(
             ToolMessage(content=f"不支持的武术范型: {archetype}。可选: {', '.join(sorted(valid))}", tool_call_id=tool_call_id)
         ]})
 
-    player_dict["fighter_archetype"] = archetype
-    features = player_dict.setdefault("class_features", [])
+    target["fighter_archetype"] = archetype
+    features = target.setdefault("class_features", [])
     lines = [f"[武术范型] 选择了 {archetype}"]
 
     if archetype == "champion":
@@ -719,54 +870,59 @@ def _choose_fighter_archetype_command(
             features.append("improved_critical")
             lines.append("  获得特性: 精通重击 (Improved Critical) — 武器攻击天然 19 或 20 时造成重击")
     elif archetype == "battle_master":
-        for feat in ["combat_superiority", "student_of_war"]:
+        for feat in BATTLE_MASTER_FEATURE_IDS:
             if feat not in features:
                 features.append(feat)
-        resources = player_dict.setdefault("resources", {})
-        resource_caps = player_dict.setdefault("resource_caps", {})
-        resources["superiority_dice"] = 4
-        resource_caps["superiority_dice"] = 4
-        player_dict["superiority_die"] = "1d8"
-        player_dict.setdefault("maneuvers", [])
+        resources = target.setdefault("resources", {})
+        resource_caps = target.setdefault("resource_caps", {})
+        resources["superiority_dice"] = BATTLE_MASTER_SUPERIORITY_DICE
+        resource_caps["superiority_dice"] = BATTLE_MASTER_SUPERIORITY_DICE
+        modifiers = target.get("modifiers", {})
+        target["superiority_die"] = BATTLE_MASTER_SUPERIORITY_DIE
+        target["maneuvers_known_count"] = 3
+        target["maneuvers"] = []
+        target["maneuver_save_ability"] = BATTLE_MASTER_MANEUVER_SAVE_ABILITY
+        target["maneuver_save_dc"] = 8 + BATTLE_MASTER_MANEUVER_SAVE_DC_BONUS + max(
+            modifiers.get("str", 0),
+            modifiers.get("dex", 0),
+        )
+        target["artisan_tool_proficiency"] = ""
         lines.append("  获得特性: 卓越战技 (Combat Superiority) — 4 枚 d8 卓越骰")
         lines.append("  获得特性: 战争学徒 (Student of War)")
     elif archetype == "eldritch_knight":
-        for feat in ["eldritch_knight_spellcasting", "weapon_bond"]:
+        for feat in ELDRITCH_KNIGHT_FEATURE_IDS:
             if feat not in features:
                 features.append(feat)
-        player_dict["spellcasting_ability"] = "int"
-        known_cantrips = player_dict.setdefault("known_cantrips", [])
-        for spell_id in ["fire_bolt", "ray_of_frost"]:
-            if spell_id not in known_cantrips:
-                known_cantrips.append(spell_id)
-        known_spells = player_dict.setdefault("known_spells", [])
-        for spell_id in ["shield", "magic_missile", "burning_hands"]:
-            if spell_id not in known_spells:
-                known_spells.append(spell_id)
-        resources = player_dict.setdefault("resources", {})
-        resource_caps = player_dict.setdefault("resource_caps", {})
-        resources["spell_slot_lv1"] = 2
-        resource_caps["spell_slot_lv1"] = 2
+        lines.extend(sync_eldritch_knight_spellcasting(target))
         lines.append("  获得特性: 奥法骑士施法 (Eldritch Knight Spellcasting)")
         lines.append("  获得特性: 武器联结 (Weapon Bond)")
 
-    return Command(update={
-        "player": player_dict,
-        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
-    })
+    return Command(update=_build_character_growth_update(
+        target,
+        source,
+        base_update,
+        [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    ))
 
 
 def _choose_arcane_tradition_command(
+    target_id: str,
     tradition: str,
     state: dict,
     tool_call_id: str | None,
 ) -> Command:
     """为法师写入奥术传承，并授予对应职业特性。"""
-    player_dict = _get_player_dict(state)
-    if not player_dict:
-        return _missing_player_message(tool_call_id)
+    target, source, base_update = _resolve_growth_target(state, target_id)
+    if not target:
+        return Command(update={"messages": [
+            ToolMessage(content=f"找不到成长目标 '{target_id}'。", tool_call_id=tool_call_id)
+        ]})
+    if not _is_growth_character(target):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{target.get('name', target_id)} 不是可升级的玩家或友方角色。", tool_call_id=tool_call_id)
+        ]})
 
-    if player_dict.get("role_class") != "法师":
+    if _growth_role_class(target) != "法师":
         return Command(update={"messages": [
             ToolMessage(content="仅法师可选择奥术传承。", tool_call_id=tool_call_id)
         ]})
@@ -778,8 +934,8 @@ def _choose_arcane_tradition_command(
             ToolMessage(content=f"不支持的传承: {tradition}。可选: {', '.join(valid)}", tool_call_id=tool_call_id)
         ]})
 
-    player_dict["arcane_tradition"] = tradition
-    features = player_dict.setdefault("class_features", [])
+    target["arcane_tradition"] = tradition
+    features = target.setdefault("class_features", [])
     lines = [f"[奥术传承] 选择了 {tradition}"]
 
     if tradition == "evocation":
@@ -791,23 +947,75 @@ def _choose_arcane_tradition_command(
             features.append("arcane_ward")
             # 创建初始结界
             from app.conditions._base import build_condition_extra, create_condition
-            int_mod = player_dict.get("modifiers", {}).get("int", 0)
-            level = player_dict.get("level", 2)
+            int_mod = target.get("modifiers", {}).get("int", 0)
+            level = target.get("level", 2)
             ward_hp = level * 2 + int_mod
-            conditions = player_dict.setdefault("conditions", [])
+            conditions = target.setdefault("conditions", [])
             # 移除旧结界
-            player_dict["conditions"] = [c for c in conditions if c.get("id") != "arcane_ward"]
-            player_dict["conditions"].append(create_condition(
+            target["conditions"] = [c for c in conditions if c.get("id") != "arcane_ward"]
+            target["conditions"].append(create_condition(
                 "arcane_ward",
                 source_id="arcane_tradition",
                 extra=build_condition_extra(ward_hp=ward_hp, ward_max_hp=ward_hp),
             ))
             lines.append(f"  获得特性: 奥术结界 (Arcane Ward) — 结界 HP: {ward_hp}")
 
-    return Command(update={
-        "player": player_dict,
-        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
-    })
+    return Command(update=_build_character_growth_update(
+        target,
+        source,
+        base_update,
+        [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    ))
+
+
+def _choose_feat_command(
+    target_id: str,
+    feat_id: str,
+    state: dict,
+    tool_call_id: str | None,
+) -> Command:
+    """为目标角色记录专长，复杂效果先交给专长注册表逐步扩展。"""
+    target, source, base_update = _resolve_growth_target(state, target_id)
+    if not target:
+        return Command(update={"messages": [
+            ToolMessage(content=f"找不到成长目标 '{target_id}'。", tool_call_id=tool_call_id)
+        ]})
+    if not _is_growth_character(target):
+        return Command(update={"messages": [
+            ToolMessage(content=f"{target.get('name', target_id)} 不是可选择专长的玩家或友方角色。", tool_call_id=tool_call_id)
+        ]})
+
+    feat_id = feat_id.strip().lower()
+    if feat_id not in available_feat_ids():
+        return Command(update={"messages": [
+            ToolMessage(
+                content=f"不支持的专长: {feat_id}。可选: {', '.join(available_feat_ids())}",
+                tool_call_id=tool_call_id,
+            )
+        ]})
+
+    feats = target.setdefault("feats", [])
+    if feat_id in feats:
+        return Command(update={"messages": [
+            ToolMessage(content=f"已选择专长: {feat_id}。", tool_call_id=tool_call_id)
+        ]})
+
+    feats.append(feat_id)
+    feature_id = f"feat_{feat_id}"
+    features = target.setdefault("class_features", [])
+    if feature_id not in features:
+        features.append(feature_id)
+
+    feat_name, feat_lines = apply_feat(target, feat_id)
+    lines = [f"[专长] 选择了 {feat_name} ({feat_id})"]
+    lines.extend(feat_lines)
+
+    return Command(update=_build_character_growth_update(
+        target,
+        source,
+        base_update,
+        [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
+    ))
 
 
 @tool
@@ -819,7 +1027,7 @@ def grant_xp(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为玩家角色增加经验值。新模型可见入口是 modify_character_state。"""
-    return _grant_xp_command(amount, reason, state, tool_call_id)
+    return _grant_xp_command("player", amount, reason, state, tool_call_id)
 
 
 @tool
@@ -829,7 +1037,7 @@ def level_up(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：将玩家角色升级到下一等级。新模型可见入口是 modify_character_state。"""
-    return _level_up_command(state, tool_call_id)
+    return _level_up_command("player", state, tool_call_id)
 
 
 @tool
@@ -840,7 +1048,7 @@ def choose_arcane_tradition(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为法师选择奥术传承。新模型可见入口是 modify_character_state。"""
-    return _choose_arcane_tradition_command(tradition, state, tool_call_id)
+    return _choose_arcane_tradition_command("player", tradition, state, tool_call_id)
 
 
 @tool
@@ -851,4 +1059,5 @@ def choose_fighter_archetype(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """兼容旧调用：为战士选择武术范型。新模型可见入口是 modify_character_state。"""
-    return _choose_fighter_archetype_command(archetype, state, tool_call_id)
+    return _choose_fighter_archetype_command("player", archetype, state, tool_call_id)
+
