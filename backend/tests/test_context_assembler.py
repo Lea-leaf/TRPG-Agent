@@ -149,8 +149,9 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertIn("[冒险节点校准]", assembled.runtime_state_text)
         self.assertIn("goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("优先沿当前节点给出可执行后果、线索或下一步压力", assembled.runtime_state_text)
         self.assertIn("必须先调用冒险工具读取或更新节点状态", assembled.runtime_state_text)
-        self.assertIn("不要因为多轮闲聊而脱离当前模组进度", assembled.runtime_state_text)
+        self.assertIn("不要顺着即兴逻辑游离到未建立的地点", assembled.runtime_state_text)
 
     def test_adventure_node_anchor_skips_combat_mode(self):
         assembler = ContextAssembler()
