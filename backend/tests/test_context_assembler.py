@@ -149,6 +149,7 @@ class ContextAssemblerTests(unittest.TestCase):
 
         self.assertIn("[冒险节点校准]", assembled.runtime_state_text)
         self.assertIn("goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("必须先调用冒险工具读取或更新节点状态", assembled.runtime_state_text)
         self.assertIn("不要因为多轮闲聊而脱离当前模组进度", assembled.runtime_state_text)
 
     def test_adventure_node_anchor_skips_combat_mode(self):
@@ -263,7 +264,7 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("新版突袭只让先攻劣势", projected)
         self.assertIn("available_exits", projected)
 
-    def test_archived_combat_expands_start_to_triggering_ai_tool_call(self):
+    def test_combat_archive_metadata_no_longer_collapses_model_history(self):
         assembler = ContextAssembler()
         state = {
             "messages": [
@@ -285,17 +286,11 @@ class ContextAssemblerTests(unittest.TestCase):
 
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
-        dangling_tool_call_messages = [
-            message for message in assembled.model_input_messages
-            if isinstance(message, AIMessage) and message.tool_calls
-        ]
-        self.assertEqual([], dangling_tool_call_messages)
-        self.assertTrue(any(
-            isinstance(message, HumanMessage)
-            and isinstance(message.content, str)
-            and message.content.startswith("[系统:战斗归档]")
-            for message in assembled.model_input_messages
-        ))
+        projected_text = "\n".join(str(message.content) for message in assembled.model_input_messages)
+        self.assertNotIn("[系统:战斗归档]", projected_text)
+        self.assertIn("战斗开始！第 1 回合。", projected_text)
+        self.assertIn("共进行了 1 回合。 倒下: Wolf", projected_text)
+        self.assertEqual("我检查四周。", assembled.model_input_messages[-1].content)
 
     def test_projection_strips_legacy_dangling_tool_call(self):
         assembler = ContextAssembler()

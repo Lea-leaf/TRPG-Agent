@@ -216,8 +216,8 @@ class TestStartCombatPlayerJoin:
         assert result.update["player"]["id"] == "温良"
         assert result.update["player"]["side"] == "player"
 
-    def test_active_combat_archive_start_includes_start_tool_call(self):
-        """战斗归档起点必须包含 start_combat 的 AI tool_call，避免后续 prompt 残留悬空调用。"""
+    def test_active_combat_start_includes_start_tool_call(self):
+        """活跃战斗窗口从 start_combat 的 AI tool_call 开始，便于长上下文裁剪保护完整工具链。"""
         player = PREDEFINED_CHARACTERS["战士"]
         goblin = _make_goblin()
         state = {
@@ -854,7 +854,7 @@ class TestPhaseLifecycle:
         assert result.update.get("phase") == "exploration"
         assert result.update.get("combat") is None
 
-    def test_end_combat_archives_finished_battle_span(self):
+    def test_end_combat_keeps_full_battle_history_without_archive_metadata(self):
         from app.services.tool_service import end_combat
 
         goblin = _make_goblin()
@@ -872,9 +872,8 @@ class TestPhaseLifecycle:
         result = _invoke_tool(end_combat, tool_input={"state": state})
 
         assert result.update.get("active_combat_message_start") is None
-        assert result.update["combat_archives"][0]["start_index"] == 1
-        assert result.update["combat_archives"][0]["end_index"] == 3
-        assert "共进行了" in result.update["combat_archives"][0]["summary"]
+        assert "combat_archives" not in result.update
+        assert "共进行了" in result.update["messages"][0].content
 
     def test_end_combat_removes_dead_units_from_space(self):
         from app.services.tool_service import end_combat

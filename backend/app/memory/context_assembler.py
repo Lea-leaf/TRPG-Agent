@@ -16,7 +16,6 @@ from app.graph.state import GraphState
 from app.services.tools._helpers import compute_ac
 
 
-COMBAT_ARCHIVE_MESSAGE_PREFIX = "[系统:战斗归档]"
 CONTEXT_COMPACTION_MESSAGE_PREFIX = "[系统:上下文预算归档]"
 RUNTIME_STATE_MESSAGE_PREFIX = "[系统:运行状态帧]"
 MODEL_CONTEXT_TOKEN_LIMIT = 1_000_000
@@ -172,10 +171,8 @@ class ContextAssembler:
         return "\n\n=== 状态快照 ===\n" + "\n\n".join(sections) + "\n===========================\n"
 
     def build_model_input_messages(self, state: GraphState, mode: str, runtime_state_text: str) -> list[BaseMessage]:
-        source_messages = collapse_archived_combat_messages(
-            list(state.get("messages", [])),
-            state.get("combat_archives", []),
-        )
+        # 中文注释：DeepSeek KC 成本可接受时，战后也保留原始战斗记录，避免摘要过弱导致模型误以为战斗未发生。
+        source_messages = list(state.get("messages", []))
         trimmed_messages = trim_model_messages(source_messages, mode, state=state)
         projected_messages: list[BaseMessage] = []
 
@@ -185,7 +182,7 @@ class ContextAssembler:
                 continue
 
             if isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith("[系统:"):
-                if message.content.startswith((COMBAT_ARCHIVE_MESSAGE_PREFIX, CONTEXT_COMPACTION_MESSAGE_PREFIX, RUNTIME_STATE_MESSAGE_PREFIX)):
+                if message.content.startswith((CONTEXT_COMPACTION_MESSAGE_PREFIX, RUNTIME_STATE_MESSAGE_PREFIX)):
                     projected_messages.append(message)
                     continue
                 projected_messages.append(clone_message_with_content(message, summarize_system_message(message.content)))
@@ -410,7 +407,8 @@ class ContextAssembler:
         return (
             "[冒险节点校准]\n"
             f"当前仍处于模组 {adventure_dict['module_id']} 的节点 {adventure_dict['active_node_id']}。"
-            "继续叙事前先对齐该节点的已知事实、出口、线索与已完成事件；"
+            "若本轮将新增或改变剧情事实、线索、出口、遭遇结果、已完成事件或节点进度，"
+            "必须先调用冒险工具读取或更新节点状态；若只是闲聊、规则解释或战斗内动作结算，不调用。"
             "不要因为多轮闲聊而脱离当前模组进度或提前揭露未获得的信息。"
         )
 
@@ -592,45 +590,8 @@ def format_compaction_line(message: BaseMessage) -> str:
     return content
 
 
-def collapse_archived_combat_messages(messages: list[BaseMessage], combat_archives: list[dict[str, Any]] | None) -> list[BaseMessage]:
-    """中文注释：战后只把整段战斗投影成一条摘要，避免后续回合继续吞下整串战报。"""
-    normalized_archives = normalize_combat_archives(combat_archives, len(messages))
-    if not normalized_archives:
-        return list(messages)
-
-    collapsed: list[BaseMessage] = []
-    cursor = 0
-    for archive in normalized_archives:
-        start_index = expand_archive_start_to_tool_call(messages, archive["start_index"])
-        end_index = archive["end_index"]
-
-        if start_index < cursor:
-            continue
-
-        collapsed.extend(messages[cursor:start_index])
-        summary = archive["summary"]
-        if summary:
-            collapsed.append(HumanMessage(content=format_combat_archive_message(summary)))
-        else:
-            collapsed.extend(messages[start_index:end_index + 1])
-        cursor = end_index + 1
-
-    collapsed.extend(messages[cursor:])
-    return collapsed
-
-
-def format_combat_archive_message(summary: str) -> str:
-    """把战斗摘要标成已完成事实，避免模型把前序开战准备当作当前待办。"""
-    return (
-        f"{COMBAT_ARCHIVE_MESSAGE_PREFIX}\n"
-        "状态: 已完成并归档。该战斗已经真实发生并结束；不要再次开始同一场战斗，不要重投先攻或补做突袭判定。\n"
-        "前文若仍保留开战准备、突袭判定或 start_combat 规划，只能作为历史原因参考，不是当前待执行任务。\n"
-        f"结果摘要: {summary}"
-    )
-
-
 def expand_archive_start_to_tool_call(messages: list[BaseMessage], start_index: int) -> int:
-    """战斗归档必须连同触发工具的 AIMessage 一起折叠，否则会留下悬空 tool_calls。"""
+    """预算裁剪保护战斗段时，从触发工具调用的 AIMessage 开始保留。"""
     if start_index <= 0 or start_index >= len(messages):
         return start_index
 
@@ -697,43 +658,12 @@ def strip_tool_calls(message: AIMessage) -> AIMessage:
     )
 
 
-def normalize_combat_archives(combat_archives: list[dict[str, Any]] | None, message_count: int) -> list[dict[str, Any]]:
-    if not combat_archives or message_count <= 0:
-        return []
-
-    normalized: list[dict[str, Any]] = []
-    for archive in combat_archives:
-        if hasattr(archive, "model_dump"):
-            archive = archive.model_dump()
-        elif hasattr(archive, "items"):
-            archive = dict(archive)
-        else:
-            continue
-
-        start_index = archive.get("start_index")
-        end_index = archive.get("end_index")
-        if not isinstance(start_index, int) or not isinstance(end_index, int):
-            continue
-        if start_index < 0 or end_index < start_index or start_index >= message_count:
-            continue
-
-        normalized.append(
-            {
-                "summary": str(archive.get("summary", "")).strip(),
-                "start_index": start_index,
-                "end_index": min(end_index, message_count - 1),
-            }
-        )
-
-    normalized.sort(key=lambda item: (item["start_index"], item["end_index"]))
-    return normalized
-
-
 def format_runtime_hud_content(hud_text: str) -> str:
     return (
         f"{RUNTIME_STATE_MESSAGE_PREFIX}\n"
-        "本帧为追加式状态快照；只有最后一条运行状态帧有效，旧运行状态帧只用于缓存前缀，不得引用旧 HP、资源、坐标或回合。\n"
-        "<runtime_state_frame source=\"state\" visibility=\"model_only\" role=\"state_snapshot\" audience=\"none\">\n"
+        "机器状态快照，不是玩家发言、请求或可回复对象；只用于读取当前事实与约束。\n"
+        "只有最后一条运行状态帧有效，旧运行状态帧只用于缓存前缀，不得引用旧 HP、资源、坐标或回合。\n"
+        "<runtime_state_frame source=\"state\" visibility=\"model_only\" role=\"state_snapshot\" audience=\"none\" reply=\"forbidden\">\n"
         f"{hud_text}"
         "</runtime_state_frame>"
     )

@@ -43,7 +43,7 @@ class MemoryIngestionPipeline:
         """把一轮对话拆成消息记录、稳定事件与派生摘要三个层次。"""
         normalized_messages = self._normalize_messages(new_messages)
         stable_events = self._extract_stable_events(old_state, new_state)
-        combat_summary = self._extract_latest_combat_summary(old_state, new_state)
+        combat_summary = self._extract_combat_end_summary(normalized_messages, stable_events)
         rule_turn_summary = self._build_turn_summary(normalized_messages, stable_events, reply, combat_summary)
         turn_summary = await self._compress_turn_summary(
             session_id=session_id,
@@ -194,7 +194,7 @@ class MemoryIngestionPipeline:
     ) -> str:
         payload = {
             "stable_events": stable_events,
-            "combat_archive_summary": combat_summary,
+            "combat_end_summary": combat_summary,
             "assistant_reply": reply.strip(),
             "recent_messages": normalized_messages[-6:],
             "rule_summary_draft": rule_turn_summary,
@@ -350,21 +350,20 @@ class MemoryIngestionPipeline:
 
         return " ".join(lines[:4]).strip()
 
-    def _extract_latest_combat_summary(self, old_state: dict[str, Any], new_state: dict[str, Any]) -> str:
-        old_archives = old_state.get("combat_archives") or []
-        new_archives = new_state.get("combat_archives") or []
-        if len(new_archives) <= len(old_archives):
+    def _extract_combat_end_summary(
+        self,
+        normalized_messages: list[dict[str, Any]],
+        stable_events: list[dict[str, Any]],
+    ) -> str:
+        """战斗结束记忆来自本轮工具结果，不再依赖战斗归档字段。"""
+        if not any(event["type"] == "combat_ended" for event in stable_events):
             return ""
 
-        latest_archive = new_archives[-1]
-        if hasattr(latest_archive, "model_dump"):
-            latest_archive = latest_archive.model_dump()
-        elif hasattr(latest_archive, "items"):
-            latest_archive = dict(latest_archive)
-        else:
-            return ""
+        for message in reversed(normalized_messages):
+            if message.get("kind") == "tool_result" and message.get("tool_name") == "end_combat":
+                return str(message.get("content", "")).strip()[:1200]
 
-        return str(latest_archive.get("summary", "")).strip()[:1200]
+        return ""
 
     def _message_role_and_kind(self, message: BaseMessage) -> tuple[str, str]:
         if isinstance(message, ToolMessage):
@@ -385,7 +384,8 @@ class MemoryIngestionPipeline:
         if isinstance(message, ToolMessage):
             lines = [line.strip() for line in content.splitlines() if line.strip()]
             preview = " | ".join(lines[:3])
-            return preview[:180]
+            limit = 1200 if getattr(message, "name", "") == "end_combat" else 180
+            return preview[:limit]
 
         if isinstance(message, HumanMessage) and content.startswith("[系统:"):
             lines = [line.strip() for line in content.splitlines() if line.strip()]

@@ -360,7 +360,7 @@ def test_combat_projection_falls_back_to_detecting_start_combat_tool_message_und
     assert trimmed_messages[8].tool_calls[0]["name"] == "start_combat"
 
 
-def test_post_combat_projection_collapses_archived_battle_to_single_summary():
+def test_post_combat_projection_keeps_full_battle_history_after_archive_metadata():
     state = {
         "phase": "exploration",
         "combat": None,
@@ -383,17 +383,16 @@ def test_post_combat_projection_collapses_archived_battle_to_single_summary():
     }
 
     projected_messages = _build_model_input_messages(state, NARRATIVE_AGENT_MODE)
+    projected_text = "\n".join(str(message.content) for message in projected_messages)
 
-    assert len(projected_messages) == 3
-    assert projected_messages[1].content.startswith("[系统:战斗归档]")
-    assert "状态: 已完成并归档" in projected_messages[1].content
-    assert "不要再次开始同一场战斗" in projected_messages[1].content
-    assert "英雄在 2 回合内击败哥布林" in projected_messages[1].content
-    assert "Goblin 使用 [Scimitar]" not in projected_messages[1].content
+    assert "[系统:战斗归档]" not in projected_text
+    assert "战斗开始！第 1 回合。" in projected_text
+    assert "Goblin 使用 [Scimitar]" in projected_text
+    assert "共进行了 2 回合。 存活: 英雄 倒下: Goblin" in projected_text
     assert projected_messages[-1].content.startswith("我检查哥布林尸体。")
 
 
-def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_messages_remain():
+def test_post_combat_projection_keeps_start_combat_record_even_if_archive_metadata_exists():
     state = {
         "phase": "exploration",
         "combat": None,
@@ -420,14 +419,12 @@ def test_post_combat_projection_marks_archive_as_completed_even_if_preparation_m
     projected_messages = _build_model_input_messages(state, NARRATIVE_AGENT_MODE)
     projected_text = "\n".join(str(message.content) for message in projected_messages)
 
-    assert "[系统:战斗归档]" in projected_text
-    assert "状态: 已完成并归档" in projected_text
-    assert "不要再次开始同一场战斗" in projected_text
-    assert "前文若仍保留开战准备" in projected_text
-    assert "地精伏击已经结束" in projected_text
+    assert "[系统:战斗归档]" not in projected_text
     assert "正式启动战斗流程" in projected_text
     assert "突袭检定 raw=12" in projected_text
-    assert "现在进入正式战斗" not in projected_text
+    assert "现在进入正式战斗" in projected_text
+    assert "战斗开始！第 1 回合。" in projected_text
+    assert "共进行了 1 回合。 存活: 英雄 倒下: Goblin" in projected_text
     assert projected_messages[-1].content == "我检查路障。"
 
 
