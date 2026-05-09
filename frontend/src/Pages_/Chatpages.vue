@@ -84,8 +84,8 @@
 
     <!-- 右侧功能区 -->
     <div class="function-area" :style="{ width: rightWidth + '%' }">
-      <CharacterPanel
-        ref="characterPanelRef"
+      <CharacterSidebar
+        ref="characterSidebarRef"
         :external-player="playerState"
         :combat="combatState"
         :space="spaceState"
@@ -115,7 +115,7 @@ import { Plus, Trash2 } from 'lucide-vue-next'
 import ChatMessage from '../components/Chat/ChatMessage.vue'
 import ChatInput from '../components/Chat/ChatInput.vue'
 import ActionPanel from '../components/Chat/ActionPanel.vue'
-import CharacterPanel from '../components/Chat/CharacterPanel.vue'
+import CharacterSidebar from '../components/Chat/SideCharacterPanel/CharacterSidebar.vue'
 import Dice3D from '../components/Dice3D/Dice3D.vue'
 import { useChatSession } from '../composables/useChatSession'
 import { useChatMessages } from '../composables/useChatMessages'
@@ -129,7 +129,7 @@ import '../styles_/Chatpages.css'
 const containerRef = ref<HTMLElement | null>(null)
 const messageListRef = ref<HTMLElement | null>(null)
 const dice3dRef = ref<InstanceType<typeof Dice3D> | null>(null)
-const characterPanelRef = ref<InstanceType<typeof CharacterPanel> | null>(null)
+const characterSidebarRef = ref<InstanceType<typeof CharacterSidebar> | null>(null)
 const showDiceAnimation = ref(false)
 const rightWidth = ref(25)
 const showToggleBtn = ref(false)
@@ -170,13 +170,13 @@ const {
 // 通过 provide 向子组件注入 debugMode
 provide('debugMode', debugMode)
 
-// 监听战斗状态变化，自动切换 CharacterPanel 视图
+// 战斗开始时优先切到血量概览，结束后回到角色页
 watch(combatState, (hasCombat) => {
-  if (characterPanelRef.value) {
+  if (characterSidebarRef.value) {
     if (hasCombat) {
-      characterPanelRef.value.setViewMode('hp')
+      characterSidebarRef.value.setViewMode('hp')
     } else {
-      characterPanelRef.value.setViewMode('character')
+      characterSidebarRef.value.setViewMode('character')
     }
   }
 }, { immediate: true })

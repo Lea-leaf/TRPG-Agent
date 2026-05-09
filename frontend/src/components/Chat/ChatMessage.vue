@@ -46,7 +46,7 @@
 import { computed, inject, watch, onUnmounted, reactive, ref } from 'vue'
 import { marked } from 'marked'
 import type { ChatMessage } from '../../Services_/chatService'
-import HpBar from './HpBar.vue'
+import HpBar from './SideCharacterPanel/HpBar.vue'
 import { adaptLLMOutput } from '../../composables/markdownAdapter'
 import { useTypewriter } from '../../composables/useTypewriter'
 
