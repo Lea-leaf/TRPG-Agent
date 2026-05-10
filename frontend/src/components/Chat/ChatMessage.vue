@@ -17,7 +17,7 @@
   </div>
 
   <!-- 普通消息 -->
-  <div v-else :class="['message-wrapper', message.role]">
+  <div v-else :class="['message-wrapper', message.role]" @pointerdown="handleMessagePointerDown">
     <div class="avatar">
       <img v-if="avatarUrl" :src="avatarUrl" :alt="displayName" />
       <div v-else class="avatar-placeholder">{{ avatarIcon }}</div>
@@ -27,7 +27,7 @@
         <span class="display-name">{{ displayName }}</span>
         <span class="timestamp">{{ formatTime(message.timestamp) }}</span>
       </div>
-      <div class="message-bubble" :class="{ 'combat-bubble': message.type === 'combat_action' }" @click="handleMessageClick">
+      <div class="message-bubble" :class="{ 'combat-bubble': message.type === 'combat_action' }">
         <div v-if="message.content" class="message-text" v-html="renderedContent"></div>
         <HpBar
           v-for="(hpc, i) in hpChanges"
@@ -135,7 +135,9 @@ const renderedContent = computed(() => {
   return marked.parse(content, { async: false }) as string
 })
 
-const handleMessageClick = () => {
+// 在指针按下瞬间触发跳过，避免流式渲染期间 DOM 位移导致 click 丢失。
+const handleMessagePointerDown = (event: PointerEvent) => {
+  if (event.button !== 0) return
   if (!skipAnimation.value) {
     skip()
   }

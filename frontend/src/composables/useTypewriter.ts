@@ -15,8 +15,6 @@ export function useTypewriter(
   let isOutputting = false
   let skipped = false
 
-  const threshold = 10
-
   const stopTimer = () => {
     if (timer) {
       clearTimeout(timer)
@@ -40,7 +38,8 @@ export function useTypewriter(
   }
 
   const tryStartOutput = () => {
-    if (!isOutputting && cacheQueue.length >= threshold) {
+    // 流式消息应立即开始渲染，避免因攒批导致点击跳过时产生明显延迟感。
+    if (!isOutputting && cacheQueue.length > 0) {
       isOutputting = true
       outputNextChar()
     }
