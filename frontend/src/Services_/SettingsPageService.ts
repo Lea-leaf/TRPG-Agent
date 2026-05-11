@@ -11,6 +11,7 @@ export interface AppSettings {
 }
 
 const SETTINGS_STORAGE_KEY = 'trpg-app-settings'
+export const APP_SETTINGS_UPDATED_EVENT = 'trpg:app-settings-updated'
 
 /**
  * 默认配置保持保守，避免影响现有界面行为。
@@ -50,6 +51,7 @@ export function loadAppSettings(): AppSettings {
  */
 export function saveAppSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+  window.dispatchEvent(new CustomEvent(APP_SETTINGS_UPDATED_EVENT, { detail: settings }))
 }
 
 /**

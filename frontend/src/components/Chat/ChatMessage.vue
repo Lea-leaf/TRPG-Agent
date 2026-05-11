@@ -43,7 +43,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, watch, onUnmounted, reactive, ref } from 'vue'
+import { computed, inject, watch, onUnmounted, reactive, ref, type ComputedRef } from 'vue'
 import { marked } from 'marked'
 import type { ChatMessage } from '../../Services_/chatService'
 import HpBar from './SideCharacterPanel/HpBar.vue'
@@ -65,6 +65,7 @@ const emit = defineEmits<{
 }>()
 
 const debugMode = inject<boolean>('debugMode', false)
+const globalSkipOutputAnimation = inject<ComputedRef<boolean>>('skipOutputAnimation', computed(() => false))
 
 const globalHpCache = reactive<Record<string, number>>({})
 
@@ -101,7 +102,7 @@ const rawProcessedContent = computed(() => {
 
 const isUser = props.message.role === 'user'
 const isHistory = props.message.isHistory === true
-const skipAnimation = computed(() => isUser || isHistory)
+const skipAnimation = computed(() => isUser || isHistory || globalSkipOutputAnimation.value)
 
 // 用于确保 firstChar 只触发一次
 const hasEmittedFirstChar = ref(false)
@@ -243,13 +244,13 @@ onUnmounted(() => {
 }
 
 .display-name {
-  font-size: 14px;
+  font-size: calc(14px * var(--chat-font-scale, 100) / 100);
   font-weight: 600;
   color: #e5e5ea;
 }
 
 .timestamp {
-  font-size: 11px;
+  font-size: calc(11px * var(--chat-font-scale, 100) / 100);
   color: #6c6c70;
   display: none; 
 }
@@ -270,7 +271,7 @@ onUnmounted(() => {
 .message-text {
   margin: 0;
   line-height: 1.5;
-  font-size: 14px;
+  font-size: calc(14px * var(--chat-font-scale, 100) / 100);
   color: #e5e5ea;
   word-break: break-word;
 }
@@ -389,7 +390,7 @@ onUnmounted(() => {
 }
 .tool-badge {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: calc(10px * var(--chat-font-scale, 100) / 100);
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
@@ -399,7 +400,7 @@ onUnmounted(() => {
 }
 .tool-content {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--chat-font-scale, 100) / 100);
   font-family: 'Courier New', monospace;
   color: #8e8e93;
   white-space: pre-wrap;
@@ -456,7 +457,7 @@ onUnmounted(() => {
 /* 中世纪风格文字 */
 .loading-text {
   font-family: 'Cinzel', 'MedievalSharp', 'UnifrakturMaguntia', serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--chat-font-scale, 100) / 100);
   font-style: italic;
   color: #d4c5a9;                              /* 羊皮纸浅金色 */
   letter-spacing: 2px;

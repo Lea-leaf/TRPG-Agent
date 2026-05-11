@@ -17,7 +17,7 @@ const createMessage = (
 
 const createWelcomeMessage = () => createMessage('assistant', '你好，我是 TRPG 助手。你可以直接开始提问。')
 
-export function useChatMessages() {
+export function useChatMessages(initialDebugMode: boolean = false) {
   const messages = ref<ChatMessage[]>([
     createWelcomeMessage()
   ])
@@ -29,7 +29,7 @@ export function useChatMessages() {
   const combatState = ref<any | null>(null)
   const spaceState = ref<any | null>(null)
   const sceneUnitsState = ref<Record<string, any> | null>(null)
-  const debugMode = ref(false)
+  const debugMode = ref(initialDebugMode)
 
   let currentStreamingMessageId: string | null = null
   let loadingMessageId: string | null = null
