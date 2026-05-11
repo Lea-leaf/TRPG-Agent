@@ -55,7 +55,7 @@ import DiceDialog from '../DiceDialog/DiceDialog.vue'
 import DiceAnimationPage from '../../Pages_/DiceAnimationPage.vue'
 import HistoryPage from '../../Pages_/HistoryPage.vue'
 import RulePage from '../../Pages_/RulePage.vue'
-import ProfilePage from '../../Pages_/ProfilePage.vue'  // 新增导入
+import ProfilePage from '../../Pages_/ProfilePage.vue'
 
 // 在 script 中添加
 const handleNavigate = (tabId: string, params?: Record<string, any>) => {
@@ -67,18 +67,14 @@ const handleNavigate = (tabId: string, params?: Record<string, any>) => {
   }
 }
 
-// 页面组件映射
+// 仅保留实际存在且可用的页面，移除占位入口。
 const componentMap: Record<string, any> = {
   welcome: WelcomePage,
   chat: ChatPage,
-  page1: WelcomePage,
-  page2: WelcomePage,
-  page3: HistoryPage, 
-  page4: WelcomePage,
-  page5: WelcomePage,
-  page6: RulePage,  
-  page7: SettingsPage,
-  profile: ProfilePage  // 修改：将 profile 映射到新的 ProfilePage
+  history: HistoryPage,
+  rules: RulePage,
+  settings: SettingsPage,
+  profile: ProfilePage,
 }
 
 const currentTab = ref('welcome')
@@ -99,15 +95,6 @@ const handleSelect = (tabId: string) => {
   currentTab.value = tabId
 }
 
-// 打开骰子动画页面
-const openDiceAnimation = () => {
-  diceAnimationVisible.value = true
-}
-
-// 关闭骰子动画页面（可选）
-const closeDiceAnimation = () => {
-  diceAnimationVisible.value = false
-}
 </script>
 
 <style scoped>
