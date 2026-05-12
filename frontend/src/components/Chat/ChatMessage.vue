@@ -115,7 +115,7 @@ const onTypewriterChar = () => {
   }
 }
 
-const { displayText, skip, cleanup, reset, flush } = useTypewriter(
+const { displayText, skip, cleanup, reset } = useTypewriter(
   rawProcessedContent,
   35,
   undefined,

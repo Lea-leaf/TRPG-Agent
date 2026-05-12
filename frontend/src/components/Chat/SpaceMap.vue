@@ -104,18 +104,6 @@
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 
-type Point = {
-  x?: number
-  y?: number
-}
-
-type Placement = {
-  unit_id: string
-  map_id: string
-  position: Point
-  facing_deg?: number
-}
-
 type PlaneMap = {
   id: string
   name: string
