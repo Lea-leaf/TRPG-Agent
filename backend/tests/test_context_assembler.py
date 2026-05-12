@@ -97,7 +97,7 @@ class ContextAssemblerTests(unittest.TestCase):
                 "active_node_id": "goblin_ambush",
                 "known_clue_ids": ["goblin_trail"],
                 "completed_event_ids": ["goblin_ambush_resolved"],
-                "pending_exit_option_ids": ["follow_goblin_trail"],
+                "pending_exit_option_ids": ["investigate_goblin_trail"],
             },
             "player": {
                 "id": "player_hero",
@@ -129,7 +129,7 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("冒险节点: lost_mine / goblin_ambush", assembled.runtime_state_text)
         self.assertIn("已知线索: ['goblin_trail']", assembled.runtime_state_text)
         self.assertIn("已完成事件: ['goblin_ambush_resolved']", assembled.runtime_state_text)
-        self.assertIn("待确认出口: ['follow_goblin_trail']", assembled.runtime_state_text)
+        self.assertIn("待确认出口: ['investigate_goblin_trail']", assembled.runtime_state_text)
         self.assertIn("可用法术单位: 伊莲[ID:apprentice_wizard", assembled.runtime_state_text)
         self.assertIn("spells=magic_missile; cantrips=ray_of_frost", assembled.runtime_state_text)
 
@@ -153,8 +153,8 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("[扩展上下文]", assembled.runtime_state_text)
         self.assertIn("[冒险节点事实]", assembled.runtime_state_text)
         self.assertIn("当前节点: 地精伏击 [ID:goblin_ambush]", assembled.runtime_state_text)
-        self.assertIn("follow_goblin_trail: 追踪地精踪迹 -> goblin_trail_to_cragmaw_hideout", assembled.runtime_state_text)
-        self.assertIn("continue_to_phandalin: 继续前往凡达林 -> phandalin", assembled.runtime_state_text)
+        self.assertIn("investigate_goblin_trail: 搜索伏击点并追踪地精 -> goblin_trail_to_cragmaw_hideout", assembled.runtime_state_text)
+        self.assertIn("go_to_phandalin_first: 先去凡达林 -> phandalin", assembled.runtime_state_text)
         self.assertIn("[冒险节点检索]", assembled.runtime_state_text)
         self.assertIn("最近意图: 我想去凡达林。", assembled.runtime_state_text)
         self.assertRegex(assembled.runtime_state_text, r"phandalin(_arrival)?")
@@ -348,7 +348,7 @@ class ContextAssemblerTests(unittest.TestCase):
                         "rules_overrides": [{"topic": "surprise", "rule": "新版突袭只让先攻劣势"}],
                     },
                     "progression_rule": "剧情推进出口只看顶层 available_exits；available_exits 非空且 available=true 时即可用对应 id 调用 advance。",
-                    "available_exits": [{"id": "follow_goblin_trail", "available": False}],
+                    "available_exits": [{"id": "investigate_goblin_trail", "available": False}],
                     "adventure_state": {"known_clue_ids": []},
                 },
                 ensure_ascii=False,
@@ -455,7 +455,66 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("待发放剧情奖励:", assembled.runtime_state_text)
         self.assertIn("goblin_ambush_hideout_75_xp", assembled.runtime_state_text)
         self.assertIn("当前必须执行: 本轮第一步调用 claim_adventure_reward", assembled.runtime_state_text)
-        self.assertNotIn("goblin_ambush_hideout_75_xp: +75 XP，当前 XP 75", assembled.runtime_state_text)
+
+    def test_spider_web_route_memory_hides_stale_opening_nodes(self):
+        provider = AdventureNodeRetrievalContextProvider()
+        block = provider._build_route_memory_block(
+            {
+                "module_id": "lost_mine",
+                "active_node_id": "spider_web_overview",
+                "unlocked_node_ids": ["goblin_ambush", "cragmaw_hideout_klarg_cave", "phandalin", "spider_web_overview"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "claimed_reward_ids": [],
+                "pending_exit_option_ids": [],
+                "breadcrumb_node_ids": [
+                    "adventure_hook_meet_me_in_phandalin",
+                    "goblin_ambush",
+                    "cragmaw_hideout_entrance",
+                    "cragmaw_hideout_klarg_cave",
+                    "phandalin",
+                    "spider_web_overview",
+                ],
+                "deferred_node_ids": ["goblin_ambush", "cragmaw_hideout_klarg_cave", "phandalin"],
+                "transition_log": [],
+            }
+        )
+
+        self.assertIn("phandalin", block)
+        self.assertNotIn("goblin_ambush", block)
+        self.assertNotIn("cragmaw_hideout_entrance", block)
+        self.assertNotIn("cragmaw_hideout_klarg_cave", block)
+
+    def test_wave_echo_route_memory_hides_stale_spider_web_nodes(self):
+        provider = AdventureNodeRetrievalContextProvider()
+        block = provider._build_route_memory_block(
+            {
+                "module_id": "lost_mine",
+                "active_node_id": "wave_echo_forge_of_spells",
+                "unlocked_node_ids": ["phandalin", "old_owl_well", "cragmaw_castle_search", "wave_echo_forge_of_spells"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "claimed_reward_ids": [],
+                "pending_exit_option_ids": [],
+                "breadcrumb_node_ids": [
+                    "phandalin",
+                    "old_owl_well",
+                    "cragmaw_castle_search",
+                    "wave_echo_overview",
+                    "wave_echo_forge_of_spells",
+                ],
+                "deferred_node_ids": ["old_owl_well", "cragmaw_castle_search", "phandalin", "wave_echo_starry_cavern"],
+                "transition_log": [],
+            }
+        )
+
+        self.assertIn("phandalin", block)
+        self.assertIn("wave_echo_overview", block)
+        self.assertIn("wave_echo_starry_cavern", block)
+        self.assertNotIn("old_owl_well", block)
+        self.assertNotIn("cragmaw_castle_search", block)
 
     def test_combat_archive_metadata_no_longer_collapses_model_history(self):
         assembler = ContextAssembler()

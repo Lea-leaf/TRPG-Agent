@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from app.adventures.models import AdventureState
 from app.adventures.rewards import normalize_pending_reward_grants
+from app.adventures.store import get_node_generation_reference
 
 
 AdventureTransitionKind = Literal["advance", "switch", "revisit"]
@@ -89,7 +90,25 @@ def returnable_node_ids(adventure: Any, current_node_id: str | None = None) -> l
     for node_id in reversed(adventure_dict.get("breadcrumb_node_ids", [])):
         if node_id and node_id != current and node_id not in ordered:
             ordered.append(node_id)
-    return ordered
+    return _filter_stale_returnable_nodes(ordered, current)
+
+
+def _filter_stale_returnable_nodes(node_ids: list[str], current_node_id: str) -> list[str]:
+    """进入新章节后隐藏过久远的房间级回访点，避免 Director 被旧路径牵回开局。"""
+    rules = get_node_generation_reference().get("stale_return_rules", [])
+    if not rules:
+        return node_ids
+    hidden: set[str] = set()
+    kept: set[str] = set()
+    for rule in rules:
+        prefixes = [str(item) for item in rule.get("when_active_prefixes", [])]
+        if not any(current_node_id == prefix or current_node_id.startswith(prefix) for prefix in prefixes):
+            continue
+        hidden.update(str(item) for item in rule.get("hide_node_ids", []))
+        kept.update(str(item) for item in rule.get("keep_node_ids", []))
+    if not hidden:
+        return node_ids
+    return [node_id for node_id in node_ids if node_id not in hidden or node_id in kept]
 
 
 def settle_exit_local_requirements(adventure: dict[str, Any], node: Any, exit_option: Any) -> bool:

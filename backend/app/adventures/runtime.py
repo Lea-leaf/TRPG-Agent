@@ -572,6 +572,7 @@ def _director_current_node_view(node: Any) -> dict[str, Any]:
         "player_visible_intro": node.player_visible_intro,
         "scene_beats": _dedupe_director_texts(getattr(node, "scene_beats", []), threshold=0.35),
         "rules_notes": _dedupe_director_texts(getattr(node, "rules_notes", []), threshold=0.35),
+        "routing_notes": _dedupe_director_texts(getattr(node, "routing_notes", []), threshold=0.35),
         "clues": _dedupe_director_id_items(getattr(node, "clues", [])),
         "events": _dedupe_director_ids(getattr(node, "events", [])),
         "exits": _dedupe_director_exits([item.model_dump() for item in getattr(node, "exits", [])]),

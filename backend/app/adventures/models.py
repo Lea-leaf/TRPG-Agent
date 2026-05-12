@@ -50,6 +50,7 @@ class AdventureNode(BaseModel, extra="allow"):
     clues: list[dict] = Field(default_factory=list)
     events: list[str] = Field(default_factory=list)
     fallbacks: list[dict[str, Any]] = Field(default_factory=list)
+    routing_notes: list[str] = Field(default_factory=list)
     dm_guidance: dict[str, list[str]] = Field(default_factory=dict)
     exits: list[AdventureExit] = Field(default_factory=list)
     candidate_exits: list[dict] = Field(default_factory=list)

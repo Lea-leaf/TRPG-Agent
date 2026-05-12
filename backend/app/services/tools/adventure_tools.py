@@ -13,7 +13,7 @@ from langgraph.types import Command
 
 from app.adventures.models import AdventureNode, AdventureState
 from app.adventures.navigation import apply_arrival_events, normalize_adventure_state, record_node_transition, settle_exit_local_requirements
-from app.adventures.rewards import claim_pending_xp_reward, sync_pending_node_rewards
+from app.adventures.rewards import claim_pending_reward, sync_pending_node_rewards
 from app.adventures.store import get_adventure_store
 from app.services.skills import load_skill_content
 
@@ -406,14 +406,14 @@ def claim_adventure_reward(
 ) -> Command:
     """领取后台已判定为待发放的剧情节点奖励，并把奖励内容告知玩家。
     只能使用运行状态帧或冒险工具结果中列出的 pending_reward_grants.id；重复领取同一个 reward_id 不会再次加 XP。
-    当前结构化奖励只支持 XP，金币、物品和友谊仍按剧情线索处理。
-    成功后要让玩家知道拿到了什么奖励、多少 XP，以及这笔奖励为什么发放。
+    XP 会写入角色卡；财物、金币、道具会被标记为已领取并返回内容，具体持有状态按当前剧情记录。
+    成功后要让玩家知道拿到了什么奖励，以及这笔奖励为什么发放。
     参数示例：{"reward_id": "goblin_ambush_hideout_75_xp"}。
 
     Args:
         reward_id: 待领取剧情奖励 ID，必须来自 pending_reward_grants。
     """
-    adventure, player, result = claim_pending_xp_reward(state or {}, reward_id)
+    adventure, player, result = claim_pending_reward(state or {}, reward_id)
     if result.get("ok"):
         reward = result["reward"]
         reward_summary: dict[str, Any] = {
@@ -421,10 +421,14 @@ def claim_adventure_reward(
             "reward_id": reward["id"],
             "type": reward["type"],
             "amount": reward["amount"],
-            "previous_xp": reward["previous_xp"],
-            "current_xp": reward["current_xp"],
             "pending_reward_ids": result.get("pending_reward_ids", []),
         }
+        if reward.get("currency"):
+            reward_summary["currency"] = reward["currency"]
+        if "previous_xp" in reward:
+            reward_summary["previous_xp"] = reward["previous_xp"]
+        if "current_xp" in reward:
+            reward_summary["current_xp"] = reward["current_xp"]
         if reward.get("description"):
             reward_summary["description"] = reward["description"]
         payload: dict[str, Any] = {
@@ -432,11 +436,7 @@ def claim_adventure_reward(
             "result": reward_summary,
         }
         description = str(reward.get("description", "")).strip()
-        payload["message"] = (
-            f"已发放剧情奖励 {reward['id']}: +{reward['amount']} XP，"
-            f"当前 XP {reward['current_xp']}。"
-            + (description if description else "")
-        )
+        payload["message"] = _reward_claim_message(reward, description)
     else:
         # 中文注释：失败时只返回纠错所需字段，避免把完整冒险状态塞回模型上下文。
         payload = {
@@ -456,6 +456,19 @@ def claim_adventure_reward(
     if player is not None:
         update["player"] = player
     return Command(update=update)
+
+
+def _reward_claim_message(reward: dict[str, Any], description: str) -> str:
+    """工具消息直接给出玩家可见奖励，避免主模型猜测奖励内容。"""
+    reward_type = str(reward.get("type", "")).lower()
+    if reward_type == "xp":
+        message = f"已发放剧情奖励 {reward['id']}: +{reward['amount']} XP，当前 XP {reward['current_xp']}。"
+    elif reward_type == "gold":
+        currency = str(reward.get("currency") or "gp").upper()
+        message = f"已记录剧情奖励 {reward['id']}: {reward.get('amount', 0)} {currency}。"
+    else:
+        message = f"已记录剧情奖励 {reward['id']}: {reward.get('amount', 0)} 项 {reward_type or 'reward'}。"
+    return message + (description if description else "")
 
 
 @tool

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +15,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ADVENTURE_DIR = BACKEND_DIR / "data" / "adventures" / "lost_mine"
 CANONICAL_NODES_FILENAME = "nodes.canonical.json"
 LEGACY_NODES_FILENAME = "nodes.json"
+NODE_GENERATION_REFERENCE_FILENAME = "node_generation_reference.json"
 _NODE_ID_ALIASES: dict[str, str] = {
     "goblin_arrows": "goblin_arrows_road_to_phandalin",
     "driving_the_wagon": "goblin_arrows_driving_the_wagon",
@@ -49,7 +51,8 @@ class AdventureStore:
 
     def __init__(self, data_dir: Path = DEFAULT_ADVENTURE_DIR) -> None:
         self._data_dir = data_dir
-        self._canonical_nodes = self._load_nodes_file(CANONICAL_NODES_FILENAME, fallback={})
+        canonical_filename = os.getenv("ADVENTURE_NODES_FILENAME", CANONICAL_NODES_FILENAME)
+        self._canonical_nodes = self._load_nodes_file(canonical_filename, fallback={})
         self._legacy_nodes = self._load_nodes_file(LEGACY_NODES_FILENAME, fallback=_fallback_nodes())
         self._nodes = self._merge_nodes(self._canonical_nodes, self._legacy_nodes)
 
@@ -391,6 +394,16 @@ def _fallback_nodes() -> dict[str, AdventureNode]:
         ),
     ]
     return {node.id: node for node in nodes}
+
+
+@lru_cache(maxsize=1)
+def get_node_generation_reference() -> dict[str, Any]:
+    """读取节点生成契约，运行时只使用其中稳定的路由元数据。"""
+    reference_path = DEFAULT_ADVENTURE_DIR / NODE_GENERATION_REFERENCE_FILENAME
+    if not reference_path.exists():
+        return {}
+    with reference_path.open("r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 @lru_cache(maxsize=1)

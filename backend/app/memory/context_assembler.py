@@ -185,6 +185,7 @@ class AdventureNodeRetrievalContextProvider:
         source_pages = _node_source_pages(node)
         scene_beats = _compact_non_xp_lines(getattr(node, "scene_beats", []), 3)
         rules_notes = _compact_non_xp_lines(getattr(node, "rules_notes", []), 2)
+        routing_notes = _compact_non_xp_lines(getattr(node, "routing_notes", []), 2, char_limit=100)
         fallbacks = _compact_fallbacks(getattr(node, "fallbacks", []), 3)
         lines = [
             "[冒险节点事实]",
@@ -198,6 +199,8 @@ class AdventureNodeRetrievalContextProvider:
             lines.append("关键推进: " + " | ".join(scene_beats))
         if rules_notes:
             lines.append("规则提醒: " + " | ".join(rules_notes))
+        if routing_notes:
+            lines.append("路线原则: " + " | ".join(routing_notes))
         if clue_ids:
             preview = _compact_ids(clue_ids, 8)
             lines.append(
@@ -216,7 +219,10 @@ class AdventureNodeRetrievalContextProvider:
         return "\n".join(lines)
 
     def _build_route_memory_block(self, adventure: dict[str, Any]) -> str:
-        breadcrumb_ids = recent_breadcrumb_ids(adventure, limit=6)
+        returnable_ids = returnable_node_ids(adventure, adventure.get("active_node_id", ""))
+        visible_route_ids = set(returnable_ids)
+        visible_route_ids.add(str(adventure.get("active_node_id", "")))
+        breadcrumb_ids = [node_id for node_id in recent_breadcrumb_ids(adventure, limit=6) if node_id in visible_route_ids]
         if len(breadcrumb_ids) <= 1 and not adventure.get("deferred_node_ids"):
             return ""
 
@@ -224,10 +230,10 @@ class AdventureNodeRetrievalContextProvider:
         if breadcrumb_ids:
             lines.append("路径回溯: " + " -> ".join(self._summarize_route_nodes(breadcrumb_ids)))
         if adventure.get("deferred_node_ids"):
-            deferred = self._summarize_route_nodes(adventure.get("deferred_node_ids", [])[:6])
+            deferred = self._summarize_route_nodes([node_id for node_id in adventure.get("deferred_node_ids", []) if node_id in visible_route_ids][:6])
             if deferred:
                 lines.append("待回访节点: " + "；".join(deferred))
-        returnable = self._summarize_route_nodes(returnable_node_ids(adventure, adventure.get("active_node_id", ""))[:6])
+        returnable = self._summarize_route_nodes(returnable_ids[:6])
         if returnable:
             lines.append("可回访节点: " + "；".join(returnable))
         return "\n".join(lines)

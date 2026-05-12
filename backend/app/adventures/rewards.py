@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-SUPPORTED_REWARD_TYPES = frozenset({"xp"})
+SUPPORTED_REWARD_TYPES = frozenset({"xp", "gold", "treasure", "item"})
 REWARD_ARRIVAL_EVENT_PREFIXES = ("enter_", "arrive_", "arrived_", "reach_")
 
 
@@ -27,6 +27,7 @@ def normalize_pending_reward_grants(values: list[Any] | None) -> list[dict[str, 
                 "type": str(item.get("type", "")).strip().lower(),
                 "amount": item.get("amount", 0),
                 "scope": str(item.get("scope", "")).strip(),
+                "currency": str(item.get("currency", "")).strip().lower(),
                 "description": str(item.get("description", "")).strip(),
                 "requires": [str(requirement) for requirement in item.get("requires", [])],
             }
@@ -57,6 +58,7 @@ def pending_reward_from_node(node_id: str, reward: dict[str, Any], index: int) -
         "type": str(reward.get("type", "")).strip().lower(),
         "amount": reward.get("amount", 0),
         "scope": str(reward.get("scope", "")).strip(),
+        "currency": str(reward.get("currency", "")).strip().lower(),
         "description": str(reward.get("description", "")).strip(),
         "requires": [str(requirement) for requirement in reward.get("requires", [])],
     }
@@ -72,6 +74,8 @@ def sync_pending_node_rewards(adventure: dict[str, Any], node: Any) -> bool:
 
     for index, reward in enumerate(getattr(node, "rewards", []) or []):
         if not isinstance(reward, dict):
+            continue
+        if str(reward.get("type", "")).strip().lower() not in SUPPORTED_REWARD_TYPES:
             continue
         reward_id = reward_id_for(node.id, reward, index)
         if reward_id in claimed or reward_id in existing_ids:
@@ -127,11 +131,11 @@ def remove_pending_reward(adventure: dict[str, Any], reward_id: str) -> bool:
     return pending != previous
 
 
-def claim_pending_xp_reward(
+def claim_pending_reward(
     state: dict[str, Any],
     reward_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
-    """领取剧情 XP 奖励并同步 claimed/pending 两侧状态。"""
+    """领取剧情奖励并同步 claimed/pending 两侧状态。"""
     from app.adventures.navigation import normalize_adventure_state
 
     adventure = normalize_adventure_state(state.get("adventure"))
@@ -162,38 +166,47 @@ def claim_pending_xp_reward(
             "claimed_reward_ids": adventure.get("claimed_reward_ids", []),
         }
 
-    player_raw = state.get("player")
-    if not player_raw:
+    player, error = _apply_reward_to_player(state, reward)
+    if error:
         return adventure, None, {
             "ok": False,
-            "error": "玩家尚未加载角色卡。",
+            "error": error,
             "reward": reward,
             "claimed_reward_ids": adventure.get("claimed_reward_ids", []),
         }
-
-    player = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw)
-    amount = int(reward.get("amount", 0) or 0)
-    if amount <= 0:
-        return adventure, None, {
-            "ok": False,
-            "error": f"奖励金额无效: {reward_id}",
-            "reward": reward,
-            "claimed_reward_ids": adventure.get("claimed_reward_ids", []),
-        }
-
-    previous_xp = int(player.get("xp", 0) or 0)
-    player["xp"] = previous_xp + amount
     claimed = adventure.setdefault("claimed_reward_ids", [])
     if reward["id"] not in claimed:
         claimed.append(reward["id"])
     remove_pending_reward(adventure, reward["id"])
     return adventure, player, {
         "ok": True,
-        "reward": {
-            **reward,
-            "previous_xp": previous_xp,
-            "current_xp": player["xp"],
-        },
+        "reward": reward,
         "claimed_reward_ids": adventure.get("claimed_reward_ids", []),
         "pending_reward_ids": [item["id"] for item in normalize_pending_reward_grants(adventure.get("pending_reward_grants", []))],
     }
+
+
+def claim_pending_xp_reward(
+    state: dict[str, Any],
+    reward_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
+    """兼容旧调用名；剧情奖励统一由 claim_pending_reward 处理。"""
+    return claim_pending_reward(state, reward_id)
+
+
+def _apply_reward_to_player(state: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """目前只有 XP 有正式角色卡字段；财物类先完成防重发结算。"""
+    if reward["type"] != "xp":
+        return None, ""
+    player_raw = state.get("player")
+    if not player_raw:
+        return None, "玩家尚未加载角色卡。"
+    player = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw)
+    amount = int(reward.get("amount", 0) or 0)
+    if amount <= 0:
+        return None, f"奖励金额无效: {reward['id']}"
+    previous_xp = int(player.get("xp", 0) or 0)
+    player["xp"] = previous_xp + amount
+    reward["previous_xp"] = previous_xp
+    reward["current_xp"] = player["xp"]
+    return player, ""

@@ -212,7 +212,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             AdventureProgressDecision(
                 completed_event_ids=["goblin_ambush_resolved"],
                 discovered_clue_ids=["goblin_trail"],
-                exit_option_id="follow_goblin_trail",
+                exit_option_id="investigate_goblin_trail",
                 confidence=0.9,
             )
         )
@@ -223,7 +223,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("地精倒下，你发现林中有拖拽痕迹。", result["reply"])
         self.assertEqual(["goblin_trail"], result["adventure"]["known_clue_ids"])
         self.assertEqual(
-            ["goblin_ambush_resolved", "enter_goblin_trail_to_cragmaw_hideout"],
+            ["goblin_ambush_resolved"],
             result["adventure"]["completed_event_ids"],
         )
         self.assertEqual([], result["adventure"]["pending_exit_option_ids"])

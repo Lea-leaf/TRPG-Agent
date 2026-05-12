@@ -43,9 +43,9 @@ def test_load_default_adventure_hook_node():
     assert isinstance(result, Command)
     payload = _payload(result)
     assert payload["node"]["id"] == "adventure_hook_meet_me_in_phandalin"
-    assert payload["node"]["source_pages"] == [4, 5]
+    assert payload["node"]["source_pages"] == [6, 6]
     assert payload["progression_rule"].startswith("剧情推进出口只看顶层 available_exits")
-    assert payload["available_exits"][0]["id"] == "take_the_road_to_phandalin"
+    assert payload["available_exits"][0]["id"] == "begin_escort_journey"
     assert "candidate_exits" not in payload["node"]
 
 
@@ -55,7 +55,7 @@ def test_manage_adventure_loads_default_node():
     assert isinstance(result, Command)
     payload = _payload(result)
     assert payload["node"]["id"] == "adventure_hook_meet_me_in_phandalin"
-    assert payload["available_exits"][0]["id"] == "take_the_road_to_phandalin"
+    assert payload["available_exits"][0]["id"] == "begin_escort_journey"
 
 
 def test_inspect_adventure_state_can_load_skill_instructions():
@@ -115,7 +115,7 @@ def test_manage_adventure_advance_settles_single_exit_local_requirements():
         manage_adventure,
         tool_input={
             "action": "advance",
-            "option_id": "take_the_road_to_phandalin",
+            "option_id": "begin_escort_journey",
             "state": state,
         },
     )
@@ -142,7 +142,7 @@ def test_advance_requires_completed_event_when_exit_has_condition():
 
     blocked = _invoke_tool(
         advance_adventure,
-        tool_input={"option_id": "follow_goblin_trail", "state": state},
+        tool_input={"option_id": "investigate_goblin_trail", "state": state},
     )
     assert "出口条件未满足" in _payload(blocked)["error"]
 
@@ -154,7 +154,7 @@ def test_advance_requires_completed_event_when_exit_has_condition():
 
     still_blocked = _invoke_tool(
         advance_adventure,
-        tool_input={"option_id": "follow_goblin_trail", "state": state},
+        tool_input={"option_id": "investigate_goblin_trail", "state": state},
     )
     assert "出口条件未满足" in _payload(still_blocked)["error"]
 
@@ -166,7 +166,7 @@ def test_advance_requires_completed_event_when_exit_has_condition():
 
     advanced = _invoke_tool(
         advance_adventure,
-        tool_input={"option_id": "follow_goblin_trail", "state": state},
+        tool_input={"option_id": "investigate_goblin_trail", "state": state},
     )
     assert advanced.update["adventure"]["active_node_id"] == "goblin_trail_to_cragmaw_hideout"
     assert "goblin_ambush" in advanced.update["adventure"]["completed_node_ids"]
@@ -196,7 +196,7 @@ def test_manage_adventure_can_resolve_clue_and_advance():
 
     advanced = _invoke_tool(
         manage_adventure,
-        tool_input={"action": "advance", "option_id": "follow_goblin_trail", "state": state},
+        tool_input={"action": "advance", "option_id": "investigate_goblin_trail", "state": state},
     )
 
     assert advanced.update["adventure"]["active_node_id"] == "goblin_trail_to_cragmaw_hideout"
@@ -205,13 +205,13 @@ def test_manage_adventure_can_resolve_clue_and_advance():
 
     trail_resolved = _invoke_tool(
         manage_adventure,
-        tool_input={"action": "resolve", "event_ids": ["reach_cragmaw_hideout_trail_end"], "state": state},
+        tool_input={"action": "resolve", "state": state},
     )
     state["adventure"] = trail_resolved.update["adventure"]
 
     hideout = _invoke_tool(
         manage_adventure,
-        tool_input={"action": "advance", "option_id": "arrive_cragmaw_hideout", "state": state},
+        tool_input={"action": "advance", "option_id": "follow_trail_to_hideout", "state": state},
     )
 
     assert hideout.update["adventure"]["active_node_id"] == "cragmaw_hideout_entrance"
@@ -251,6 +251,49 @@ def test_manage_adventure_can_resolve_clue_and_advance():
     assert "adventure_state" not in _payload(repeated)
 
 
+def test_claim_adventure_reward_records_treasure_without_touching_player_xp():
+    state = {
+        "player": {"name": "温良", "xp": 75},
+        "adventure": {
+            "module_id": "lost_mine",
+            "active_node_id": "cragmaw_hideout_klarg_cave",
+            "unlocked_node_ids": ["cragmaw_hideout_klarg_cave"],
+            "completed_node_ids": [],
+            "known_clue_ids": [],
+            "completed_event_ids": ["cragmaw_hideout_milestone_complete"],
+            "claimed_reward_ids": [],
+            "pending_reward_grants": [
+                {
+                    "id": "klarg_treasure_cache",
+                    "node_id": "cragmaw_hideout_klarg_cave",
+                    "type": "treasure",
+                    "amount": 1,
+                    "scope": "party",
+                    "description": "克拉格的小金库：600 cp、110 sp、两瓶治疗药水和翡翠青蛙。",
+                    "requires": ["cragmaw_hideout_milestone_complete"],
+                }
+            ],
+            "pending_exit_option_ids": [],
+            "breadcrumb_node_ids": ["cragmaw_hideout_klarg_cave"],
+            "deferred_node_ids": [],
+            "transition_log": [],
+        },
+    }
+
+    claimed = _invoke_tool(
+        claim_adventure_reward,
+        tool_input={"reward_id": "klarg_treasure_cache", "state": state},
+    )
+
+    assert "player" not in claimed.update
+    assert claimed.update["adventure"]["claimed_reward_ids"] == ["klarg_treasure_cache"]
+    assert claimed.update["adventure"]["pending_reward_grants"] == []
+    payload = _payload(claimed)
+    assert payload["result"]["type"] == "treasure"
+    assert payload["result"]["amount"] == 1
+    assert "克拉格的小金库" in payload["message"]
+
+
 def test_manage_adventure_resolve_returns_available_exits_after_scene_result():
     state = {
         "adventure": {
@@ -280,8 +323,10 @@ def test_manage_adventure_resolve_returns_available_exits_after_scene_result():
     assert "goblin_ambush_resolved" in resolved.update["adventure"]["completed_event_ids"]
     assert payload["recommended_action"]["tool"] == "ask_player_or_advance_declared_choice"
     assert payload["recommended_action"]["available_option_ids"] == [
-        "follow_goblin_trail",
-        "continue_to_phandalin",
+        "investigate_goblin_trail",
+        "go_to_phandalin_first",
+        "return_to_ambush_site",
+        "captive_leads_to_trail",
     ]
 
 
@@ -339,7 +384,7 @@ def test_advance_with_event_id_returns_exit_hint():
     payload = _payload(result)
     assert "当前节点没有出口" in payload["error"]
     assert "available_exits.id" in payload["hint"]
-    assert payload["available_exit_ids"] == ["take_the_road_to_phandalin"]
+    assert payload["available_exit_ids"] == ["begin_escort_journey"]
 
 
 def test_search_adventure_nodes_finds_module_material():
@@ -362,8 +407,8 @@ def test_load_ambush_node_includes_pdf_guidance():
     payload = _payload(result)
     node = payload["node"]
     assert node["scene_beats"]
-    assert any("伏击" in beat for beat in node["scene_beats"])
-    assert any("新版突袭规则" in note for note in node["rules_notes"])
+    assert node["title"] == "地精伏击"
+    assert any("新版突袭" in note for note in node["rules_notes"])
     assert any(clue["id"] == "goblin_trail" for clue in node["clues"])
     assert node["fallbacks"]
 
@@ -378,7 +423,7 @@ def test_load_ambush_node_overrides_legacy_surprise_rule():
     node = payload["node"]
     visible_text = json.dumps(node, ensure_ascii=False)
     assert "第一轮无法执行任何动作" not in visible_text
-    assert "新版突袭规则" in visible_text
+    assert "新版突袭" in visible_text
     assert "先攻检定上获得劣势" in visible_text
     assert "不跳过首回合" in visible_text
 

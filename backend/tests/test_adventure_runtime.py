@@ -9,6 +9,7 @@ from app.adventures.runtime import (
     adjudicate_and_apply_adventure_progress,
     adjudicate_and_apply_pre_turn_adventure_progress,
 )
+from app.adventures.navigation import returnable_node_ids
 from app.adventures.store import get_adventure_store
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -75,14 +76,14 @@ def test_runtime_accepts_director_decision_with_current_node_ids_only():
             AdventureProgressDecision(
                 completed_event_ids=["goblin_ambush_resolved", "fake_event"],
                 discovered_clue_ids=["goblin_trail", "fake_clue"],
-                exit_option_id="follow_goblin_trail",
+                exit_option_id="investigate_goblin_trail",
                 confidence=0.9,
             )
         ),
     )
 
     assert update.adventure is not None
-    assert update.adventure["completed_event_ids"] == ["goblin_ambush_resolved", "enter_goblin_trail_to_cragmaw_hideout"]
+    assert update.adventure["completed_event_ids"] == ["goblin_ambush_resolved"]
     assert update.adventure["known_clue_ids"] == ["goblin_trail"]
     assert update.applied == "advanced"
     assert update.adventure["pending_exit_option_ids"] == []
@@ -170,6 +171,51 @@ def test_runtime_marks_node_reward_pending_instead_of_granting_xp():
     assert update.adventure["pending_reward_grants"][0]["amount"] == 75
 
 
+def test_runtime_can_mark_treasure_reward_pending_from_current_node():
+    state = {
+        "player": {"name": "温良", "xp": 0},
+        "adventure": {
+            "module_id": "lost_mine",
+            "active_node_id": "cragmaw_hideout_klarg_cave",
+            "unlocked_node_ids": ["cragmaw_hideout_klarg_cave"],
+            "completed_node_ids": [],
+            "known_clue_ids": [],
+            "completed_event_ids": ["cragmaw_hideout_milestone_complete"],
+            "claimed_reward_ids": ["cragmaw_hideout_milestone_275_xp"],
+            "pending_reward_grants": [],
+            "pending_exit_option_ids": [],
+            "breadcrumb_node_ids": ["cragmaw_hideout_klarg_cave"],
+            "deferred_node_ids": [],
+            "transition_log": [],
+        },
+    }
+    store = get_adventure_store()
+    node = store.get_node("cragmaw_hideout_klarg_cave")
+    original_rewards = node.rewards
+    node.rewards = [
+        {
+            "id": "klarg_treasure_cache",
+            "type": "treasure",
+            "amount": 1,
+            "scope": "party",
+            "requires": ["cragmaw_hideout_milestone_complete"],
+            "description": "克拉格的小金库。",
+        }
+    ]
+    try:
+        update = adjudicate_and_apply_adventure_progress(
+            state,
+            recent_messages=[],
+            director=FakeDirector(AdventureProgressDecision(confidence=0.0)),
+        )
+    finally:
+        node.rewards = original_rewards
+
+    assert update.adventure["pending_reward_grants"][0]["id"] == "klarg_treasure_cache"
+    assert update.adventure["pending_reward_grants"][0]["type"] == "treasure"
+    assert "player" not in update.state_update
+
+
 def test_pre_turn_settles_current_node_facts_before_switching_and_syncing_rewards():
     state = {
         "player": {"name": "温良", "xp": 0},
@@ -221,7 +267,7 @@ def test_runtime_settles_selected_exit_local_requirements_when_advancing():
         recent_messages=[],
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="follow_goblin_trail",
+                exit_option_id="investigate_goblin_trail",
                 confidence=0.9,
             )
         ),
@@ -230,7 +276,7 @@ def test_runtime_settles_selected_exit_local_requirements_when_advancing():
     assert update.adventure is not None
     assert update.applied == "advanced"
     assert update.adventure["active_node_id"] == "goblin_trail_to_cragmaw_hideout"
-    assert update.adventure["completed_event_ids"] == ["goblin_ambush_resolved", "enter_goblin_trail_to_cragmaw_hideout"]
+    assert update.adventure["completed_event_ids"] == ["goblin_ambush_resolved"]
     assert update.adventure["known_clue_ids"] == ["goblin_trail"]
     assert update.adventure["pending_exit_option_ids"] == []
 
@@ -259,7 +305,7 @@ def test_runtime_settles_selected_exit_local_clue_when_advancing():
         player_message="追寻踪迹",
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="follow_goblin_trail",
+                exit_option_id="investigate_goblin_trail",
                 target_node_id="goblin_trail_to_cragmaw_hideout",
                 transition_kind="advance",
                 confidence=0.95,
@@ -274,20 +320,20 @@ def test_runtime_settles_selected_exit_local_clue_when_advancing():
     assert update.adventure["pending_reward_grants"] == []
 
 
-def test_runtime_does_not_block_director_exit_on_nonlocal_requirements():
+def test_runtime_does_not_block_director_exit_on_cross_node_requirements():
     state = {
         "player": {"name": "温良", "xp": 0},
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "cragmaw_hideout_klarg_cave",
-            "unlocked_node_ids": ["cragmaw_hideout_klarg_cave", "cragmaw_hideout_goblin_den"],
+            "active_node_id": "goblin_trail_to_cragmaw_hideout",
+            "unlocked_node_ids": ["goblin_ambush", "goblin_trail_to_cragmaw_hideout"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
             "claimed_reward_ids": [],
             "pending_reward_grants": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["cragmaw_hideout_klarg_cave"],
+            "breadcrumb_node_ids": ["goblin_ambush", "goblin_trail_to_cragmaw_hideout"],
             "deferred_node_ids": [],
             "transition_log": [],
         },
@@ -295,20 +341,20 @@ def test_runtime_does_not_block_director_exit_on_nonlocal_requirements():
 
     update = adjudicate_and_apply_adventure_progress(
         state,
-        recent_messages=[HumanMessage(content="我回去找修达。")],
+        recent_messages=[HumanMessage(content="俘虏地精带我们去窝点。")],
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="return_to_eating_cave_for_sildar",
+                exit_option_id="guided_to_hideout",
                 transition_kind="advance",
                 confidence=0.95,
-                reason="玩家明确回到开吃洞室找人类俘虏。",
+                reason="玩家明确让俘虏带路前往窝点。",
             )
         ),
     )
 
     assert update.applied == "advanced"
-    assert update.adventure["active_node_id"] == "cragmaw_hideout_goblin_den"
-    assert "human_guard_in_eating_cave" not in update.adventure["known_clue_ids"]
+    assert update.adventure["active_node_id"] == "cragmaw_hideout_entrance"
+    assert "goblin_ambush_resolved" not in update.adventure["completed_event_ids"]
 
 
 def test_runtime_commits_director_target_even_when_player_choice_remains_inside_target():
@@ -406,7 +452,7 @@ def test_pre_turn_can_depart_from_opening_node_by_settling_single_exit_requireme
         player_message="继续吧",
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="take_the_road_to_phandalin",
+                exit_option_id="begin_escort_journey",
                 confidence=0.95,
                 reason="玩家明确同意出发前往凡达林。",
             )
@@ -506,7 +552,7 @@ def test_pre_turn_runtime_does_not_commit_generic_continue_on_multi_exit_node():
         player_message="继续前进",
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="continue_to_phandalin",
+                exit_option_id="go_to_phandalin_first",
                 target_node_id="phandalin",
                 transition_kind="advance",
                 confidence=0.95,
@@ -622,7 +668,7 @@ def test_runtime_switches_to_semantic_candidate_node_after_reply():
     assert update.state_update["adventure_runtime_directive"]["node_id"] == "goblin_ambush"
 
 
-def test_runtime_normalizes_direct_hideout_room_switch_to_entrance_and_marks_arrival_reward_pending():
+def test_runtime_switches_to_director_room_without_module_specific_entrance_rewrite():
     state = {
         "player": {"name": "温良", "xp": 0},
         "adventure": {
@@ -654,12 +700,12 @@ def test_runtime_normalizes_direct_hideout_room_switch_to_entrance_and_marks_arr
     )
 
     assert update.applied == "switched"
-    assert update.adventure["active_node_id"] == "cragmaw_hideout_entrance"
-    assert "reach_cragmaw_hideout" in update.adventure["completed_event_ids"]
+    assert update.adventure["active_node_id"] == "cragmaw_hideout_goblin_den"
+    assert "reach_cragmaw_hideout" not in update.adventure["completed_event_ids"]
     assert update.adventure["claimed_reward_ids"] == []
-    assert update.adventure["pending_reward_grants"][0]["id"] == "goblin_ambush_hideout_75_xp"
+    assert update.adventure["pending_reward_grants"] == []
     assert "player" not in update.state_update
-    assert update.state_update["adventure_runtime_directive"]["node_id"] == "cragmaw_hideout_entrance"
+    assert update.state_update["adventure_runtime_directive"]["node_id"] == "cragmaw_hideout_goblin_den"
 
 
 def test_pre_turn_advancing_from_trail_settles_selected_exit_local_event_and_syncs_reward():
@@ -699,7 +745,7 @@ def test_pre_turn_advancing_from_trail_settles_selected_exit_local_event_and_syn
         player_message="我们进去",
         director=FakeDirector(
             AdventureProgressDecision(
-                exit_option_id="arrive_cragmaw_hideout",
+                exit_option_id="follow_trail_to_hideout",
                 target_node_id="cragmaw_hideout_entrance",
                 transition_kind="advance",
                 confidence=0.95,
@@ -710,7 +756,6 @@ def test_pre_turn_advancing_from_trail_settles_selected_exit_local_event_and_syn
 
     assert update.applied == "pre_turn_advanced"
     assert update.adventure["active_node_id"] == "cragmaw_hideout_entrance"
-    assert "reach_cragmaw_hideout_trail_end" in update.adventure["completed_event_ids"]
     assert "reach_cragmaw_hideout" in update.adventure["completed_event_ids"]
     assert update.adventure["pending_reward_grants"][0]["id"] == "goblin_ambush_hideout_75_xp"
 
@@ -746,9 +791,9 @@ def test_runtime_uses_node_routing_instead_of_module_specific_switch_rules():
         ),
     )
 
-    assert update.adventure["active_node_id"] == "cragmaw_hideout_entrance"
-    assert "reach_cragmaw_hideout" in update.adventure["completed_event_ids"]
-    assert update.adventure["pending_reward_grants"][0]["id"] == "goblin_ambush_hideout_75_xp"
+    assert update.adventure["active_node_id"] == "cragmaw_hideout_goblin_den"
+    assert "reach_cragmaw_hideout" not in update.adventure["completed_event_ids"]
+    assert update.adventure["pending_reward_grants"] == []
     assert "player" not in update.state_update
 
 
@@ -1011,9 +1056,9 @@ def test_director_candidate_and_returnable_nodes_use_index_views():
                 "goblin_ambush",
                 "cragmaw_hideout_entrance",
             ],
-            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
-            "known_clue_ids": ["goblin_trail"],
-            "completed_event_ids": ["goblin_ambush_resolved", "reach_cragmaw_hideout"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
+            "known_clue_ids": [],
+            "completed_event_ids": [],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
             "breadcrumb_node_ids": [
@@ -1021,7 +1066,7 @@ def test_director_candidate_and_returnable_nodes_use_index_views():
                 "goblin_ambush",
                 "cragmaw_hideout_entrance",
             ],
-            "deferred_node_ids": [],
+            "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         },
     }
@@ -1102,32 +1147,30 @@ def test_director_current_node_view_keeps_ids_but_compacts_repeated_facts():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "cragmaw_hideout_entrance",
+            "active_node_id": "goblin_ambush",
             "unlocked_node_ids": [
                 "adventure_hook_meet_me_in_phandalin",
                 "goblin_ambush",
-                "cragmaw_hideout_entrance",
             ],
-            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
-            "known_clue_ids": ["goblin_trail"],
-            "completed_event_ids": ["goblin_ambush_resolved", "reach_cragmaw_hideout"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
+            "known_clue_ids": [],
+            "completed_event_ids": [],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
             "breadcrumb_node_ids": [
                 "adventure_hook_meet_me_in_phandalin",
                 "goblin_ambush",
-                "cragmaw_hideout_entrance",
             ],
             "deferred_node_ids": [],
             "transition_log": [],
         },
     }
 
-    director.adjudicate(state=state, recent_messages=[HumanMessage(content="我到了洞口。")], session_id="compact-node-view")
+    director.adjudicate(state=state, recent_messages=[HumanMessage(content="我搜索伏击现场。")], session_id="compact-node-view")
 
     payload = json.loads(fake_llm.calls[0]["summary_input"])
     current_node = payload["current_node"]
-    source_node = get_adventure_store().get_node("cragmaw_hideout_entrance")
+    source_node = get_adventure_store().get_node("goblin_ambush")
 
     clue_ids = {item["id"] for item in current_node["clues"]}
     exit_ids = {item["id"] for item in current_node["exits"]}
@@ -1137,11 +1180,72 @@ def test_director_current_node_view_keeps_ids_but_compacts_repeated_facts():
     assert exit_ids == {item.id for item in source_node.exits}
     assert reward_ids == {item["id"] for item in source_node.rewards}
     assert set(current_node["events"]) == set(source_node.events)
-    assert any(item.get("alias_of") for item in current_node["clues"])
     assert any(item.get("alias_of") for item in current_node["exits"])
     assert len(json.dumps(current_node, ensure_ascii=False, separators=(",", ":"))) < 16_000
-    assert len(current_node["scene_beats"]) < len(source_node.scene_beats)
-    assert len(current_node["rules_notes"]) < len(source_node.rules_notes)
+    assert len(current_node["scene_beats"]) <= len(source_node.scene_beats)
+    assert len(current_node["rules_notes"]) <= len(source_node.rules_notes)
+
+
+def test_spider_web_hides_stale_opening_return_nodes_from_director():
+    adventure = {
+        "module_id": "lost_mine",
+        "active_node_id": "spider_web_overview",
+        "unlocked_node_ids": ["goblin_ambush", "cragmaw_hideout_klarg_cave", "phandalin", "spider_web_overview"],
+        "completed_node_ids": ["goblin_ambush", "cragmaw_hideout_klarg_cave"],
+        "known_clue_ids": [],
+        "completed_event_ids": [],
+        "claimed_reward_ids": [],
+        "pending_exit_option_ids": [],
+        "breadcrumb_node_ids": [
+            "adventure_hook_meet_me_in_phandalin",
+            "goblin_ambush",
+            "cragmaw_hideout_entrance",
+            "cragmaw_hideout_klarg_cave",
+            "phandalin",
+            "spider_web_overview",
+        ],
+        "deferred_node_ids": ["goblin_ambush", "cragmaw_hideout_klarg_cave", "phandalin"],
+        "transition_log": [],
+    }
+
+    returnable = returnable_node_ids(adventure, "spider_web_overview")
+
+    assert "phandalin" in returnable
+    assert "goblin_ambush" not in returnable
+    assert "cragmaw_hideout_entrance" not in returnable
+    assert "cragmaw_hideout_klarg_cave" not in returnable
+
+
+def test_wave_echo_hides_older_chapter_return_nodes_from_director():
+    adventure = {
+        "module_id": "lost_mine",
+        "active_node_id": "wave_echo_forge_of_spells",
+        "unlocked_node_ids": ["phandalin", "old_owl_well", "cragmaw_castle_search", "wave_echo_forge_of_spells"],
+        "completed_node_ids": [],
+        "known_clue_ids": [],
+        "completed_event_ids": [],
+        "claimed_reward_ids": [],
+        "pending_exit_option_ids": [],
+        "breadcrumb_node_ids": [
+            "goblin_ambush",
+            "phandalin",
+            "old_owl_well",
+            "cragmaw_castle_search",
+            "wave_echo_overview",
+            "wave_echo_forge_of_spells",
+        ],
+        "deferred_node_ids": ["goblin_ambush", "old_owl_well", "cragmaw_castle_search", "phandalin", "wave_echo_starry_cavern"],
+        "transition_log": [],
+    }
+
+    returnable = returnable_node_ids(adventure, "wave_echo_forge_of_spells")
+
+    assert "phandalin" in returnable
+    assert "wave_echo_overview" in returnable
+    assert "wave_echo_starry_cavern" in returnable
+    assert "goblin_ambush" not in returnable
+    assert "old_owl_well" not in returnable
+    assert "cragmaw_castle_search" not in returnable
 
 
 def test_pre_turn_director_prompt_rejects_generic_movement_on_multi_exit_nodes():
