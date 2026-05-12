@@ -222,6 +222,132 @@ def trace_chat_error(
     )
 
 
+def start_adventure_director_trace(
+    session_id: str,
+    *,
+    director_input: dict[str, Any],
+    trace_dir: str | Path | None = None,
+) -> tuple[str, str]:
+    """记录后台冒险裁定器的输入，让节点推进判断不再是黑箱。"""
+    invocation_id = str(uuid4())
+    started_at = _now_iso()
+    append_trace_event(
+        session_id,
+        "adventure_director_started",
+        {
+            "invocation_id": invocation_id,
+            "started_at": started_at,
+            "director_input": director_input,
+        },
+        trace_dir=trace_dir,
+    )
+    return invocation_id, started_at
+
+
+def finish_adventure_director_trace(
+    session_id: str,
+    *,
+    invocation_id: str,
+    started_at: str,
+    duration_ms: float,
+    raw_response: str,
+    decision: Any,
+    response: BaseMessage | None = None,
+    trace_dir: str | Path | None = None,
+) -> Path | None:
+    """记录 director 原始输出与解析结果，便于定位模型判断和解析差异。"""
+    payload: dict[str, Any] = {
+        "invocation_id": invocation_id,
+        "started_at": started_at,
+        "completed_at": _now_iso(),
+        "duration_ms": round(duration_ms, 3),
+        "raw_response": raw_response,
+        "decision": decision,
+    }
+    if response is not None:
+        response_metadata = getattr(response, "response_metadata", None)
+        if response_metadata:
+            payload["response_metadata"] = _json_safe(response_metadata)
+        usage_metadata = getattr(response, "usage_metadata", None)
+        if usage_metadata:
+            payload["usage_metadata"] = _json_safe(usage_metadata)
+
+    return append_trace_event(
+        session_id,
+        "adventure_director_completed",
+        payload,
+        trace_dir=trace_dir,
+    )
+
+
+def fail_adventure_director_trace(
+    session_id: str,
+    *,
+    invocation_id: str,
+    started_at: str,
+    duration_ms: float,
+    error: Exception,
+    trace_dir: str | Path | None = None,
+) -> Path | None:
+    """director 调用失败时保留错误，避免后台 fail-soft 变成无声失败。"""
+    return append_trace_event(
+        session_id,
+        "adventure_director_failed",
+        {
+            "invocation_id": invocation_id,
+            "started_at": started_at,
+            "failed_at": _now_iso(),
+            "duration_ms": round(duration_ms, 3),
+            "error_type": error.__class__.__name__,
+            "error": str(error),
+        },
+        trace_dir=trace_dir,
+    )
+
+
+def trace_adventure_runtime_update(
+    session_id: str,
+    *,
+    applied: str,
+    decision: Any,
+    adventure_update: dict[str, Any] | None,
+    state_update: dict[str, Any] | None = None,
+    player_notifications: list[dict[str, Any]] | None = None,
+    trace_dir: str | Path | None = None,
+) -> Path | None:
+    """记录 runtime 是否采纳 director 裁定，以及最终写回的冒险状态。"""
+    return append_trace_event(
+        session_id,
+        "adventure_runtime_update",
+        {
+            "applied": applied,
+            "decision": decision,
+            "adventure_update": adventure_update,
+            "state_update": state_update,
+            "player_notifications": player_notifications or [],
+        },
+        trace_dir=trace_dir,
+    )
+
+
+def trace_adventure_runtime_failed(
+    session_id: str,
+    *,
+    error: Exception,
+    trace_dir: str | Path | None = None,
+) -> Path | None:
+    """runtime 层异常同样落盘；主流程仍保持 fail-soft。"""
+    return append_trace_event(
+        session_id,
+        "adventure_runtime_failed",
+        {
+            "error_type": error.__class__.__name__,
+            "error": str(error),
+        },
+        trace_dir=trace_dir,
+    )
+
+
 def start_llm_trace(
     session_id: str,
     *,

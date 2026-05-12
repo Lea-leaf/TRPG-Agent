@@ -1,4 +1,4 @@
-"""冒险节点读取 — 优先使用 PDF 解析产物，缺失时回退到最小内置开局。"""
+"""冒险节点读取 — 优先使用 canonical PDF 产物，缺失时回退到旧节点或最小内置开局。"""
 
 from __future__ import annotations
 
@@ -6,11 +6,42 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from app.adventures.models import AdventureExit, AdventureNode
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_ADVENTURE_DIR = BACKEND_DIR / "data" / "adventures" / "lost_mine"
+CANONICAL_NODES_FILENAME = "nodes.canonical.json"
+LEGACY_NODES_FILENAME = "nodes.json"
+_NODE_ID_ALIASES: dict[str, str] = {
+    "goblin_arrows": "goblin_arrows_road_to_phandalin",
+    "driving_the_wagon": "goblin_arrows_driving_the_wagon",
+    "phandalin_arrival": "phandalin",
+    "goblin_arrows_road_to_phandalin": "goblin_arrows_wagon_escort",
+    "goblin_arrows_driving_the_wagon": "goblin_arrows_wagon_escort",
+    "goblin_trail": "goblin_trail_to_cragmaw_hideout",
+    "cragmaw_hideout__6_goblin_den": "cragmaw_hideout_goblin_den",
+    "cragmaw_hideout_area6": "cragmaw_hideout_goblin_den",
+    "cragmaw_hideout__8_klargs_cave": "cragmaw_hideout_klarg_cave",
+    "klargs_cave": "cragmaw_hideout_klarg_cave",
+    "cragmaw_hideout_area8": "cragmaw_hideout_klarg_cave",
+    "cragmaw_hideout_area5": "cragmaw_hideout_overpass",
+    "cragmaw_hideout_area7": "cragmaw_hideout__7_twin_pools",
+    "cragmaw_hideout_area_8": "cragmaw_hideout_klarg_cave",
+    "cragmaw_hideout_area_8_klargs_cave": "cragmaw_hideout_klarg_cave",
+    "cragmaw_hideout_kennel_or_steep_passage": "cragmaw_hideout_entrance_areas_1_4",
+    "cragmaw_hideout_steep_passage_continues": "cragmaw_hideout_entrance_passages",
+    "cragmaw_hideout_western_branch": "cragmaw_hideout_goblin_den",
+    "cragmaw_hideout_inner_caves": "cragmaw_hideout_overpass",
+}
+ALIAS_GROUPS: list[tuple[str, list[str]]] = [
+    ("phandalin", ["phandalin", "凡达林", "凡戴尔"]),
+    ("gundren", ["gundren", "gundren rockseeker", "冈德伦", "甘德伦", "冈德伦·洛克希尔"]),
+    ("cragmaw", ["cragmaw", "克拉摩", "克拉格玛"]),
+    ("triboar trail", ["triboar trail", "三猪小径", "三野猪小径"]),
+    ("neverwinter", ["neverwinter", "无冬城"]),
+]
 
 
 class AdventureStore:
@@ -18,25 +49,18 @@ class AdventureStore:
 
     def __init__(self, data_dir: Path = DEFAULT_ADVENTURE_DIR) -> None:
         self._data_dir = data_dir
-        self._nodes = self._load_nodes()
-        self._candidate_nodes = self._load_candidate_nodes()
+        self._canonical_nodes = self._load_nodes_file(CANONICAL_NODES_FILENAME, fallback={})
+        self._legacy_nodes = self._load_nodes_file(LEGACY_NODES_FILENAME, fallback=_fallback_nodes())
+        self._nodes = self._merge_nodes(self._canonical_nodes, self._legacy_nodes)
 
     def get_node(self, node_id: str) -> AdventureNode:
-        if node_id in self._candidate_nodes:
-            candidate = self._candidate_nodes[node_id]
-            if node_id in self._nodes:
-                return _merge_node(self._nodes[node_id], candidate)
-            return candidate
-        if node_id in self._nodes:
-            return self._nodes[node_id]
-        else:
-            raise KeyError(f"未知冒险节点: {node_id}")
+        resolved_id = self.resolve_node_id(node_id)
+        if resolved_id in self._nodes:
+            return self._nodes[resolved_id]
+        raise KeyError(f"未知冒险节点: {node_id}")
 
     def list_nodes(self) -> list[AdventureNode]:
-        merged = dict(self._nodes)
-        for node_id, candidate in self._candidate_nodes.items():
-            merged[node_id] = _merge_node(merged[node_id], candidate) if node_id in merged else candidate
-        return list(merged.values())
+        return list(self._nodes.values())
 
     def search_nodes(self, query: str, limit: int = 5) -> list[tuple[AdventureNode, float]]:
         """按玩家意图或地点/NPC/线索检索候选剧情节点。"""
@@ -54,27 +78,59 @@ class AdventureStore:
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[:limit]
 
-    def _load_nodes(self) -> dict[str, AdventureNode]:
-        nodes_path = self._data_dir / "nodes.json"
+    def resolve_node_id(self, node_id: str) -> str:
+        """把别名、占位出口或旧节点名收敛到实际存在的节点 ID。"""
+        if alias := _NODE_ID_ALIASES.get(node_id):
+            if alias in self._nodes:
+                return alias
+
+        normalized = _normalize_node_id(node_id)
+        if alias := _NODE_ID_ALIASES.get(normalized):
+            if alias in self._nodes:
+                return alias
+
+        if node_id in self._nodes:
+            return node_id
+        if normalized in self._nodes:
+            return normalized
+
+        suffix_matches = [item_id for item_id in self._nodes if item_id.endswith(f"_{normalized}") or item_id.endswith(normalized)]
+        if len(suffix_matches) == 1:
+            return suffix_matches[0]
+
+        prefix_matches = [item_id for item_id in self._nodes if item_id.startswith(f"{normalized}_")]
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
+
+        return node_id
+
+    def _load_nodes_file(self, filename: str, *, fallback: dict[str, AdventureNode]) -> dict[str, AdventureNode]:
+        nodes_path = self._data_dir / filename
         if not nodes_path.exists():
-            return _fallback_nodes()
+            return fallback
 
         with nodes_path.open("r", encoding="utf-8") as file:
             raw_nodes = json.load(file)
 
-        nodes = [AdventureNode.model_validate(item) for item in raw_nodes]
-        return {node.id: node for node in nodes}
+        nodes: dict[str, AdventureNode] = {}
+        for item in raw_nodes:
+            normalized = _normalize_raw_node(item)
+            node = AdventureNode.model_validate(normalized)
+            nodes[node.id] = node
+        return nodes
 
-    def _load_candidate_nodes(self) -> dict[str, AdventureNode]:
-        candidate_path = self._data_dir / "nodes.candidate.json"
-        if not candidate_path.exists():
-            return {}
-
-        with candidate_path.open("r", encoding="utf-8") as file:
-            raw_nodes = json.load(file)
-
-        nodes = [AdventureNode.model_validate(item) for item in raw_nodes]
-        return {node.id: node for node in nodes}
+    def _merge_nodes(
+        self,
+        canonical_nodes: dict[str, AdventureNode],
+        legacy_nodes: dict[str, AdventureNode],
+    ) -> dict[str, AdventureNode]:
+        """canonical 作为主事实源，旧节点只补缺失章节与更稳定的出口。"""
+        merged: dict[str, AdventureNode] = dict(canonical_nodes)
+        for node_id, legacy in legacy_nodes.items():
+            if node_id in merged:
+                continue
+            merged[node_id] = legacy
+        return merged
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -90,15 +146,112 @@ def _query_tokens(query: str) -> list[str]:
         token = token.strip()
         if token and token not in dedup:
             dedup.append(token)
+    for canonical, aliases in ALIAS_GROUPS:
+        if any(alias in lowered for alias in aliases):
+            for alias in [canonical, *aliases]:
+                if alias not in dedup:
+                    dedup.append(alias)
     return dedup
 
 
 def _merge_node(base: AdventureNode, candidate: AdventureNode) -> AdventureNode:
-    """候选节点补 PDF 细节，正式节点继续提供人工确认过的硬出口。"""
+    """旧节点只做兜底，canonical 本身优先保留。"""
     payload = candidate.model_dump()
-    if not payload.get("exits"):
-        payload["exits"] = [item.model_dump() for item in base.exits]
+    base_payload = base.model_dump()
+    for key in ("page_start", "page_end", "source_refs"):
+        if key not in payload or payload.get(key) in (None, [], {}):
+            payload[key] = base_payload.get(key)
     return AdventureNode.model_validate(payload)
+
+
+def _merge_legacy_exits(base: AdventureNode, legacy: AdventureNode) -> AdventureNode:
+    """当 canonical 出口仍明显缺位时，保留旧节点中已经验证过的出口。"""
+    payload = base.model_dump()
+    if legacy.exits:
+        payload["exits"] = [item.model_dump() for item in legacy.exits]
+    if legacy.events:
+        payload["events"] = list(legacy.events)
+    return AdventureNode.model_validate(payload)
+
+
+def _normalize_node_id(node_id: str) -> str:
+    text = node_id.strip().lower()
+    text = re.sub(r"[^a-z0-9_\-\u4e00-\u9fff]+", "_", text)
+    return re.sub(r"_+", "_", text).strip("_")
+
+
+def _normalize_raw_node(item: dict[str, Any]) -> dict[str, Any]:
+    raw = dict(item)
+    raw["events"] = _normalize_events(raw.get("events", []))
+    raw["scene_beats"] = _normalize_text_list(raw.get("scene_beats", []))
+    raw["rules_notes"] = _normalize_text_list(raw.get("rules_notes", []))
+    raw["fallbacks"] = _normalize_dict_list(raw.get("fallbacks", []))
+    raw["npc_reveals"] = _normalize_dict_list(raw.get("npc_reveals", []))
+    raw["source_refs"] = _normalize_dict_list(raw.get("source_refs", []))
+    if "page_start" not in raw or "page_end" not in raw:
+        page_start, page_end = _page_range_from_source_refs(raw.get("source_refs", []))
+        if page_start is not None:
+            raw["page_start"] = page_start
+        if page_end is not None:
+            raw["page_end"] = page_end
+    return raw
+
+
+def _normalize_events(value: Any) -> list[str]:
+    events: list[str] = []
+    if not isinstance(value, list):
+        return events
+    for item in value:
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                events.append(text)
+            continue
+        if isinstance(item, dict):
+            event_id = str(item.get("id", "")).strip()
+            if event_id:
+                events.append(event_id)
+    return events
+
+
+def _normalize_text_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def _normalize_dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            result.append(dict(item))
+    return result
+
+
+def _page_range_from_source_refs(source_refs: Any) -> tuple[int | None, int | None]:
+    if not isinstance(source_refs, list) or not source_refs:
+        return None, None
+
+    page_starts: list[int] = []
+    page_ends: list[int] = []
+    for ref in source_refs:
+        if not isinstance(ref, dict):
+            continue
+        try:
+            page_starts.append(int(ref.get("page_start")))
+            page_ends.append(int(ref.get("page_end")))
+        except (TypeError, ValueError):
+            continue
+    if not page_starts or not page_ends:
+        return None, None
+    return min(page_starts), max(page_ends)
 
 
 def _score_node(node: AdventureNode, query: str, tokens: list[str]) -> float:
@@ -111,11 +264,15 @@ def _score_node(node: AdventureNode, query: str, tokens: list[str]) -> float:
             node.source_text,
             node.dm_summary,
             node.player_visible_intro,
+            " ".join(getattr(node, "scene_beats", [])),
+            " ".join(getattr(node, "rules_notes", [])),
             " ".join(str(item) for item in node.clues),
             " ".join(str(item) for item in node.encounters),
             " ".join(str(item) for item in node.rewards),
             " ".join(str(item) for item in node.subsections),
+            " ".join(str(item) for item in getattr(node, "fallbacks", [])),
             " ".join(str(item) for values in node.dm_guidance.values() for item in values),
+            " ".join(f"{item.id} {item.label} {item.next_node_id} {item.description}" for item in node.exits),
         ]
     ).lower()
 

@@ -48,6 +48,7 @@ from app.services.tools.space_tools import (  # noqa: F401
 )
 from app.services.tools.adventure_tools import (  # noqa: F401
     advance_adventure,
+    claim_adventure_reward,
     inspect_adventure_state,
     load_adventure_node,
     manage_adventure,

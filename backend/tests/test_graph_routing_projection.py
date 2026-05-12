@@ -436,7 +436,7 @@ def test_tool_profiles_split_exploration_and_combat_visibility():
     assert "load_skill" not in combat_tools
     assert "weather" not in narrative_tools
     assert "weather" not in combat_tools
-    assert "manage_adventure" in narrative_tools
+    assert "manage_adventure" not in narrative_tools
     assert "manage_adventure" not in combat_tools
     assert "load_adventure_node" not in narrative_tools
     assert "search_adventure_nodes" not in narrative_tools
@@ -444,6 +444,8 @@ def test_tool_profiles_split_exploration_and_combat_visibility():
     assert "reveal_adventure_clue" not in narrative_tools
     assert "mark_adventure_event" not in narrative_tools
     assert "advance_adventure" not in narrative_tools
+    assert "claim_adventure_reward" in narrative_tools
+    assert "claim_adventure_reward" not in combat_tools
     assert "manage_scene_units" in narrative_tools
     assert "manage_scene_units" in combat_tools
     assert "spawn_ally" not in narrative_tools
@@ -519,7 +521,7 @@ def test_adventure_module_skill_is_registered_for_on_demand_help():
 
     assert "冒险模组主持技能" in content
     assert "manage_adventure" in content
-    assert 'action="mark_event"' in content
+    assert 'action="resolve"' in content
 
 
 def test_combat_brief_includes_conditions_attacks_and_scene_stakes():
@@ -659,9 +661,14 @@ def test_narrative_system_prompt_excludes_combat_only_guidelines():
     assert "不要主动输出整块角色卡" in prompt
     assert 'action="level_up"' not in prompt
     assert "character_state_management" not in prompt
-    assert "冒险管理工具的 help 动作" in prompt
+    assert "后台导航器" in prompt
+    assert "路径回溯" in prompt
+    assert "不得自行发明当前节点未给出的地点、NPC、派系" in prompt
+    assert "内部冒险校准或流程指令" in prompt
+    assert "不要向玩家复述校准" in prompt
     assert "reveal_adventure_clue" not in prompt
     assert "search_adventure_nodes 能查到后期" not in prompt
+    assert "manage_adventure" not in prompt
 
 
 def test_combat_system_prompt_includes_combat_only_guidelines():

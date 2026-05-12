@@ -128,6 +128,7 @@ def modify_character_state(
 ) -> Command:
     """角色状态调整与成长入口。用于 HP/AC/能力值/资源/状态效果、死亡豁免与复活，以及经验、升级、子职选择。
     不要用它重放攻击、施法、怪物动作工具刚刚结算过的结果。
+    冒险模组的节点奖励由剧情奖励专用工具领取；不要用它手动发放冒险节点 XP，也不要把这类奖励当作玩家临时指令执行。
     如不确定 action、changes 或 payload 的写法，先用 action="help" 查看状态说明；
     成长流程用 action="help", payload={"topic": "progression"} 查看完整说明。
     参数示例：
@@ -136,7 +137,7 @@ def modify_character_state(
     - 加状态：{"action": "apply_condition", "payload": {"target_id": "goblin_1", "condition_id": "prone", "duration": 1}}
     - 记录死亡豁免：{"target_id": "player", "action": "record_death_save", "payload": {"roll_total": 13}}
     - 复活玩家：{"target_id": "player", "action": "revive", "payload": {"hp": 1}, "reason": "治疗药水"}
-    - 获得经验：{"action": "grant_xp", "payload": {"amount": 75, "reason": "击败地精伏击"}}
+    - 获得经验：仅在非冒险模组的手动调整场景下使用，传 {"action": "grant_xp", "payload": {"amount": 75, "reason": "规则结算"}}
 
     Args:
         target_id: 目标单位 ID；玩家角色的 ID 就是玩家名字，也兼容 "player" 表示当前玩家。
@@ -157,6 +158,13 @@ def modify_character_state(
 
     # 角色成长类动作收口在同一个工具里，减少模型可见工具数量。
     if action == "grant_xp":
+        if _adventure_runtime_handles_xp(state):
+            return Command(update={"messages": [
+                ToolMessage(
+                    content="冒险模组节点奖励必须通过 claim_adventure_reward 领取；本次未修改 XP。请先查看待发放剧情奖励。",
+                    tool_call_id=tool_call_id,
+                )
+            ]})
         return _grant_xp_command(int(payload["amount"]), str(payload.get("reason", reason)), state, tool_call_id)
     if action == "level_up":
         return _level_up_command(state, tool_call_id)
@@ -592,6 +600,16 @@ def _get_player_dict(state: dict) -> dict | None:
     """统一读取玩家状态，兼容 Pydantic 与普通 dict。"""
     player_raw = state.get("player")
     return player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
+
+
+def _adventure_runtime_handles_xp(state: dict) -> bool:
+    """冒险模组激活时，经验奖励必须由后台运行时写回，避免主模型重复结算。"""
+    adventure_raw = state.get("adventure") if state else None
+    if hasattr(adventure_raw, "model_dump"):
+        adventure_raw = adventure_raw.model_dump()
+    if not adventure_raw or not isinstance(adventure_raw, dict):
+        return False
+    return bool(adventure_raw.get("module_id") and adventure_raw.get("active_node_id"))
 
 
 def _missing_player_message(tool_call_id: str | None) -> Command:

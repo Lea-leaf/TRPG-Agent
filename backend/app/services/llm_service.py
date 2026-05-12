@@ -107,13 +107,20 @@ class LLMService:
                 "LLM connection failed. Please verify OPENAI_BASE_URL and network connectivity."
             ) from exc
 
-    # 中文注释：记忆摘要必须走无工具、低温度的独立调用，避免被主 agent 的工具规划噪声污染。
+    # 中文注释：摘要/裁定必须走无工具、低温度的独立调用；保留字符串接口兼容既有调用方。
     def invoke_summary(self, summary_input: str, *, system_prompt: str) -> str:
+        response = self.invoke_summary_message(summary_input, system_prompt=system_prompt)
+        return self._message_content_to_text(getattr(response, "content", "")).strip()
+
+    # 中文注释：Director 需要模型元数据来追踪 KC，因此提供完整消息接口。
+    def invoke_summary_message(self, summary_input: str, *, system_prompt: str) -> AIMessage:
         try:
             response = self._get_summary_client().invoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=summary_input)]
             )
-            return self._message_content_to_text(getattr(response, "content", "")).strip()
+            if isinstance(response, AIMessage):
+                return response
+            return AIMessage(content=self._message_content_to_text(getattr(response, "content", "")).strip())
         except BadRequestError as exc:
             raise ValueError(f"LLM summary bad request: {exc}") from exc
         except APITimeoutError as exc:

@@ -11,6 +11,8 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from app.allies.profiles import get_ally_profile
+from app.adventures.navigation import normalize_adventure_state
+from app.adventures.store import get_adventure_store
 from app.calculation.bestiary import spawn_combatants
 from app.services.skills import load_skill_content
 from app.space.geometry import build_space_state
@@ -60,6 +62,23 @@ def _remove_space_units(space_raw: dict | None, unit_ids: list[str]) -> dict | N
     for unit_id in unit_ids:
         space.placements.pop(unit_id, None)
     return space.model_dump()
+
+
+def _adventure_after_combat_update(state: dict | None) -> tuple[dict | None, list[str]]:
+    """战斗结束后只记录当前遭遇节点的确定事件，把路线推进交还给后台导航器。"""
+    adventure_raw = state.get("adventure") if state else None
+    if not adventure_raw:
+        return None, []
+
+    adventure = normalize_adventure_state(adventure_raw)
+    node = get_adventure_store().get_node(adventure["active_node_id"])
+    recorded: list[str] = []
+    if node.kind == "encounter":
+        for event_id in node.events:
+            if event_id not in adventure["completed_event_ids"]:
+                adventure["completed_event_ids"].append(event_id)
+                recorded.append(event_id)
+    return adventure, recorded
 
 
 def _validate_combat_space(state: dict, unit_ids: list[str]) -> str | None:
@@ -703,6 +722,13 @@ def end_combat(
         if fallen_names:
             parts.append(f"倒下: {', '.join(fallen_names)}")
         summary = " ".join(parts)
+
+        adventure_update, recorded_events = _adventure_after_combat_update(state)
+        if adventure_update:
+            update["adventure"] = adventure_update
+            if recorded_events:
+                summary += f" 已记录冒险事件: {', '.join(recorded_events)}。"
+            summary += " 节点收束与后续书签推进由后台导航器处理。"
 
         dead_unit_ids = list(dead_raw.keys())
         if dead_unit_ids:

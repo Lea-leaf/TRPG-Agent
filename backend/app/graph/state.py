@@ -278,6 +278,9 @@ class GraphState(TypedDict, total=False):
     phase: Literal["exploration", "combat", "resolution"]
 
     scene_summary: str
+    adventure_guardrail_warning: dict[str, Any] | None
+    adventure_runtime_directive: dict[str, Any] | None
+    adventure_visible_clue_ids: list[str]
     adventure: AdventureState
     player: PlayerState
 

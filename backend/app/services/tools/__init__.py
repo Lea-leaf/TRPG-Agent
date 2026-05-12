@@ -45,6 +45,7 @@ from app.services.tools.space_tools import (
 from app.services.tools.monster_action_tools import use_monster_action
 from app.services.tools.adventure_tools import (
     advance_adventure,
+    claim_adventure_reward,
     inspect_adventure_state,
     load_adventure_node,
     manage_adventure,
@@ -78,7 +79,6 @@ build_player_combatant = prepare_player_for_combat
 ToolProfile = Literal["narrative", "combat"]
 
 _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
-    manage_adventure,
     request_dice_roll,
     load_character_profile,
     modify_character_state,
@@ -89,6 +89,7 @@ _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
     inspect_unit,
     consult_rules_handbook,
     manage_space,
+    claim_adventure_reward,
 )
 
 _COMBAT_TOOLS: tuple[BaseTool, ...] = (
@@ -108,6 +109,7 @@ _COMBAT_TOOLS: tuple[BaseTool, ...] = (
 )
 
 _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
+    manage_adventure,
     inspect_adventure_state,
     load_adventure_node,
     search_adventure_nodes,
@@ -115,6 +117,7 @@ _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
     reveal_adventure_clue,
     mark_adventure_event,
     advance_adventure,
+    claim_adventure_reward,
     spawn_ally,
     spawn_monsters,
     clear_dead_units,

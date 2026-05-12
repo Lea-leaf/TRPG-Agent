@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from app.adventures.runtime import AdventurePreTurnDecision, AdventureProgressDecision, AdventureRuntimeUpdate
 from app.services.chat_session_service import ChatSessionService
 
 
@@ -36,6 +38,7 @@ class _FakeGraph:
 
     async def aupdate_state(self, config, values):
         self.state_updates.append(values)
+        self._states[-1].values = {**self._states[-1].values, **values}
 
 
 def _parse_sse_event(raw_event: str) -> tuple[str, object]:
@@ -43,6 +46,27 @@ def _parse_sse_event(raw_event: str) -> tuple[str, object]:
     event_name = lines[0].split(": ", 1)[1]
     event_data = json.loads(lines[1].split(": ", 1)[1])
     return event_name, event_data
+
+
+class _NoopDirector:
+    def adjudicate_pre_turn(self, *, state, player_message, session_id=None):
+        return AdventurePreTurnDecision()
+
+    def adjudicate(self, *, state, recent_messages, session_id=None):
+        return AdventureProgressDecision()
+
+
+def _service(graph):
+    return ChatSessionService(graph, adventure_director=_NoopDirector())
+
+
+class _GuardrailDirector(_NoopDirector):
+    def adjudicate(self, *, state, recent_messages, session_id=None):
+        return AdventureProgressDecision(
+            desync_detected=True,
+            unsupported_claims=["冈德伦已被救出"],
+            warning="回到当前节点。",
+        )
 
 
 def test_reaction_stream_emits_pending_action_clear_before_combat_action():
@@ -68,7 +92,7 @@ def test_reaction_stream_emits_pending_action_clear_before_combat_action():
             }
         }],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="demo", reaction_response={"spell_id": None})]
@@ -106,7 +130,7 @@ def test_stream_ignores_attack_roll_payload_marked_as_non_visual():
             }
         }],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="demo", message="test")]
@@ -151,7 +175,7 @@ def test_stream_ignores_hidden_tool_message_but_keeps_pending_action():
             }
         }],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="demo", message="继续")]
@@ -177,7 +201,7 @@ def test_stream_emits_done_without_memory_ingestion():
             }
         }],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="demo", message="继续")]
@@ -227,7 +251,7 @@ def test_stream_keeps_ai_text_even_when_message_contains_tool_calls():
             },
         ],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="demo", message="继续战斗")]
@@ -250,7 +274,7 @@ def test_stream_clears_hot_episodic_context_before_graph_stream():
         final_state=final_state,
         chunks=[],
     )
-    service = ChatSessionService(graph)
+    service = _service(graph)
 
     async def _collect_events():
         return [event async for event in service.process_turn_stream(session_id="stream-demo", message="继续")]
@@ -261,3 +285,125 @@ def test_stream_clears_hot_episodic_context_before_graph_stream():
     assert graph.state_updates[0]["episodic_context"] == []
     assert graph.last_stream_config["recursion_limit"] == 80
     assert event_names[-1] == "done"
+
+
+def test_stream_keeps_guardrail_internal_after_desynced_reply():
+    initial_state = _FakeState({
+        "messages": [],
+        "adventure": {
+            "module_id": "lost_mine",
+            "active_node_id": "goblin_ambush",
+            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "completed_node_ids": ["lost_mine_start"],
+            "known_clue_ids": [],
+            "completed_event_ids": [],
+            "pending_exit_option_ids": [],
+        },
+    })
+    final_state = _FakeState({
+        "messages": [AIMessage(content="你们已经在酒馆救出了冈德伦。", tool_calls=[])],
+        "phase": "exploration",
+        "adventure": initial_state.values["adventure"],
+    })
+    graph = _FakeGraph(
+        initial_state=initial_state,
+        final_state=final_state,
+        chunks=[{
+            "assistant": {
+                "messages": [AIMessage(content="你们已经在酒馆救出了冈德伦。", tool_calls=[])],
+            }
+        }],
+    )
+    service = ChatSessionService(graph, adventure_director=_GuardrailDirector())
+
+    async def _collect_events():
+        return [event async for event in service.process_turn_stream(session_id="guardrail-stream", message="继续")]
+
+    raw_events = asyncio.run(_collect_events())
+    parsed_events = [_parse_sse_event(event) for event in raw_events]
+    assistant_messages = [payload["content"] for name, payload in parsed_events if name == "assistant_message"]
+
+    assert assistant_messages == ["你们已经在酒馆救出了冈德伦。"]
+    assert graph.state_updates[-1]["adventure_guardrail_warning"]["unsupported_claims"] == ["冈德伦已被救出"]
+
+
+def test_stream_post_turn_director_receives_full_message_history():
+    old_messages = [
+        HumanMessage(content="我检查货车。"),
+        AIMessage(content="货车仍在路边。", tool_calls=[]),
+    ]
+    final_messages = [
+        *old_messages,
+        HumanMessage(content="继续"),
+        AIMessage(content="你沿小路前进。", tool_calls=[]),
+    ]
+    initial_state = _FakeState({"messages": old_messages, "phase": "exploration"})
+    final_state = _FakeState({"messages": final_messages, "phase": "exploration"})
+    graph = _FakeGraph(
+        initial_state=initial_state,
+        final_state=final_state,
+        chunks=[{
+            "assistant": {
+                "messages": [AIMessage(content="你沿小路前进。", tool_calls=[])],
+            }
+        }],
+    )
+    service = _service(graph)
+    service._apply_pre_turn_adventure_runtime = AsyncMock(return_value=None)
+    service._apply_adventure_runtime = AsyncMock(return_value=None)
+
+    async def _collect_events():
+        return [event async for event in service.process_turn_stream(session_id="director-history-stream", message="继续")]
+
+    asyncio.run(_collect_events())
+
+    passed_messages = service._apply_adventure_runtime.call_args.args[3]
+    assert passed_messages == final_messages
+
+
+def test_stream_emits_reward_announcement_without_baking_it_into_model_prompt():
+    initial_state = _FakeState({
+        "messages": [],
+        "phase": "combat",
+    })
+    final_state = _FakeState({
+        "messages": [AIMessage(content="你击败了地精。", tool_calls=[])],
+        "phase": "combat",
+    })
+    graph = _FakeGraph(
+        initial_state=initial_state,
+        final_state=final_state,
+        chunks=[{
+            "assistant": {
+                "messages": [AIMessage(content="你击败了地精。", tool_calls=[])],
+            }
+        }],
+    )
+    service = _service(graph)
+    service._apply_pre_turn_adventure_runtime = AsyncMock(return_value=AdventureRuntimeUpdate())
+    service._apply_adventure_runtime = AsyncMock(
+        return_value=AdventureRuntimeUpdate(
+            player_notifications=[
+                {
+                    "kind": "xp_granted",
+                    "node_id": "cragmaw_hideout_entrance",
+                    "id": "goblin_ambush_hideout_75_xp",
+                    "type": "xp",
+                    "amount": 75,
+                    "previous_xp": 0,
+                    "current_xp": 75,
+                    "description": "打败伏击地精并抵达克拉摩窝点后发放。",
+                }
+            ]
+        )
+    )
+
+    async def _collect_events():
+        return [event async for event in service.process_turn_stream(session_id="reward-stream", message="继续")]
+
+    raw_events = asyncio.run(_collect_events())
+    parsed_events = [_parse_sse_event(event) for event in raw_events]
+    assistant_messages = [payload["content"] for name, payload in parsed_events if name == "assistant_message"]
+
+    assert "你击败了地精。" in assistant_messages
+    assert any("【经验奖励】你获得 75 XP，已计入角色卡" in message for message in assistant_messages)

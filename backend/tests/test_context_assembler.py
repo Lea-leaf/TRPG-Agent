@@ -1,10 +1,17 @@
 import json
 import unittest
+from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
-from app.memory.context_assembler import ContextAssembler, build_runtime_state_message, summarize_tool_message, trim_model_messages
+from app.memory.context_assembler import (
+    AdventureNodeRetrievalContextProvider,
+    ContextAssembler,
+    build_runtime_state_message,
+    summarize_tool_message,
+    trim_model_messages,
+)
 
 
 class _StaticContextProvider:
@@ -85,6 +92,13 @@ class ContextAssemblerTests(unittest.TestCase):
         assembler = ContextAssembler()
         state = {
             "messages": [HumanMessage(content="我准备探索。")],
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "known_clue_ids": ["goblin_trail"],
+                "completed_event_ids": ["goblin_ambush_resolved"],
+                "pending_exit_option_ids": ["follow_goblin_trail"],
+            },
             "player": {
                 "id": "player_hero",
                 "name": "英雄",
@@ -112,8 +126,57 @@ class ContextAssemblerTests(unittest.TestCase):
         assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
 
         self.assertIn("magic:[spells=magic_missile,shield; cantrips=fire_bolt]", assembled.runtime_state_text)
+        self.assertIn("冒险节点: lost_mine / goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("已知线索: ['goblin_trail']", assembled.runtime_state_text)
+        self.assertIn("已完成事件: ['goblin_ambush_resolved']", assembled.runtime_state_text)
+        self.assertIn("待确认出口: ['follow_goblin_trail']", assembled.runtime_state_text)
         self.assertIn("可用法术单位: 伊莲[ID:apprentice_wizard", assembled.runtime_state_text)
         self.assertIn("spells=magic_missile; cantrips=ray_of_frost", assembled.runtime_state_text)
+
+    def test_narrative_runtime_state_includes_current_node_facts_and_related_hits(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="我想去凡达林。")],
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": ["goblin_trail"],
+                "completed_event_ids": ["goblin_ambush_resolved"],
+                "pending_exit_option_ids": [],
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("[扩展上下文]", assembled.runtime_state_text)
+        self.assertIn("[冒险节点事实]", assembled.runtime_state_text)
+        self.assertIn("当前节点: 地精伏击 [ID:goblin_ambush]", assembled.runtime_state_text)
+        self.assertIn("follow_goblin_trail: 追踪地精踪迹 -> goblin_trail_to_cragmaw_hideout", assembled.runtime_state_text)
+        self.assertIn("continue_to_phandalin: 继续前往凡达林 -> phandalin", assembled.runtime_state_text)
+        self.assertIn("[冒险节点检索]", assembled.runtime_state_text)
+        self.assertIn("最近意图: 我想去凡达林。", assembled.runtime_state_text)
+        self.assertRegex(assembled.runtime_state_text, r"phandalin(_arrival)?")
+
+    def test_narrative_runtime_state_caps_known_clue_window(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="我继续追查线索。")],
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "known_clue_ids": [f"clue_{index}" for index in range(10)],
+                "completed_event_ids": ["goblin_ambush_resolved"],
+                "pending_exit_option_ids": [],
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("已知线索:", assembled.runtime_state_text)
+        self.assertIn("另有 4 条", assembled.runtime_state_text)
+        self.assertNotIn("clue_0", assembled.runtime_state_text)
 
     def test_hud_marks_ally_scene_unit_id_as_start_combat_input(self):
         assembler = ContextAssembler()
@@ -150,7 +213,8 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("[冒险节点校准]", assembled.runtime_state_text)
         self.assertIn("goblin_ambush", assembled.runtime_state_text)
         self.assertIn("优先沿当前节点给出可执行后果、线索或下一步压力", assembled.runtime_state_text)
-        self.assertIn("必须先调用冒险工具读取或更新节点状态", assembled.runtime_state_text)
+        self.assertIn("路径回溯", assembled.runtime_state_text)
+        self.assertIn("待回访节点", assembled.runtime_state_text)
         self.assertIn("不要顺着即兴逻辑游离到未建立的地点", assembled.runtime_state_text)
 
     def test_adventure_node_anchor_skips_combat_mode(self):
@@ -171,6 +235,41 @@ class ContextAssemblerTests(unittest.TestCase):
         assembled = assembler.assemble(state, COMBAT_AGENT_MODE, base_system_prompt="战斗规则")
 
         self.assertNotIn("[冒险节点校准]", assembled.runtime_state_text)
+
+    def test_narrative_runtime_state_keeps_guardrail_internal(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="继续")],
+            "adventure": {"module_id": "lost_mine", "active_node_id": "goblin_ambush"},
+            "adventure_guardrail_warning": {
+                "node_id": "goblin_ambush",
+                "warning": "上一轮回复越过了当前节点。",
+                "unsupported_claims": ["冈德伦已被救出", "红标帮在酒馆埋伏"],
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("[内部冒险校准]", assembled.runtime_state_text)
+        self.assertIn("不得向玩家复述", assembled.runtime_state_text)
+        self.assertNotIn("冈德伦已被救出", assembled.runtime_state_text)
+
+    def test_narrative_runtime_state_requires_load_node_after_runtime_advance(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [HumanMessage(content="继续")],
+            "adventure": {"module_id": "lost_mine", "active_node_id": "goblin_ambush"},
+            "adventure_runtime_directive": {
+                "kind": "node_advanced",
+                "node_id": "goblin_ambush",
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="基础规则")
+
+        self.assertIn("[内部冒险流程]", assembled.runtime_state_text)
+        self.assertIn("后台已将冒险书签推进到 goblin_ambush", assembled.runtime_state_text)
+        self.assertIn("本轮第一步先按当前节点事实重整叙事", assembled.runtime_state_text)
 
     def test_assemble_keeps_full_history_under_large_context_budget(self):
         assembler = ContextAssembler()
@@ -247,8 +346,8 @@ class ContextAssemblerTests(unittest.TestCase):
                         "events": [],
                         "dm_guidance": {"tactics": ["两近战两远程"], "xp": ["75 XP"]},
                         "rules_overrides": [{"topic": "surprise", "rule": "新版突袭只让先攻劣势"}],
-                        "candidate_exits": [{"id": "goblin_trail"}],
                     },
+                    "progression_rule": "剧情推进出口只看顶层 available_exits；available_exits 非空且 available=true 时即可用对应 id 调用 advance。",
                     "available_exits": [{"id": "follow_goblin_trail", "available": False}],
                     "adventure_state": {"known_clue_ids": []},
                 },
@@ -263,7 +362,100 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("轮到地精行动时", projected)
         self.assertIn("goblin_trail", projected)
         self.assertIn("新版突袭只让先攻劣势", projected)
+        self.assertIn("剧情推进出口只看顶层 available_exits", projected)
         self.assertIn("available_exits", projected)
+        self.assertNotIn("candidate_exits", projected)
+
+    def test_adventure_search_block_warns_candidates_are_not_current_scene(self):
+        assembler = ContextAssembler()
+        state = {
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "phandalin",
+                "unlocked_node_ids": ["phandalin"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "claimed_reward_ids": [],
+                "pending_exit_option_ids": [],
+                "breadcrumb_node_ids": ["phandalin"],
+                "deferred_node_ids": [],
+                "transition_log": [],
+            },
+            "messages": [HumanMessage(content="我想问问克拉摩窝点的事。")],
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="narrative rules")
+
+        self.assertIn("[冒险节点检索]", assembled.runtime_state_text)
+        self.assertIn("不得把候选节点当作已经发生的场景", assembled.runtime_state_text)
+
+    def test_adventure_node_fact_block_hides_runtime_xp_instructions(self):
+        provider = AdventureNodeRetrievalContextProvider()
+        node = SimpleNamespace(
+            id="cragmaw_hideout_entrance",
+            title="克拉摩窝点入口",
+            source_refs=[],
+            page_start=6,
+            page_end=7,
+            dm_summary="入口溪水流入洞穴。抵达此处时结算75 XP里程碑经验。",
+            player_visible_intro="洞口前有浅溪。",
+            scene_beats=["先呈现洞口地形。", "在进入窝点探索前结算里程碑经验。"],
+            rules_notes=["洞内完全黑暗。", "只有在打败伏击地精并发现窝点后才发放75 XP。"],
+            clues=[],
+            exits=[],
+            fallbacks=[],
+        )
+
+        block = provider._build_current_node_block(
+            node,
+            {
+                "breadcrumb_node_ids": ["goblin_ambush", "cragmaw_hideout_entrance"],
+                "deferred_node_ids": [],
+            },
+        )
+
+        self.assertIn("入口溪水流入洞穴", block)
+        self.assertIn("洞内完全黑暗", block)
+        self.assertNotIn("75 XP", block)
+        self.assertNotIn("里程碑经验", block)
+
+    def test_pending_adventure_reward_is_visible_as_claimable_work(self):
+        assembler = ContextAssembler()
+        state = {
+            "player": {"id": "player", "name": "玩家", "xp": 75},
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "cragmaw_hideout_entrance",
+                "unlocked_node_ids": ["cragmaw_hideout_entrance"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": ["goblin_ambush_resolved", "reach_cragmaw_hideout"],
+                "claimed_reward_ids": [],
+                "pending_reward_grants": [
+                    {
+                        "id": "goblin_ambush_hideout_75_xp",
+                        "node_id": "cragmaw_hideout_entrance",
+                        "type": "xp",
+                        "amount": 75,
+                        "scope": "per_player",
+                        "description": "打败伏击地精并抵达克拉摩窝点后发放。",
+                        "requires": ["goblin_ambush_resolved", "reach_cragmaw_hideout"],
+                    }
+                ],
+                "pending_exit_option_ids": [],
+                "breadcrumb_node_ids": ["goblin_ambush", "cragmaw_hideout_entrance"],
+                "deferred_node_ids": [],
+                "transition_log": [],
+            },
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="narrative rules")
+
+        self.assertIn("待发放剧情奖励:", assembled.runtime_state_text)
+        self.assertIn("goblin_ambush_hideout_75_xp", assembled.runtime_state_text)
+        self.assertIn("当前必须执行: 本轮第一步调用 claim_adventure_reward", assembled.runtime_state_text)
+        self.assertNotIn("goblin_ambush_hideout_75_xp: +75 XP，当前 XP 75", assembled.runtime_state_text)
 
     def test_combat_archive_metadata_no_longer_collapses_model_history(self):
         assembler = ContextAssembler()
