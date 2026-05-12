@@ -188,13 +188,206 @@ class TestBuildPlayerCombatant:
             assert len(profile.get("weapons", [])) > 0, f"{class_name} 缺少武器数据"
 
 
+class TestFighterArchetype:
+    """验证战士 3 级武术范型只写入当前版本支持的字段。"""
+
+    @pytest.mark.parametrize(
+        ("archetype", "expected_features"),
+        [
+            ("champion", ["improved_critical"]),
+            ("battle_master", ["combat_superiority", "student_of_war"]),
+            ("eldritch_knight", ["eldritch_knight_spellcasting", "weapon_bond"]),
+        ],
+    )
+    def test_choose_fighter_archetype_records_features(self, archetype, expected_features):
+        """三种范型都应记录范型名，并授予 3 级立即获得的职业特性。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["level"] = 3
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "choose_fighter_archetype",
+                "payload": {"archetype": archetype},
+                "state": {"player": player},
+            },
+        )
+        updated = result.update["player"]
+
+        assert updated["fighter_archetype"] == archetype
+        for feature in expected_features:
+            assert feature in updated["class_features"]
+
+    def test_battle_master_records_level_3_resources(self):
+        """战斗大师 3 级只记录卓越骰、战技槽和工具熟练占位，不执行战技。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["level"] = 3
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "choose_fighter_archetype",
+                "payload": {"archetype": "battle_master"},
+                "state": {"player": player},
+            },
+        )
+        updated = result.update["player"]
+
+        assert updated["resources"]["superiority_dice"] == 4
+        assert updated["resource_caps"]["superiority_dice"] == 4
+        assert updated["superiority_die"] == "1d8"
+        assert updated["maneuvers_known_count"] == 3
+        assert updated["maneuvers"] == []
+        assert updated["maneuver_save_ability"] == "str"
+        assert updated["maneuver_save_dc"] == 13
+        assert updated["artisan_tool_proficiency"] == ""
+
+    def test_eldritch_knight_records_level_3_spellcasting(self):
+        """奥法骑士 3 级只记录施法字段、默认法术和武器联结占位。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["level"] = 3
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "choose_fighter_archetype",
+                "payload": {"archetype": "eldritch_knight"},
+                "state": {"player": player},
+            },
+        )
+        updated = result.update["player"]
+
+        assert updated["spellcasting_ability"] == "int"
+        assert updated["eldritch_knight_cantrips_known"] == 2
+        assert updated["eldritch_knight_spells_known"] == 3
+        assert updated["spell_save_dc"] == 10
+        assert updated["spell_attack_bonus"] == 2
+        assert updated["resources"]["spell_slot_lv1"] == 2
+        assert updated["resource_caps"]["spell_slot_lv1"] == 2
+        assert updated["bonded_weapons"] == []
+        assert updated["bonded_weapon_limit"] == 2
+        assert "fire_bolt" in updated["known_cantrips"]
+        assert "ray_of_frost" in updated["known_cantrips"]
+        assert "shield" in updated["known_spells"]
+        assert "magic_missile" in updated["known_spells"]
+        assert "burning_hands" in updated["known_spells"]
+
+    def test_eldritch_knight_level_4_syncs_spellcasting_table(self):
+        """奥法骑士升到 4 级后，应获得 4 个已知法术和 3 个 1 环法术位。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player.update({
+            "level": 3,
+            "xp": 2700,
+            "fighter_archetype": "eldritch_knight",
+            "class_features": [
+                "fighting_style",
+                "second_wind",
+                "action_surge",
+                "eldritch_knight_spellcasting",
+                "weapon_bond",
+            ],
+            "known_cantrips": ["fire_bolt", "ray_of_frost"],
+            "known_spells": ["shield", "magic_missile", "burning_hands"],
+            "resources": {"second_wind_uses": 1, "action_surge_uses": 1, "spell_slot_lv1": 2},
+            "resource_caps": {"second_wind_uses": 1, "action_surge_uses": 1, "spell_slot_lv1": 2},
+        })
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "level_up",
+                "state": {"player": player},
+            },
+        )
+        updated = result.update["player"]
+
+        assert updated["level"] == 4
+        assert updated["eldritch_knight_cantrips_known"] == 2
+        assert updated["eldritch_knight_spells_known"] == 4
+        assert updated["resources"]["spell_slot_lv1"] == 3
+        assert updated["resource_caps"]["spell_slot_lv1"] == 3
+        assert "thunderwave" in updated["known_spells"]
+        assert "ability_score_improvement" in updated["class_features"]
+
+    def test_eldritch_knight_level_5_keeps_level_5_spellcasting_table(self):
+        """奥法骑士 5 级仍是 2 戏法、4 已知法术、3 个 1 环法术位。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player.update({
+            "level": 4,
+            "xp": 6500,
+            "fighter_archetype": "eldritch_knight",
+            "class_features": [
+                "fighting_style",
+                "second_wind",
+                "action_surge",
+                "ability_score_improvement",
+                "eldritch_knight_spellcasting",
+                "weapon_bond",
+            ],
+            "known_cantrips": ["fire_bolt", "ray_of_frost"],
+            "known_spells": ["shield", "magic_missile", "burning_hands", "thunderwave"],
+            "resources": {"second_wind_uses": 1, "action_surge_uses": 1, "spell_slot_lv1": 3},
+            "resource_caps": {"second_wind_uses": 1, "action_surge_uses": 1, "spell_slot_lv1": 3},
+        })
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "level_up",
+                "state": {"player": player},
+            },
+        )
+        updated = result.update["player"]
+
+        assert updated["level"] == 5
+        assert updated["eldritch_knight_cantrips_known"] == 2
+        assert updated["eldritch_knight_spells_known"] == 4
+        assert updated["resources"]["spell_slot_lv1"] == 3
+        assert updated["resource_caps"]["spell_slot_lv1"] == 3
+        assert "extra_attack" in updated["class_features"]
+
+    def test_champion_crit_on_natural_19(self):
+        """勇士的精通重击应把武器暴击阈值压到 19。"""
+        from app.services.tools._helpers import roll_attack_hit
+
+        attacker = _make_player_combatant("战士")
+        attacker["class_features"] = ["improved_critical"]
+        target = _make_goblin()
+
+        with patch("app.services.tools._helpers._get_natural_d20", return_value=19):
+            roll_info = roll_attack_hit(attacker, target)
+
+        assert roll_info["hit"] is True
+        assert roll_info["crit"] is True
+
+    def test_battle_master_does_not_crit_on_natural_19(self):
+        """战斗大师不应继承勇士的 19-20 暴击。"""
+        from app.services.tools._helpers import roll_attack_hit
+
+        attacker = _make_player_combatant("战士")
+        attacker["class_features"] = ["combat_superiority", "student_of_war"]
+        target = _make_goblin()
+
+        with patch("app.services.tools._helpers._get_natural_d20", return_value=19):
+            roll_info = roll_attack_hit(attacker, target)
+
+        assert roll_info["crit"] is False
+
+
 # ── Phase 2: start_combat 玩家自动入场 ──────────────────────────
 
 
 class TestStartCombatPlayerJoin:
     """验证 start_combat 自动将已加载的玩家角色纳入战斗（玩家在 player 字段，不在 participants）"""
 
-    def _invoke_start_combat(self, state: dict, surprised_ids: list[str] | None = None):
+    def _invoke_start_combat(self, state: dict, surprised_ids: list[str] | str | None = None):
         from app.services.tool_service import start_combat
         tool_input = {"combatant_ids": ["goblin_1"], "state": state}
         if surprised_ids is not None:
@@ -283,6 +476,32 @@ class TestStartCombatPlayerJoin:
         assert "突袭劣势" in result.update["messages"][0].content
         assert "突袭单位的先攻劣势已计入下列骰式" in result.update["messages"][0].content
         assert "不要自行重排或补骰" in result.update["messages"][0].content
+
+    def test_start_combat_accepts_json_string_surprised_ids(self):
+        """真实模型偶尔把 surprised_ids 列表序列化成字符串，开战工具应归一化后继续执行。"""
+        class FakeRoll:
+            def __init__(self, total: int, text: str):
+                self.total = total
+                self.text = text
+
+            def __str__(self) -> str:
+                return self.text
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良"}
+        goblin = _make_goblin()
+        state = {"player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["温良", "goblin_1"])}
+        rolled_exprs: list[str] = []
+
+        def fake_roll(expr: str):
+            rolled_exprs.append(expr)
+            return FakeRoll(5 if expr.startswith("2d20kl1") else 14, expr)
+
+        with patch("app.services.tools.combat_tools.d20.roll", side_effect=fake_roll):
+            result = self._invoke_start_combat(state, surprised_ids='["player"]')
+
+        assert any(expr.startswith("2d20kl1") for expr in rolled_exprs)
+        assert result.update["player"]["surprised"] is True
+        assert "combat" in result.update
 
     def test_start_combat_rejects_unknown_surprised_id(self):
         """突袭目标必须能解析到参战单位，避免静默忽略拼错 ID。"""
@@ -691,6 +910,18 @@ class TestAttackActionValidation:
         msg = result.update["messages"][0].content
         assert "用尽" in msg
 
+    def test_extra_action_allows_attack_after_normal_action_is_spent(self):
+        """动作如潮提供的额外动作应允许普通动作已用尽的角色继续攻击一次。"""
+        state = self._build_state(current_actor_id="player_预设-战士", player_action_available=False)
+        state["player"]["extra_action_available"] = True
+
+        result = self._invoke_attack(state, "player_预设-战士", "goblin_1")
+
+        assert isinstance(result, Command)
+        assert result.update["player"]["action_available"] is False
+        assert result.update["player"]["extra_action_available"] is False
+        assert "攻击" in result.update["messages"][0].content
+
     def test_successful_attack_consumes_action(self):
         """攻击成功后 attacker.action_available 应为 False（使用怪物攻击以避免玩家 interrupt）"""
         state = self._build_state(current_actor_id="goblin_1")
@@ -709,6 +940,213 @@ class TestAttackActionValidation:
         assert isinstance(result, Command)
         msg_content = result.update["messages"][0].content
         assert "攻击" in msg_content
+
+    def test_trip_attack_maneuver_adds_damage_and_prone_on_failed_save(self):
+        """攻击流程中的摔绊攻击应消耗卓越骰、追加伤害，并在 STR 豁免失败时倒地。"""
+        state = self._build_state(current_actor_id="player_预设-战士")
+        player = state["player"]
+        player.update({
+            "level": 3,
+            "fighter_archetype": "battle_master",
+            "class_features": [*player.get("class_features", []), "combat_superiority", "student_of_war"],
+            "maneuvers": ["trip_attack"],
+            "superiority_die": "1d8",
+            "maneuver_save_dc": 13,
+        })
+        player.setdefault("resources", {})["superiority_dice"] = 4
+        combat_dict = state["combat"].model_dump()
+        combat_dict["participants"]["goblin_1"]["hp"] = 20
+        combat_dict["participants"]["goblin_1"]["max_hp"] = 20
+        state["combat"] = CombatState(**combat_dict)
+        real_roll = d20.roll
+
+        def fixed_roll(expr: str):
+            mapping = {
+                "1d20+5": "15",
+                "1d8+3": "5",
+                "1d8": "4",
+                "1d20-1": "7",
+            }
+            return real_roll(mapping.get(expr.replace(" ", ""), expr))
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=fixed_roll):
+            result = self._invoke_attack(
+                state,
+                "player_预设-战士",
+                "goblin_1",
+                maneuver_id="trip_attack",
+            )
+
+        updated_player = result.update["player"]
+        updated_target = result.update["combat"]["participants"]["goblin_1"]
+        content = result.update["messages"][0].content
+        assert updated_player["resources"]["superiority_dice"] == 3
+        assert updated_target["hp"] == 11
+        assert any(condition["id"] == "prone" for condition in updated_target["conditions"])
+        assert "摔绊攻击" in content
+        assert "失败，陷入倒地" in content
+
+    def test_trip_attack_maneuver_does_not_prone_on_successful_save(self):
+        """目标 STR 豁免成功时，摔绊攻击只追加伤害不倒地。"""
+        state = self._build_state(current_actor_id="player_预设-战士")
+        player = state["player"]
+        player.update({
+            "level": 3,
+            "fighter_archetype": "battle_master",
+            "class_features": [*player.get("class_features", []), "combat_superiority", "student_of_war"],
+            "maneuvers": ["trip_attack"],
+            "superiority_die": "1d8",
+            "maneuver_save_dc": 13,
+        })
+        player.setdefault("resources", {})["superiority_dice"] = 4
+        combat_dict = state["combat"].model_dump()
+        combat_dict["participants"]["goblin_1"]["hp"] = 20
+        combat_dict["participants"]["goblin_1"]["max_hp"] = 20
+        state["combat"] = CombatState(**combat_dict)
+        real_roll = d20.roll
+
+        def fixed_roll(expr: str):
+            mapping = {
+                "1d20+5": "15",
+                "1d8+3": "5",
+                "1d8": "4",
+                "1d20-1": "18",
+            }
+            return real_roll(mapping.get(expr.replace(" ", ""), expr))
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=fixed_roll):
+            result = self._invoke_attack(
+                state,
+                "player_预设-战士",
+                "goblin_1",
+                maneuver_id="trip_attack",
+            )
+
+        updated_target = result.update["combat"]["participants"]["goblin_1"]
+        content = result.update["messages"][0].content
+        assert updated_target["hp"] == 11
+        assert not any(condition["id"] == "prone" for condition in updated_target["conditions"])
+        assert "成功，未倒地" in content
+
+    def test_trip_attack_maneuver_does_not_consume_on_miss(self):
+        """攻击未命中时，声明的摔绊攻击不应消耗卓越骰。"""
+        state = self._build_state(current_actor_id="player_预设-战士")
+        player = state["player"]
+        player.update({
+            "level": 3,
+            "fighter_archetype": "battle_master",
+            "class_features": [*player.get("class_features", []), "combat_superiority", "student_of_war"],
+            "maneuvers": ["trip_attack"],
+            "superiority_die": "1d8",
+            "maneuver_save_dc": 13,
+        })
+        player.setdefault("resources", {})["superiority_dice"] = 4
+        real_roll = d20.roll
+
+        def fixed_roll(expr: str):
+            return real_roll("2") if expr.replace(" ", "") == "1d20+5" else real_roll(expr)
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=fixed_roll):
+            result = self._invoke_attack(
+                state,
+                "player_预设-战士",
+                "goblin_1",
+                maneuver_id="trip_attack",
+            )
+
+        assert result.update["player"]["resources"]["superiority_dice"] == 4
+        assert "未命中" in result.update["messages"][0].content
+
+    def test_menacing_attack_adds_damage_and_frightened_on_failed_save(self):
+        """恐吓攻击应追加卓越骰伤害，并在 WIS 豁免失败时施加恐慌。"""
+        state = self._build_state(current_actor_id="player_预设-战士")
+        player = state["player"]
+        player.update({
+            "level": 3,
+            "fighter_archetype": "battle_master",
+            "class_features": [*player.get("class_features", []), "combat_superiority", "student_of_war"],
+            "maneuvers": ["menacing_attack"],
+            "superiority_die": "1d8",
+            "maneuver_save_dc": 13,
+        })
+        player.setdefault("resources", {})["superiority_dice"] = 4
+        combat_dict = state["combat"].model_dump()
+        combat_dict["participants"]["goblin_1"]["hp"] = 20
+        combat_dict["participants"]["goblin_1"]["max_hp"] = 20
+        state["combat"] = CombatState(**combat_dict)
+        real_roll = d20.roll
+
+        def fixed_roll(expr: str):
+            mapping = {
+                "1d20+5": "15",
+                "1d8+3": "5",
+                "1d8": "4",
+                "1d20-1": "7",
+            }
+            return real_roll(mapping.get(expr.replace(" ", ""), expr))
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=fixed_roll):
+            result = self._invoke_attack(
+                state,
+                "player_预设-战士",
+                "goblin_1",
+                maneuver_id="menacing_attack",
+            )
+
+        updated_player = result.update["player"]
+        updated_target = result.update["combat"]["participants"]["goblin_1"]
+        content = result.update["messages"][0].content
+        assert updated_player["resources"]["superiority_dice"] == 3
+        assert updated_target["hp"] == 11
+        assert any(condition["id"] == "frightened" for condition in updated_target["conditions"])
+        assert "恐吓攻击" in content
+        assert "失败，陷入恐慌" in content
+
+    def test_pushing_attack_records_pending_forced_movement_on_failed_save(self):
+        """推撞攻击第一版记录待推动结果，不直接猜测空间落点。"""
+        state = self._build_state(current_actor_id="player_预设-战士")
+        player = state["player"]
+        player.update({
+            "level": 3,
+            "fighter_archetype": "battle_master",
+            "class_features": [*player.get("class_features", []), "combat_superiority", "student_of_war"],
+            "maneuvers": ["pushing_attack"],
+            "superiority_die": "1d8",
+            "maneuver_save_dc": 13,
+        })
+        player.setdefault("resources", {})["superiority_dice"] = 4
+        combat_dict = state["combat"].model_dump()
+        combat_dict["participants"]["goblin_1"]["hp"] = 20
+        combat_dict["participants"]["goblin_1"]["max_hp"] = 20
+        state["combat"] = CombatState(**combat_dict)
+        real_roll = d20.roll
+
+        def fixed_roll(expr: str):
+            mapping = {
+                "1d20+5": "15",
+                "1d8+3": "5",
+                "1d8": "4",
+                "1d20-1": "7",
+            }
+            return real_roll(mapping.get(expr.replace(" ", ""), expr))
+
+        with patch("app.services.tools._helpers.d20.roll", side_effect=fixed_roll):
+            result = self._invoke_attack(
+                state,
+                "player_预设-战士",
+                "goblin_1",
+                maneuver_id="pushing_attack",
+            )
+
+        updated_target = result.update["combat"]["participants"]["goblin_1"]
+        assert updated_target["hp"] == 11
+        assert updated_target["forced_movement_pending"] == {
+            "type": "push",
+            "source_id": state["player"]["id"],
+            "distance_feet": 15,
+            "direction": "away_from_source",
+        }
+        assert "推撞攻击" in result.update["messages"][0].content
 
     def test_monster_attack_returns_pending_reaction_snapshot_when_reaction_available(self):
         """怪物攻击命中玩家且存在可用反应时，只写入 pending_reaction，不提前结算伤害。"""
@@ -1281,6 +1719,121 @@ class TestModifyCharacterStateResources:
         assert "player" not in result.update
         assert "本次未修改 XP" in result.update["messages"][0].content
 
+    def test_grant_xp_action_can_target_scene_ally(self):
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        state = {"scene_units": {ally["id"]: ally}}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": ally["id"],
+                "action": "grant_xp",
+                "payload": {"amount": 300},
+                "reason": "ally reward",
+                "state": state,
+            },
+        )
+
+        updated = result.update["scene_units"][ally["id"]]
+        assert updated["xp"] == 300
+        assert "player" not in result.update
+        assert 'action="level_up"' in result.update["messages"][0].content
+
+    def test_grant_xp_action_accepts_json_string_payload_for_scene_ally(self):
+        """真实模型偶尔会把 payload 对象序列化成字符串，工具边界应兼容这种调用形态。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        state = {"scene_units": {ally["id"]: ally}}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": ally["id"],
+                "action": "grant_xp",
+                "payload": '{"amount": 900, "reason": "同伴奖励"}',
+                "state": state,
+            },
+        )
+
+        updated = result.update["scene_units"][ally["id"]]
+        assert updated["xp"] == 900
+        assert "player" not in result.update
+
+    def test_update_action_accepts_json_string_changes(self):
+        """changes 也在同一工具边界归一化，避免 update 动作因字符串对象失败。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "update",
+                "changes": '{"hp_delta": -3}',
+                "reason": "陷阱伤害",
+                "state": state,
+            },
+        )
+
+        assert result.update["player"]["hp"] == player["hp"] - 3
+
+    def test_grant_xp_action_can_target_combat_ally(self):
+        """战斗中的友方获得经验时，应写回 combat.participants 而不是玩家状态。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        goblin = _make_goblin()
+        state = {
+            "combat": _make_combat_state({"fighter_companion": ally, "goblin_1": goblin}, current_actor_id="fighter_companion"),
+        }
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "fighter_companion",
+                "action": "grant_xp",
+                "payload": {"amount": 300},
+                "reason": "ally reward",
+                "state": state,
+            },
+        )
+
+        updated = result.update["combat"]["participants"]["fighter_companion"]
+        assert updated["xp"] == 300
+        assert result.update["combat"]["participants"]["goblin_1"]["hp"] == goblin["hp"]
+        assert "player" not in result.update
+
+    def test_grant_xp_action_rejects_non_character_enemy(self):
+        """普通怪物没有职业成长字段，不能通过经验工具升级。"""
+        from app.services.tool_service import modify_character_state
+
+        goblin = _make_goblin()
+        state = {"scene_units": {"goblin_1": goblin}}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "goblin_1",
+                "action": "grant_xp",
+                "payload": {"amount": 300},
+                "reason": "invalid reward",
+                "state": state,
+            },
+        )
+
+        assert "scene_units" not in result.update
+        assert "不是可升级的玩家或友方角色" in result.update["messages"][0].content
+
     def test_level_up_and_arcane_tradition_actions_use_unified_state_tool(self):
         from app.services.tool_service import modify_character_state
 
@@ -1312,6 +1865,194 @@ class TestModifyCharacterStateResources:
         assert tradition_result.update["player"]["arcane_tradition"] == "abjuration"
         assert "arcane_ward" in tradition_result.update["player"]["class_features"]
         assert any(c.get("id") == "arcane_ward" for c in tradition_result.update["player"]["conditions"])
+
+    def test_level_up_action_can_target_scene_ally(self):
+        """友方角色升级应按 target_id 写回 scene_units，不污染玩家状态。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+
+        ally = get_ally_profile("fighter_companion")
+        ally["xp"] = 300
+        state = {"scene_units": {"fighter_companion": ally}}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "fighter_companion",
+                "action": "level_up",
+                "state": state,
+            },
+        )
+
+        updated = result.update["scene_units"]["fighter_companion"]
+        assert updated["level"] == 2
+        assert "action_surge" in updated["class_features"]
+        assert updated["action_available"] is True
+        assert updated["attacks"]
+        assert "player" not in result.update
+
+    def test_level_up_refreshes_combat_fields_without_resetting_action_economy(self):
+        """战斗中成长会刷新攻击等派生字段，但不能返还本回合已消耗的动作资源。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        ally["xp"] = 300
+        ally["action_available"] = False
+        ally["bonus_action_available"] = False
+        ally["reaction_available"] = False
+        ally["movement_left"] = 5
+        state = {
+            "combat": _make_combat_state({"fighter_companion": ally}, current_actor_id="fighter_companion"),
+        }
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "fighter_companion",
+                "action": "level_up",
+                "state": state,
+            },
+        )
+
+        updated = result.update["combat"]["participants"]["fighter_companion"]
+        assert updated["level"] == 2
+        assert updated["attacks"]
+        assert updated["action_available"] is False
+        assert updated["bonus_action_available"] is False
+        assert updated["reaction_available"] is False
+        assert updated["movement_left"] == 5
+
+    def test_choose_fighter_archetype_can_target_combat_ally(self):
+        """战斗中的战士友方达到 3 级后，可以选择武术范型并写回 combat。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("sildar"), side="ally")
+        state = {
+            "combat": _make_combat_state({"sildar": ally}, current_actor_id="sildar"),
+        }
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "sildar",
+                "action": "choose_fighter_archetype",
+                "payload": {"archetype": "battle_master"},
+                "state": state,
+            },
+        )
+
+        updated = result.update["combat"]["participants"]["sildar"]
+        assert updated["fighter_archetype"] == "battle_master"
+        assert updated["resources"]["superiority_dice"] == 4
+        assert updated["maneuvers_known_count"] == 3
+        assert updated["attacks"]
+        assert "player" not in result.update
+
+    def test_choose_arcane_tradition_can_target_scene_ally(self):
+        """法师友方可以通过 target_id 选择奥术传统并写回 scene_units。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+
+        ally = get_ally_profile("apprentice_wizard")
+        state = {"scene_units": {"apprentice_wizard": ally}}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "apprentice_wizard",
+                "action": "choose_arcane_tradition",
+                "payload": {"tradition": "evocation"},
+                "state": state,
+            },
+        )
+
+        updated = result.update["scene_units"]["apprentice_wizard"]
+        assert updated["arcane_tradition"] == "evocation"
+        assert "sculpt_spells" in updated["class_features"]
+        assert "player" not in result.update
+
+    def test_choose_feat_action_records_tough_on_player(self):
+        """专长第一版通过注册表写入字段，并复用成长回写刷新派生状态。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["level"] = 4
+        old_max_hp = player["max_hp"]
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "choose_feat",
+                "payload": {"feat": "tough"},
+                "state": state,
+            },
+        )
+
+        updated = result.update["player"]
+        assert "tough" in updated["feats"]
+        assert "feat_tough" in updated["class_features"]
+        assert updated["feat_tough_hp_bonus"] == 8
+        assert updated["max_hp"] == old_max_hp + 8
+        assert updated["attacks"]
+
+    def test_choose_feat_action_can_target_combat_ally_without_resetting_action_economy(self):
+        """战斗中友方可选择专长，但不能因此返还已消耗的动作经济。"""
+        from app.allies.profiles import get_ally_profile
+        from app.services.tool_service import modify_character_state
+        from app.services.tools._helpers import prepare_character_for_combat
+
+        ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
+        ally["action_available"] = False
+        ally["bonus_action_available"] = False
+        ally["reaction_available"] = False
+        ally["movement_left"] = 5
+        state = {
+            "combat": _make_combat_state({"fighter_companion": ally}, current_actor_id="fighter_companion"),
+        }
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "target_id": "fighter_companion",
+                "action": "choose_feat",
+                "payload": {"feat": "sharpshooter"},
+                "state": state,
+            },
+        )
+
+        updated = result.update["combat"]["participants"]["fighter_companion"]
+        assert "sharpshooter" in updated["feats"]
+        assert "feat_sharpshooter" in updated["class_features"]
+        assert updated["sharpshooter_enabled"] is False
+        assert updated["action_available"] is False
+        assert updated["bonus_action_available"] is False
+        assert updated["reaction_available"] is False
+        assert updated["movement_left"] == 5
+
+    def test_choose_feat_action_rejects_duplicate_feat(self):
+        """重复选择同一专长应直接拒绝，避免重复叠加字段效果。"""
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+        player["feats"] = ["tough"]
+        state = {"player": player}
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "choose_feat",
+                "payload": {"feat": "tough"},
+                "state": state,
+            },
+        )
+
+        assert "player" not in result.update
+        assert "已选择专长" in result.update["messages"][0].content
 
 
 # ── Phase 8: Mage Armor 法术回归测试 ───────────────────────────
@@ -1358,6 +2099,36 @@ class TestMageArmorSpell:
         assert updated_player["ac"] == 15
         assert updated_player["resources"]["spell_slot_lv1"] == 1
         assert any(c.get("id") == "mage_armor" for c in updated_player["conditions"])
+
+    def test_extra_action_allows_action_spell_after_normal_action_is_spent(self):
+        """动作如潮的额外动作应能支付施法时间为 action 的法术。"""
+        from app.services.tool_service import cast_spell
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        prepare_player_for_combat(player)
+        player["action_available"] = False
+        player["extra_action_available"] = True
+        goblin = _make_goblin()
+        combat = _make_combat_state(
+            {player["id"]: player, "goblin_1": goblin},
+            current_actor_id=player["id"],
+            player_dict=player,
+        )
+        state = {"player": player, "combat": combat}
+
+        result = _invoke_tool(
+            cast_spell,
+            tool_input={
+                "spell_id": "fire_bolt",
+                "target_ids": ["goblin_1"],
+                "state": state,
+            },
+        )
+
+        updated_player = result.update["player"]
+        assert updated_player["action_available"] is False
+        assert updated_player["extra_action_available"] is False
+        assert "本回合的动作已用尽" not in result.update["messages"][0].content
 
 
 class TestSpellRangeValidation:
@@ -2324,4 +3095,3 @@ class TestDamageTypeAdjustments:
 
         assert target["hp"] == 26
         assert any("免疫" in line for line in result["lines"])
-

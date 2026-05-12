@@ -72,6 +72,25 @@ def test_create_map_place_units_and_measure_distance():
     assert "5.0 尺" in measured.update["messages"][0].content
 
 
+def test_manage_space_accepts_json_string_payload_for_create_map():
+    """真实模型偶尔把 payload 对象序列化成字符串，空间工具入口应归一化后继续执行。"""
+    result = _invoke_tool(
+        manage_space,
+        tool_input={
+            "action": "create_map",
+            "payload": '{"name": "失落矿坑入口", "width": 60, "height": 40}',
+            "state": {},
+        },
+    )
+
+    assert isinstance(result, Command)
+    space = result.update["space"]
+    active_map = space["maps"][space["active_map_id"]]
+    assert active_map["name"] == "失落矿坑入口"
+    assert active_map["width"] == 60
+    assert active_map["height"] == 40
+
+
 def test_place_unit_resolves_player_alias_without_creating_player_node():
     space = _invoke_tool(
         create_plane_map,
