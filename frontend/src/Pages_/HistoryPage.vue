@@ -11,7 +11,7 @@
         <!-- 紧凑型搜索栏 -->
         <div class="search-section">
           <div class="search-box">
-            <Search :size="16" class="search-icon" />
+            <Search v-if="!isPristineEmptyState" :size="16" class="search-icon" />
             <input
               v-model="searchKeyword"
               type="text"
@@ -66,12 +66,10 @@
 
       <!-- 空状态 -->
       <div v-else class="empty-state">
-        <div class="empty-icon">📭</div>
         <p>{{ searchKeyword ? '未找到匹配的冒险记录' : '暂无历史对话' }}</p>
-        <p class="empty-hint" v-if="!searchKeyword">创建一个新会话，开启新的征程吧！</p>
-        <button class="primary-btn" @click="startSession">
-          <MessageCircle :size="18" />
-          新建会话
+        <p class="empty-hint" v-if="!searchKeyword">让故事从这里开始。</p>
+        <button v-if="!searchKeyword" class="story-entry-btn" @click="startSession">
+          编写你的故事
         </button>
       </div>
     </div>
@@ -107,6 +105,11 @@ const filteredSessions = computed(() => {
 
   // 按最后消息时间倒序排列
   return result.sort((a, b) => b.lastMessageAt - a.lastMessageAt)
+})
+
+// 仅在完全没有历史记录且未搜索时，启用初始空白页样式
+const isPristineEmptyState = computed(() => {
+  return !isLoading.value && sessions.value.length === 0 && !searchKeyword.value.trim()
 })
 
 // 搜索防抖
@@ -545,41 +548,97 @@ const startSession = async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  min-height: 300px;
-  color: #a1a1aa;
+  min-height: 340px;
+  color: #a8a0a0;
   text-align: center;
-}
-
-.empty-icon {
-  font-size: 4rem;
-  margin-bottom: 16px;
-  opacity: 0.4;
+  gap: 10px;
+  padding: 32px 24px 56px;
 }
 
 .empty-hint {
-  margin: 8px 0 24px;
-  font-size: 0.9rem;
-  color: #7a7a82;
+  margin: 0 0 24px;
+  font-size: 0.95rem;
+  color: rgba(180, 170, 162, 0.8);
+  letter-spacing: 0.08em;
 }
 
-.primary-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(66, 184, 131, 0.12);
-  border: 0.5px solid rgba(66, 184, 131, 0.3);
-  color: #42b883;
-  padding: 10px 26px;
-  border-radius: 40px;
+.empty-state > p:first-child {
+  margin: 0;
   font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
+  color: rgba(229, 213, 168, 0.8);
+  letter-spacing: 0.22em;
 }
 
-.primary-btn:hover {
-  background: rgba(66, 184, 131, 0.25);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+.story-entry-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 8px;
+  font-family: 'Cinzel', 'UnifrakturMaguntia', serif;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.18em;
+  background-image: linear-gradient(135deg, rgba(230, 213, 168, 0.84) 0%, rgba(184, 138, 68, 0.58) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow:
+    0 2px 12px rgba(0, 0, 0, 0.24),
+    0 0 26px rgba(184, 138, 68, 0.12);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.25s ease, transform 0.25s ease, text-shadow 0.25s ease;
+  animation: story-flicker 4.8s ease-in-out infinite;
+}
+
+.story-entry-btn:hover {
+  opacity: 0.82;
+  transform: translateY(-1px);
+  text-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.28),
+    0 0 32px rgba(230, 213, 168, 0.16);
+}
+
+.story-entry-btn:focus-visible {
+  outline: none;
+  opacity: 0.82;
+}
+
+@keyframes story-flicker {
+  0% {
+    opacity: 0.28;
+    text-shadow:
+      0 2px 10px rgba(0, 0, 0, 0.16),
+      0 0 14px rgba(184, 138, 68, 0.05);
+  }
+
+  22% {
+    opacity: 0.78;
+    text-shadow:
+      0 4px 16px rgba(0, 0, 0, 0.24),
+      0 0 30px rgba(230, 213, 168, 0.18);
+  }
+
+  50% {
+    opacity: 0.34;
+    text-shadow:
+      0 2px 12px rgba(0, 0, 0, 0.18),
+      0 0 16px rgba(184, 138, 68, 0.06);
+  }
+
+  78% {
+    opacity: 0.84;
+    text-shadow:
+      0 4px 18px rgba(0, 0, 0, 0.28),
+      0 0 34px rgba(230, 213, 168, 0.2);
+  }
+
+  100% {
+    opacity: 0.28;
+    text-shadow:
+      0 2px 10px rgba(0, 0, 0, 0.16),
+      0 0 14px rgba(184, 138, 68, 0.05);
+  }
 }
 </style>

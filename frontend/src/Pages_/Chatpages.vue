@@ -2,7 +2,11 @@
 <template>
   <div class="chat-page" ref="containerRef">
     <!-- 左侧聊天区 -->
-    <div class="chat-main" :class="{ hidden: rightWidth === 100 }">
+    <div
+      class="chat-main"
+      :class="{ hidden: rightWidth === 100 }"
+      :style="{ '--chat-font-scale': String(appSettings.fontScale) }"
+    >
       <div class="chat-container">
         <header class="chat-header">
           <h1>TRPG 助手</h1>
@@ -84,8 +88,8 @@
 
     <!-- 右侧功能区 -->
     <div class="function-area" :style="{ width: rightWidth + '%' }">
-      <CharacterPanel
-        ref="characterPanelRef"
+      <CharacterSidebar
+        ref="characterSidebarRef"
         :external-player="playerState"
         :combat="combatState"
         :space="spaceState"
@@ -115,13 +119,14 @@ import { Plus, Trash2 } from 'lucide-vue-next'
 import ChatMessage from '../components/Chat/ChatMessage.vue'
 import ChatInput from '../components/Chat/ChatInput.vue'
 import ActionPanel from '../components/Chat/ActionPanel.vue'
-import CharacterPanel from '../components/Chat/CharacterPanel.vue'
+import CharacterSidebar from '../components/Chat/SideCharacterPanel/CharacterSidebar.vue'
 import Dice3D from '../components/Dice3D/Dice3D.vue'
 import { useChatSession } from '../composables/useChatSession'
 import { useChatMessages } from '../composables/useChatMessages'
 import { useChatSender } from '../composables/useChatSender'
 import { chatService } from '../Services_/chatService'
 import { createSession, deleteSession as deleteSessionApi } from '../Services_/sessionService'
+import { APP_SETTINGS_UPDATED_EVENT, loadAppSettings, type AppSettings } from '../Services_/SettingsPageService'
 
 import '../styles_/Chatpages.css'
 
@@ -129,11 +134,12 @@ import '../styles_/Chatpages.css'
 const containerRef = ref<HTMLElement | null>(null)
 const messageListRef = ref<HTMLElement | null>(null)
 const dice3dRef = ref<InstanceType<typeof Dice3D> | null>(null)
-const characterPanelRef = ref<InstanceType<typeof CharacterPanel> | null>(null)
+const characterSidebarRef = ref<InstanceType<typeof CharacterSidebar> | null>(null)
 const showDiceAnimation = ref(false)
 const rightWidth = ref(25)
 const showToggleBtn = ref(false)
 const isDragging = ref(false)
+const appSettings = ref(loadAppSettings())
 
 // 聊天逻辑
 const { sessionId, updateSessionId, clearSessionId } = useChatSession()
@@ -165,18 +171,19 @@ const {
   toggleDebugMode,
   startLoading,
   stopLoading,
-} = useChatMessages()
+} = useChatMessages(appSettings.value.defaultDebugMode)
 
 // 通过 provide 向子组件注入 debugMode
 provide('debugMode', debugMode)
+provide('skipOutputAnimation', computed(() => appSettings.value.skipOutputAnimation))
 
-// 监听战斗状态变化，自动切换 CharacterPanel 视图
+// 战斗开始时优先切到血量概览，结束后回到角色页
 watch(combatState, (hasCombat) => {
-  if (characterPanelRef.value) {
+  if (characterSidebarRef.value) {
     if (hasCombat) {
-      characterPanelRef.value.setViewMode('hp')
+      characterSidebarRef.value.setViewMode('hp')
     } else {
-      characterPanelRef.value.setViewMode('character')
+      characterSidebarRef.value.setViewMode('character')
     }
   }
 }, { immediate: true })
@@ -219,7 +226,7 @@ const showNextTurnBtn = computed(() => {
   return currentActorId.startsWith('player_')
 })
 
-const autoScrollDisabled = ref(false)
+const autoScrollDisabled = ref(!appSettings.value.autoScrollChat)
 
 const isNearBottom = (): boolean => {
   const el = messageListRef.value
@@ -229,11 +236,16 @@ const isNearBottom = (): boolean => {
 }
 
 const handleScroll = () => {
+  if (!appSettings.value.autoScrollChat) {
+    autoScrollDisabled.value = true
+    return
+  }
   autoScrollDisabled.value = !isNearBottom()
 }
 
 const scrollToBottom = () => {
   nextTick(() => {
+    if (!appSettings.value.autoScrollChat) return
     if (!autoScrollDisabled.value && messageListRef.value) {
       messageListRef.value.scrollTop = messageListRef.value.scrollHeight
     }
@@ -295,6 +307,8 @@ const deleteCurrentSession = async () => {
 
 onMounted(async () => {
   document.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('storage', handleSettingsStorage)
+  window.addEventListener(APP_SETTINGS_UPDATED_EVENT, handleSettingsUpdated as EventListener)
 
   const pendingSessionId = sessionStorage.getItem('pending_session_id')
   if (pendingSessionId) {
@@ -307,7 +321,27 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('storage', handleSettingsStorage)
+  window.removeEventListener(APP_SETTINGS_UPDATED_EVENT, handleSettingsUpdated as EventListener)
 })
+
+const handleSettingsStorage = (event: StorageEvent) => {
+  if (event.key !== 'trpg-app-settings') return
+  applySettings(loadAppSettings())
+}
+
+const handleSettingsUpdated = (event: CustomEvent<AppSettings>) => {
+  applySettings(event.detail)
+}
+
+const applySettings = (settings: AppSettings) => {
+  appSettings.value = settings
+  debugMode.value = settings.defaultDebugMode
+  autoScrollDisabled.value = !settings.autoScrollChat
+  if (settings.autoScrollChat) {
+    scrollToBottom()
+  }
+}
 
 const togglePanel = () => {
   rightWidth.value = rightWidth.value === 0 ? 25 : 0

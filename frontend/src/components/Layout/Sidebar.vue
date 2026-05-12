@@ -31,12 +31,8 @@
 import { 
   Home, 
   MessageCircle, 
-  Hash, 
-  Star,
   BookOpen,
-  Sword,
-  Trophy,
-  BarChart3,
+  ScrollText,
   Settings,
   User,
   type LucideIcon
@@ -62,14 +58,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'welcome', label: '欢迎', icon: Home },
-  { id: 'chat', label: '聊天助手', icon: MessageCircle },
-  { id: 'page1', label: '1', icon: Hash },
-  { id: 'page2', label: '2', icon: Star },
-  { id: 'page3', label: '历史', icon: BookOpen },
-  { id: 'page4', label: '4', icon: Sword },
-  { id: 'page5', label: '5', icon: Trophy },
-  { id: 'page6', label: '规则', icon: BookOpen },
-  { id: 'page7', label: '设置', icon: Settings },
+  { id: 'chat', label: '聊天', icon: MessageCircle },
+  { id: 'history', label: '历史', icon: ScrollText },
+  { id: 'rules', label: '规则', icon: BookOpen },
+  { id: 'settings', label: '设置', icon: Settings },
   { id: 'profile', label: '用户', icon: User },
 ]
 </script>
