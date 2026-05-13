@@ -601,6 +601,9 @@ def manage_space(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """平面空间管理技能。用于地图、单位落点、移动、测距和范围查询。
+    剧情进入新的可操作地点（房间、道路、洞穴、营地、建筑、遭遇区域）时，应先确认当前地图是否匹配；
+    若没有地图或当前地图属于旧场景，先 create_map 或 switch_map，再放置玩家、友方、NPC 或怪物。
+    战斗开始前必须有当前地图，并且所有参战单位都已放置到当前地图。
     如不确定 action 或 payload 写法，先用 action="help" 查看完整技能说明。
     参数示例：
     - 创建地图：action="create_map", payload={"name": "地精伏击路段", "width": 150, "height": 120}

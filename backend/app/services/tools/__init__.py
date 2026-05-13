@@ -21,16 +21,17 @@ from app.services.tools.combat_tools import (
     attack_action,
     clear_dead_units,
     end_combat,
-    help_action,
     manage_scene_units,
     next_turn,
     spawn_ally,
     spawn_monsters,
     start_combat,
 )
+from app.services.tools.item_tools import buy_item, use_item
 from app.services.tools.spell_tools import cast_spell
 from app.services.tools.condition_tools import apply_condition, remove_condition
 from app.services.tools.rag_tools import consult_rules_handbook
+from app.services.tools.rest_tools import take_rest
 from app.services.tools.skill_tools import load_skill
 from app.services.tools.space_tools import (
     create_plane_map,
@@ -44,7 +45,6 @@ from app.services.tools.space_tools import (
 )
 from app.services.tools.monster_action_tools import use_monster_action
 from app.services.tools.class_action_tools import use_class_action
-from app.services.tools.class_feature_tools import use_class_feature
 from app.services.tools.adventure_tools import (
     advance_adventure,
     claim_adventure_reward,
@@ -86,11 +86,13 @@ _NARRATIVE_TOOLS: tuple[BaseTool, ...] = (
     modify_character_state,
     manage_scene_units,
     start_combat,
-    end_combat,
     cast_spell,
+    use_item,
+    buy_item,
     use_class_action,
     inspect_unit,
     consult_rules_handbook,
+    take_rest,
     manage_space,
     claim_adventure_reward,
 )
@@ -99,9 +101,8 @@ _COMBAT_TOOLS: tuple[BaseTool, ...] = (
     request_dice_roll,
     modify_character_state,
     use_class_action,
-    use_class_feature,
+    use_item,
     attack_action,
-    help_action,
     manage_scene_units,
     use_monster_action,
     next_turn,
@@ -110,7 +111,6 @@ _COMBAT_TOOLS: tuple[BaseTool, ...] = (
     inspect_unit,
     consult_rules_handbook,
     manage_space,
-    remove_unit,
 )
 
 _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
@@ -133,8 +133,8 @@ _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
     level_up,
     choose_arcane_tradition,
     choose_fighter_archetype,
+    buy_item,
     use_class_action,
-    use_class_feature,
     create_plane_map,
     switch_plane_map,
     place_unit,

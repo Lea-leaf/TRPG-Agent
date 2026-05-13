@@ -1,6 +1,6 @@
 // frontend/src/composables/useChatMessages.ts
 import { ref } from 'vue'
-import type { ChatMessage, PendingAction, HpChange } from '../Services_/chatService'
+import type { ChatMessage, PendingAction, HpChange, DiceRollEvent } from '../Services_/chatService'
 
 const createMessage = (
   role: ChatMessage['role'],
@@ -111,6 +111,15 @@ export function useChatMessages(initialDebugMode: boolean = false) {
     currentStreamingMessageId = null
   }
 
+  const addDiceRollMessage = (roll: DiceRollEvent) => {
+    stopLoading()
+    messages.value.push(createMessage('assistant', '', {
+      type: 'dice_roll',
+      metadata: { dice_roll: roll },
+    }))
+    currentStreamingMessageId = null
+  }
+
   const addConfirmedMessage = (reason?: string) => {
     messages.value.push(createMessage('user', `[掷骰确认: ${reason || '无'}]`))
     currentStreamingMessageId = null
@@ -206,6 +215,7 @@ export function useChatMessages(initialDebugMode: boolean = false) {
     addAssistantMessage,
     addCombatMessage,
     addToolMessage,
+    addDiceRollMessage,
     addConfirmedMessage,
     setPendingAction,
     setError,

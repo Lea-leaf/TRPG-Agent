@@ -17,6 +17,18 @@ export interface WeaponData {
   properties?: string[]
 }
 
+export interface InventoryItemData {
+  id: string
+  name?: string
+  name_en?: string
+  type: 'item' | 'treasure' | 'potion' | string
+  quantity?: number
+  description?: string
+  price_gp?: number
+  source_reward_id?: string
+  source_node_id?: string
+}
+
 export interface PlayerState {
   // 基础信息
   name: string
@@ -40,6 +52,8 @@ export interface PlayerState {
 
   // 战斗相关
   weapons: WeaponData[]
+  coins?: Record<string, number>
+  inventory?: InventoryItemData[]
 
   // 法术相关
   known_spells: string[]              // 已知法术（1环及以上）

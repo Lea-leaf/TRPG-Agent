@@ -9,6 +9,7 @@ ASSISTANT_NODE = NARRATIVE_ASSISTANT_NODE
 COMBAT_ASSISTANT_NODE = "combat_assistant"
 TOOL_NODE = "tool"
 COMBAT_RESOLUTION_NODE = "combat_resolution"
+DEATH_SAVE_PAUSE_NODE = "death_save_pause"
 SUMMARIZE_NODE = "summarize"
 REACTION_RESOLUTION_NODE = "resolve_reaction"
 
@@ -17,3 +18,4 @@ COMBAT_AGENT_MODE = "combat"
 
 STATE_MESSAGES_KEY = "messages"
 STATE_OUTPUT_KEY = "output"
+STATE_DEATH_SAVE_PAUSE_TURN_KEY = "death_save_pause_turn_id"

@@ -12,6 +12,18 @@ from app.adventures.store import get_node_generation_reference
 
 AdventureTransitionKind = Literal["advance", "switch", "revisit"]
 AUTOMATIC_ENTRY_EVENT_PREFIXES = ("enter_", "arrive_", "arrived_")
+_LEGACY_NODE_ID_ALIASES: dict[str, str] = {
+    "lost_mine_start": "adventure_hook_meet_me_in_phandalin",
+    "phandalin_arrival": "phandalin",
+    "cragmaw_hideout": "cragmaw_hideout_entrance",
+    "redbrand_ruffians": "sleeping_giant_redbrand_ruffians",
+    "redbrand_hideout": "tresendar_manor_approach",
+    "redbrand_hideout_entrance": "tresendar_manor_approach",
+    "spiders_web": "spider_web_overview",
+    "spider_web": "spider_web_overview",
+    "cragmaw_castle": "cragmaw_castle_search",
+    "wave_echo_cave": "wave_echo_overview",
+}
 
 
 def normalize_adventure_state(value: Any) -> dict[str, Any]:
@@ -24,8 +36,8 @@ def normalize_adventure_state(value: Any) -> dict[str, Any]:
         adventure = AdventureState.model_validate(value).model_dump()
 
     adventure["module_id"] = str(adventure.get("module_id") or AdventureState().module_id)
-    adventure["active_node_id"] = str(adventure.get("active_node_id") or AdventureState().active_node_id)
-    adventure["unlocked_node_ids"] = _dedupe_strings(adventure.get("unlocked_node_ids", []))
+    adventure["active_node_id"] = _canonical_node_id(str(adventure.get("active_node_id") or AdventureState().active_node_id))
+    adventure["unlocked_node_ids"] = _dedupe_node_ids(adventure.get("unlocked_node_ids", []))
     adventure["completed_node_ids"] = _dedupe_strings(adventure.get("completed_node_ids", []))
     adventure["known_clue_ids"] = _dedupe_strings(adventure.get("known_clue_ids", []))
     adventure["completed_event_ids"] = _dedupe_strings(adventure.get("completed_event_ids", []))
@@ -161,8 +173,17 @@ def _dedupe_strings(values: list[Any]) -> list[str]:
     return deduped
 
 
+def _canonical_node_id(value: str) -> str:
+    """旧节点文件删除后，历史状态里的旧 ID 在边界处统一收敛。"""
+    return _LEGACY_NODE_ID_ALIASES.get(value, value)
+
+
+def _dedupe_node_ids(values: list[Any]) -> list[str]:
+    return _dedupe_strings([_canonical_node_id(str(value).strip()) for value in values or []])
+
+
 def _normalize_breadcrumbs(values: list[Any], active_node_id: str) -> list[str]:
-    breadcrumbs = _string_list(values)
+    breadcrumbs = [_canonical_node_id(node_id) for node_id in _string_list(values)]
     if not breadcrumbs:
         return [active_node_id]
     if breadcrumbs[-1] != active_node_id:
@@ -171,7 +192,7 @@ def _normalize_breadcrumbs(values: list[Any], active_node_id: str) -> list[str]:
 
 
 def _normalize_deferred(values: list[Any], active_node_id: str) -> list[str]:
-    deferred = [node_id for node_id in _dedupe_strings(values) if node_id != active_node_id]
+    deferred = [node_id for node_id in _dedupe_node_ids(values) if node_id != active_node_id]
     return deferred
 
 
@@ -182,8 +203,8 @@ def _normalize_transition_log(values: list[Any]) -> list[dict[str, Any]]:
             continue
         entry = {
             "timestamp": item.get("timestamp", 0.0),
-            "from_node_id": str(item.get("from_node_id", "")),
-            "to_node_id": str(item.get("to_node_id", "")),
+            "from_node_id": _canonical_node_id(str(item.get("from_node_id", ""))),
+            "to_node_id": _canonical_node_id(str(item.get("to_node_id", ""))),
             "kind": str(item.get("kind", "")),
             "reason": str(item.get("reason", "")),
         }

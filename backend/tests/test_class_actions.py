@@ -441,3 +441,55 @@ def test_rally_rejects_when_not_selected():
     assert "尚未选择鼓舞" in result.update["messages"][0].content
     assert result.update["player"]["resources"]["superiority_dice"] == 4
     assert result.update["combat"]["participants"]["ally_1"]["temp_hp"] == 0
+
+
+def test_arcane_recovery_lists_and_restores_spell_slot():
+    """奥术回想作为主动职业动作暴露，并按恢复总环级结算法术位。"""
+    wizard = {
+        "id": "wizard_1",
+        "name": "Wizard",
+        "role_class": "法师",
+        "level": 2,
+        "class_features": ["arcane_recovery"],
+        "resources": {"spell_slot_lv1": 1, "arcane_recovery_uses": 1},
+        "resource_caps": {"spell_slot_lv1": 3, "arcane_recovery_uses": 1},
+    }
+
+    listed = use_class_action.func(action_id="", state={"player": wizard}, tool_call_id="call-list")
+    assert "arcane_recovery" in listed.update["messages"][0].content
+
+    result = use_class_action.func(
+        action_id="arcane_recovery",
+        payload={"restore_slots": {"spell_slot_lv1": 1}},
+        state={"player": wizard},
+        tool_call_id="call-use",
+    )
+
+    updated = result.update["player"]
+    assert updated["resources"]["spell_slot_lv1"] == 2
+    assert updated["resources"]["arcane_recovery_uses"] == 0
+    assert "奥术回想" in result.update["messages"][0].content
+
+
+def test_arcane_recovery_rejects_over_budget_request():
+    """奥术回想不能恢复超过法师等级一半向上取整的总环级。"""
+    wizard = {
+        "id": "wizard_1",
+        "name": "Wizard",
+        "role_class": "法师",
+        "level": 3,
+        "class_features": ["arcane_recovery"],
+        "resources": {"spell_slot_lv1": 0, "spell_slot_lv2": 0, "arcane_recovery_uses": 1},
+        "resource_caps": {"spell_slot_lv1": 4, "spell_slot_lv2": 2, "arcane_recovery_uses": 1},
+    }
+
+    result = use_class_action.func(
+        action_id="arcane_recovery",
+        payload={"restore_slots": {"spell_slot_lv2": 2}},
+        state={"player": wizard},
+        tool_call_id="call-use",
+    )
+
+    assert "最多为 2" in result.update["messages"][0].content
+    assert result.update["player"]["resources"]["spell_slot_lv2"] == 0
+    assert result.update["player"]["resources"]["arcane_recovery_uses"] == 1

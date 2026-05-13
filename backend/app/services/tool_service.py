@@ -14,13 +14,13 @@ from app.services.tools.combat_tools import (  # noqa: F401
     attack_action,
     clear_dead_units,
     end_combat,
-    help_action,
     manage_scene_units,
     next_turn,
     spawn_ally,
     spawn_monsters,
     start_combat,
 )
+from app.services.tools.item_tools import buy_item, use_item  # noqa: F401
 from app.services.tools.character_tools import (  # noqa: F401
     choose_arcane_tradition,
     choose_fighter_archetype,
@@ -31,12 +31,12 @@ from app.services.tools.character_tools import (  # noqa: F401
     modify_character_state,
 )
 from app.services.tools.class_action_tools import use_class_action  # noqa: F401
-from app.services.tools.class_feature_tools import use_class_feature  # noqa: F401
 from app.services.tools.monster_action_tools import use_monster_action  # noqa: F401
 from app.services.tools.dice_tools import request_dice_roll  # noqa: F401
 from app.services.tools.spell_tools import cast_spell  # noqa: F401
 from app.services.tools.condition_tools import apply_condition, remove_condition  # noqa: F401
 from app.services.tools.rag_tools import consult_rules_handbook  # noqa: F401
+from app.services.tools.rest_tools import take_rest  # noqa: F401
 from app.services.tools.skill_tools import load_skill  # noqa: F401
 from app.services.tools.space_tools import (  # noqa: F401
     create_plane_map,

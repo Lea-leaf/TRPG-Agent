@@ -7,6 +7,7 @@ from app.graph.state import (
     AbilityBlock, ModifierBlock, CombatantState,
 )
 from app.calculation.abilities import ability_to_modifier
+from app.calculation.experience import xp_from_cr
 from app.monsters.actions import action_to_attack_info
 from app.monsters.lost_mine import get_lost_mine_actions, get_lost_mine_traits
 from app.services.open5e_client import get_monster_template, MonsterTemplate
@@ -71,6 +72,9 @@ def spawn_combatants(slug: str, count: int = 1, side: str = "enemy") -> list[Com
             actions=local_actions,
             traits=get_lost_mine_traits(slug),
             action_recharges=recharge_state,
+            monster_slug=slug,
+            challenge_rating=template.challenge_rating,
+            xp_value=xp_from_cr(template.challenge_rating),
             action_available=True,
             bonus_action_available=True,
             reaction_available=True,

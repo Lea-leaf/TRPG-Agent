@@ -22,6 +22,9 @@ class ChatResponse(BaseModel):
     player: Optional[PlayerState] = Field(default=None, description="Player state")
     combat: Optional[dict] = Field(default=None, description="Combat state")
     space: Optional[dict] = Field(default=None, description="Planar space state")
+    scene_units: Optional[dict] = Field(default=None, description="Current scene unit pool")
+    dead_units: Optional[dict] = Field(default=None, description="Dead unit archive")
+    departed_units: Optional[dict] = Field(default=None, description="Departed non-dead unit archive")
     adventure: Optional[AdventureState] = Field(default=None, description="Adventure module progress")
 
 

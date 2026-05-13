@@ -7,8 +7,8 @@ export interface ChatMessage {
   avatar?: string
   displayName?: string
   // 扩展字段：消息子类型 + 元数据
-  type?: 'text' | 'combat_action' | 'tool' | 'loading' 
-  metadata?: { hp_changes?: HpChange[] }
+  type?: 'text' | 'combat_action' | 'tool' | 'loading' | 'dice_roll'
+  metadata?: { hp_changes?: HpChange[], dice_roll?: DiceRollEvent }
  isHistory?: boolean   // 新增：标记是否为历史消息
 }
 
@@ -27,6 +27,18 @@ export interface AttackRoll {
   hit_total?: number
   target_ac: number
   attack_name?: string
+}
+
+export interface DiceRollEvent {
+  kind?: 'check' | 'attack'
+  title?: string
+  raw_roll: number
+  modifier?: number
+  final_total: number
+  target?: number | null
+  target_label?: string
+  formula?: string
+  advantage?: 'normal' | 'advantage' | 'disadvantage'
 }
 
 export interface ReactionResponse {
@@ -61,7 +73,7 @@ export interface SSECallbacks {
   onToolMessage?: (content: string) => void
   onStateUpdate?: (player: any, combat: any, sceneUnits?: any, deadUnits?: any, space?: any) => void
   onPendingAction?: (action: PendingAction | null) => void
-  onDiceRoll?: (rawRoll: number, finalTotal: number) => void | Promise<void>
+  onDiceRoll?: (roll: DiceRollEvent) => void | Promise<void>
   onDone?: (sessionId: string) => void
   onError?: (message: string) => void
 }
@@ -233,7 +245,7 @@ export const chatService = {
               if (callbacks.onDiceRoll) {
                 diceAnimationQueue = diceAnimationQueue
                   .catch(() => undefined)
-                  .then(() => Promise.resolve(callbacks.onDiceRoll?.(parsed.raw_roll, parsed.final_total)))
+                  .then(() => Promise.resolve(callbacks.onDiceRoll?.(parsed)))
                   .catch((error) => {
                     console.error('Dice animation failed:', error)
                   })

@@ -38,6 +38,17 @@ class WeaponData(BaseModel):
     extra_damage_type: str = ""
 
 
+class InventoryItem(BaseModel, extra="allow"):
+    """背包物品记录；规则道具用稳定 id，剧情财宝保留来源描述。"""
+    id: str
+    name: str
+    type: Literal["item", "treasure", "potion"] = "item"
+    quantity: int = 1
+    description: str = ""
+    source_reward_id: str = ""
+    source_node_id: str = ""
+
+
 class PlayerState(BaseModel, extra="allow"):
     """玩家常驻状态"""
     name: str = ""
@@ -52,7 +63,13 @@ class PlayerState(BaseModel, extra="allow"):
     modifiers: ModifierBlock = Field(default_factory=dict)
     conditions: list[ActiveCondition] = Field(default_factory=list)
     resources: dict[str, int] = Field(default_factory=dict)
+    resource_caps: dict[str, int] = Field(default_factory=dict)
+    hit_die: str = ""
+    hit_dice_total: int = 0
+    hit_dice_remaining: int = 0
     weapons: list[WeaponData] = Field(default_factory=list)
+    coins: dict[str, int] = Field(default_factory=dict)
+    inventory: list[InventoryItem] = Field(default_factory=list)
     known_spells: list[str] = Field(default_factory=list)
     known_cantrips: list[str] = Field(default_factory=list)
     spellcasting_ability: str = ""
@@ -168,6 +185,9 @@ class CombatantState(BaseModel, extra="allow"):
     actions: list[MonsterAction] = Field(default_factory=list)
     traits: list[str] = Field(default_factory=list)
     action_recharges: dict[str, bool] = Field(default_factory=dict)
+    monster_slug: str = ""
+    challenge_rating: str = "0"
+    xp_value: int = 0
 
     # 动作资源
     action_available: bool = True
@@ -300,7 +320,13 @@ class GraphState(TypedDict, total=False):
     # 战斗结束后的死亡单位归档（搜尸体等剧情用途）
     dead_units: dict[str, CombatantState]
 
+    # 战斗结束后的离场单位归档（逃跑、撤退、传送离开等非死亡退场）
+    departed_units: dict[str, CombatantState]
+
     # 本轮攻击产生的 HP 变动记录，供前端渲染血条动画
     hp_changes: list[dict]
+
+    # 当前倒地玩家回合是否已经交还过话语权，避免死亡豁免暂停节点重复触发。
+    death_save_pause_turn_id: str
 
     event_log: list[dict]

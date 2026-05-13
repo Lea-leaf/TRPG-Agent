@@ -9,6 +9,7 @@ from app.graph.constants import (
     ASSISTANT_NODE,
     COMBAT_ASSISTANT_NODE,
     COMBAT_RESOLUTION_NODE,
+    DEATH_SAVE_PAUSE_NODE,
     ROUTER_NODE,
     TOOL_NODE,
     REACTION_RESOLUTION_NODE,
@@ -25,6 +26,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
     graph.add_node(COMBAT_ASSISTANT_NODE, nodes.combat_assistant_node)
     graph.add_node(TOOL_NODE, ToolNode(get_tools()))
     graph.add_node(COMBAT_RESOLUTION_NODE, nodes.combat_resolution_node)
+    graph.add_node(DEATH_SAVE_PAUSE_NODE, nodes.death_save_pause_node)
     graph.add_node(REACTION_RESOLUTION_NODE, nodes.resolve_reaction_node)
 
     graph.add_edge(START, ROUTER_NODE)
@@ -36,6 +38,7 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
             ASSISTANT_NODE: ASSISTANT_NODE,
             COMBAT_ASSISTANT_NODE: COMBAT_ASSISTANT_NODE,
             TOOL_NODE: TOOL_NODE,
+            DEATH_SAVE_PAUSE_NODE: DEATH_SAVE_PAUSE_NODE,
             REACTION_RESOLUTION_NODE: REACTION_RESOLUTION_NODE,
             "end": END,
         },
@@ -76,9 +79,12 @@ def build_graph(checkpointer: BaseCheckpointSaver | None = None):
         {
             ASSISTANT_NODE: ASSISTANT_NODE,
             COMBAT_ASSISTANT_NODE: COMBAT_ASSISTANT_NODE,
+            DEATH_SAVE_PAUSE_NODE: DEATH_SAVE_PAUSE_NODE,
             "end": END,
         },
     )
+
+    graph.add_edge(DEATH_SAVE_PAUSE_NODE, END)
 
     graph.add_conditional_edges(
         REACTION_RESOLUTION_NODE,

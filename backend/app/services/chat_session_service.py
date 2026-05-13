@@ -42,6 +42,16 @@ _CHAT_SESSION_SERVICE_LOCK = asyncio.Lock()
 class ChatSessionService:
     """借助原生 Thread-based Checkpointer 负责包装、路由以及发起 Graph 推理调用。"""
 
+    _STATE_UPDATE_FIELDS = (
+        "player",
+        "combat",
+        "scene_units",
+        "dead_units",
+        "departed_units",
+        "space",
+        "adventure",
+    )
+
     def __init__(
         self,
         graph: Any,
@@ -125,30 +135,7 @@ class ChatSessionService:
             reward_notifications.extend(post_turn_update.player_notifications)
         state = await self._graph.aget_state(config)
         
-        player_data = None
-        combat_data = None
-        space_data = None
-        scene_units_data = None
-        adventure_data = None
-        if hasattr(state, "values"):
-            adventure = state.values.get("adventure")
-            if adventure:
-                adventure_data = normalize_adventure_state(self._state_value_to_dict(adventure))
-            player = state.values.get("player")
-            if player:
-                player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
-                player_data["ac"] = compute_ac(player_data)
-            combat = state.values.get("combat")
-            if combat:
-                combat_data = combat.model_dump() if hasattr(combat, "model_dump") else dict(combat)
-                for unit in combat_data.get("participants", {}).values():
-                    unit["ac"] = compute_ac(unit)
-            space = state.values.get("space")
-            if space:
-                space_data = space.model_dump() if hasattr(space, "model_dump") else dict(space)
-            scene_units = state.values.get("scene_units")
-            if scene_units:
-                scene_units_data = self._mapping_state_to_dict(scene_units)
+        state_payload = self._project_state_update_payload(state.values, include_absent=True) if hasattr(state, "values") else {}
 
         reply = self._append_reward_announcement(self._extract_reply_from_messages(new_messages), reward_notifications)
         pending_action = self._get_pending_action(state)
@@ -165,11 +152,13 @@ class ChatSessionService:
             "plan": None,
             "session_id": current_session_id,
             "pending_action": pending_action,
-            "player": player_data,
-            "combat": combat_data,
-            "space": space_data,
-            "scene_units": scene_units_data,
-            "adventure": adventure_data,
+            "player": state_payload.get("player"),
+            "combat": state_payload.get("combat"),
+            "space": state_payload.get("space"),
+            "scene_units": state_payload.get("scene_units"),
+            "dead_units": state_payload.get("dead_units"),
+            "departed_units": state_payload.get("departed_units"),
+            "adventure": state_payload.get("adventure"),
         }
 
     def _get_pending_action(self, state: Any) -> Optional[dict]:
@@ -283,6 +272,7 @@ class ChatSessionService:
             "combat": self._state_value_to_dict(values.get("combat")),
             "scene_units": self._mapping_state_to_dict(values.get("scene_units")),
             "dead_units": self._mapping_state_to_dict(values.get("dead_units")),
+            "departed_units": self._mapping_state_to_dict(values.get("departed_units")),
             "space": self._state_value_to_dict(values.get("space")),
             "pending_reaction": self._state_value_to_dict(values.get("pending_reaction")),
         }
@@ -305,6 +295,33 @@ class ChatSessionService:
         if hasattr(value, "items"):
             return {key: self._state_value_to_dict(item) for key, item in value.items()}
         return value
+
+    def _project_state_update_payload(self, values: dict[str, Any], *, include_absent: bool = False) -> dict[str, Any]:
+        """把图状态投影成前端状态事件；增量事件只包含本节点真实写回的字段。"""
+        payload: dict[str, Any] = {}
+        for field in self._STATE_UPDATE_FIELDS:
+            if not include_absent and field not in values:
+                continue
+
+            value = values.get(field)
+            if field == "adventure":
+                payload[field] = normalize_adventure_state(self._state_value_to_dict(value)) if value else None
+            elif field == "player":
+                player_data = self._state_value_to_dict(value)
+                if player_data:
+                    player_data["ac"] = compute_ac(player_data)
+                payload[field] = player_data
+            elif field == "combat":
+                combat_data = self._state_value_to_dict(value)
+                if combat_data:
+                    for unit in combat_data.get("participants", {}).values():
+                        unit["ac"] = compute_ac(unit)
+                payload[field] = combat_data
+            elif field in {"scene_units", "dead_units", "departed_units"}:
+                payload[field] = self._mapping_state_to_dict(value) if value is not None else None
+            else:
+                payload[field] = self._state_value_to_dict(value)
+        return payload
 
     async def _apply_runtime_context(self, config: dict[str, Any], session_id: str) -> None:
         """在图执行前注入稳定运行上下文，避免旧热摘要继续扰动模型前缀。"""
@@ -434,6 +451,27 @@ class ChatSessionService:
 
         return None
 
+    def _build_dice_roll_event_payload(self, roll_data: dict[str, Any], *, kind: str = "check") -> dict[str, Any]:
+        """统一给前端骰子卡片补足展示字段，避免各流式分支格式漂移。"""
+        raw_roll = roll_data["raw_roll"]
+        final_total = roll_data.get("final_total", roll_data.get("hit_total", raw_roll))
+        modifier = roll_data.get("modifier", roll_data.get("attack_bonus", final_total - raw_roll))
+        target = roll_data.get("target_ac") or roll_data.get("dc")
+        attack_name = roll_data.get("attack_name") or roll_data.get("atk_name_display")
+        title = attack_name or roll_data.get("reason") or ("Attack Roll" if kind == "attack" else "D20 Check")
+
+        return {
+            "kind": kind,
+            "title": title,
+            "raw_roll": raw_roll,
+            "modifier": modifier,
+            "final_total": final_total,
+            "target": target,
+            "target_label": "AC" if kind == "attack" else "DC",
+            "formula": roll_data.get("formula", "1d20"),
+            "advantage": roll_data.get("advantage", "normal"),
+        }
+
     def _is_hidden_tool_message(self, msg: Any) -> bool:
         """内部 ToolMessage 仅用于满足 ToolNode 约束，不应直接透传到前端聊天流。"""
         return bool(
@@ -510,6 +548,10 @@ class ChatSessionService:
                 if "pending_reaction" in node_output:
                     yield self._sse_event("pending_action", self._pending_action_from_reaction(node_output.get("pending_reaction")))
 
+                state_delta = self._project_state_update_payload(node_output)
+                if state_delta:
+                    yield self._sse_event("state_update", state_delta)
+
                 # 提取消息增量
                 new_messages = node_output.get("messages", [])
                 hp_changes = node_output.get("hp_changes", [])
@@ -531,20 +573,13 @@ class ChatSessionService:
                             try:
                                 roll_data = json.loads(msg.content)
                                 if "raw_roll" in roll_data:
-                                    yield self._sse_event("dice_roll", {
-                                        "raw_roll": roll_data["raw_roll"],
-                                        "final_total": roll_data.get("final_total", roll_data["raw_roll"])
-                                    })
+                                    yield self._sse_event("dice_roll", self._build_dice_roll_event_payload(roll_data))
                             except Exception:
                                 pass
 
                         attack_roll = self._extract_attack_roll_payload(msg)
                         if attack_roll:
-                            yield self._sse_event("dice_roll", {
-                                "raw_roll": attack_roll["raw_roll"],
-                                "final_total": attack_roll.get("final_total", attack_roll["raw_roll"]),
-                                "attack_bonus": attack_roll.get("attack_bonus", 0),
-                            })
+                            yield self._sse_event("dice_roll", self._build_dice_roll_event_payload(attack_roll, kind="attack"))
 
                         # 怪物战斗或攻击动作产生的 ToolMessage 携带 hp_changes
                         if hp_changes:
@@ -561,11 +596,7 @@ class ChatSessionService:
                             continue
                         attack_roll = self._extract_attack_roll_payload(msg)
                         if attack_roll:
-                            yield self._sse_event("dice_roll", {
-                                "raw_roll": attack_roll["raw_roll"],
-                                "final_total": attack_roll.get("final_total", attack_roll["raw_roll"]),
-                                "attack_bonus": attack_roll.get("attack_bonus", 0),
-                            })
+                            yield self._sse_event("dice_roll", self._build_dice_roll_event_payload(attack_roll, kind="attack"))
                             
                         # 怪物行动的系统消息
                         yield self._sse_event("combat_action", {
@@ -590,47 +621,13 @@ class ChatSessionService:
             reward_notifications.extend(post_turn_update.player_notifications)
         state = await self._graph.aget_state(config)
 
-        player_data = None
-        combat_data = None
-        scene_units_data = None
-        dead_units_data = None
-        space_data = None
-        adventure_data = None
-        if hasattr(state, "values"):
-            adventure = state.values.get("adventure")
-            if adventure:
-                adventure_data = normalize_adventure_state(self._state_value_to_dict(adventure))
-            player = state.values.get("player")
-            if player:
-                player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
-                player_data["ac"] = compute_ac(player_data)
-            combat = state.values.get("combat")
-            if combat:
-                combat_data = combat.model_dump() if hasattr(combat, "model_dump") else dict(combat)
-                for unit in combat_data.get("participants", {}).values():
-                    unit["ac"] = compute_ac(unit)
-            scene_units = state.values.get("scene_units")
-            if scene_units:
-                scene_units_data = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else scene_units
-            dead_units = state.values.get("dead_units")
-            if dead_units:
-                dead_units_data = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in dead_units.items()} if hasattr(dead_units, "items") else dead_units
-            space = state.values.get("space")
-            if space:
-                space_data = space.model_dump() if hasattr(space, "model_dump") else dict(space)
+        state_payload = self._project_state_update_payload(state.values, include_absent=True) if hasattr(state, "values") else {}
 
         reward_announcement = self._build_reward_announcement(reward_notifications)
         if reward_announcement:
             yield self._sse_event("assistant_message", {"content": reward_announcement})
 
-        yield self._sse_event("state_update", {
-            "player": player_data,
-            "combat": combat_data,
-            "scene_units": scene_units_data,
-            "dead_units": dead_units_data,
-            "space": space_data,
-            "adventure": adventure_data,
-        })
+        yield self._sse_event("state_update", state_payload)
 
         pending = self._get_pending_action(state)
         reply = self._append_reward_announcement(self._extract_reply_from_messages(new_messages), reward_notifications)
@@ -675,6 +672,7 @@ class ChatSessionService:
         combat_data = None
         space_data = None
         scene_units_data = None
+        departed_units_data = None
         adventure_data = None
         if hasattr(state, "values"):
             adventure = state.values.get("adventure")
@@ -695,6 +693,9 @@ class ChatSessionService:
             scene_units = state.values.get("scene_units")
             if scene_units:
                 scene_units_data = self._mapping_state_to_dict(scene_units)
+            departed_units = state.values.get("departed_units")
+            if departed_units:
+                departed_units_data = self._mapping_state_to_dict(departed_units)
 
         return {
             "messages": history,
@@ -702,6 +703,7 @@ class ChatSessionService:
             "combat": combat_data,
             "space": space_data,
             "scene_units": scene_units_data,
+            "departed_units": departed_units_data,
             "adventure": adventure_data,
         }
 

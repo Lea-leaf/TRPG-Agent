@@ -13,6 +13,7 @@ import re
 import d20
 
 from app.conditions._base import create_condition, upsert_condition
+from app.calculation.experience import CR_XP_TABLE, xp_from_cr
 from app.equipment.weapons import resolve_weapon_data
 from app.conditions import get_combat_effects, get_condition_module, tick_conditions
 from app.graph.state import AttackInfo
@@ -1365,21 +1366,8 @@ def consume_spell_slot(resources: dict, slot_level: int) -> str | None:
     return None
 
 
-# ── CR → XP 映射 ───────────────────────────────────────────────
-
-CR_XP_TABLE: dict[str, int] = {
-    "0": 10, "1/8": 25, "1/4": 50, "1/2": 100,
-    "1": 200, "2": 450, "3": 700, "4": 1100, "5": 1800,
-    "6": 2300, "7": 2900, "8": 3900, "9": 5000, "10": 5900,
-}
-
 # 升级经验值阈值
 XP_THRESHOLDS: dict[int, int] = {2: 300, 3: 900, 4: 2700, 5: 6500}
-
-
-def xp_from_cr(cr_value) -> int:
-    """从怪物 CR 值查询对应 XP 奖励"""
-    return CR_XP_TABLE.get(str(cr_value), 0)
 
 
 # ── 回合推进 ────────────────────────────────────────────────────

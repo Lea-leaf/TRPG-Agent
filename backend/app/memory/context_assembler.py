@@ -15,6 +15,7 @@ from app.adventures.rewards import normalize_pending_reward_grants
 from app.adventures.store import get_adventure_store
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
 from app.graph.state import GraphState
+from app.services.class_action_catalog import available_class_actions
 from app.services.tools._helpers import compute_ac
 
 
@@ -500,6 +501,7 @@ class ContextAssembler:
                 f"{player_dict.get('name', player_dict.get('id', 'player'))} [ID:{player_dict.get('id', 'player')}] "
                 f"{format_player_priority_summary(player_dict)} "
                 f"conditions:{format_conditions(player_dict)} "
+                f"items:{format_consumables(player_dict)} "
                 f"magic:[{format_magic(player_dict)}]"
             )
         else:
@@ -573,7 +575,7 @@ class ContextAssembler:
         lines: list[str] = []
         scene_data = dump_mapping_state(state.get("scene_units"))
         if scene_data:
-            allies = [f'{unit.get("name", uid)}[ID:{uid}]' for uid, unit in scene_data.items() if unit.get("side") == "ally"]
+            allies = [format_narrative_ally_snapshot(uid, unit) for uid, unit in scene_data.items() if unit.get("side") == "ally"]
             enemies = [f'{unit.get("name", uid)}[ID:{uid}]' for uid, unit in scene_data.items() if unit.get("side") == "enemy"]
             if allies:
                 lines.append("可见友方: " + "；".join(allies[:4]))
@@ -650,8 +652,8 @@ class ContextAssembler:
                     )
                 return (
                     f"当前是玩家单位 {current_name} [ID:{current_id}] 的回合，角色 0 HP，必须进行死亡豁免。"
-                    "先调用 request_dice_roll(reason=\"死亡豁免\", formula=\"1d20\")，"
-                    "再用 modify_character_state(action=\"record_death_save\", payload={\"roll_total\": 掷骰raw_roll}) 写回结果；"
+                    "只有在玩家本轮明确表示继续或要求掷死亡豁免后，才调用 request_dice_roll(reason=\"死亡豁免\", formula=\"1d20\")，"
+                    "随后用 modify_character_state(action=\"record_death_save\", payload={\"roll_total\": 掷骰raw_roll}) 写回结果；"
                     "不要执行攻击、施法或主动移动。"
                 )
             return (
@@ -1103,9 +1105,32 @@ def format_player_priority_summary(player: dict[str, Any]) -> str:
     return (
         f"HP:{player.get('hp')}/{player.get('max_hp')} "
         f"AC:{compute_ac(player)} "
+        f"coins:{format_coins(player)} "
         f"resources:[{format_resources(player)}] "
+        f"items:[{format_consumables(player)}] "
         f"death_saves:{format_death_save_status(player)}"
     )
+
+
+def format_coins(unit: dict[str, Any]) -> str:
+    """短状态帧展示金币，避免购物工具靠旧对话猜余额。"""
+    coins = unit.get("coins", {}) or {}
+    if not coins:
+        return "无"
+    return ",".join(f"{key}={value}" for key, value in sorted(coins.items()))
+
+
+def format_consumables(unit: dict[str, Any]) -> str:
+    """只暴露可主动使用的消耗品数量，避免完整财宝描述污染短帧。"""
+    items: list[str] = []
+    for item in unit.get("inventory", []) or []:
+        if item.get("type") != "potion":
+            continue
+        quantity = int(item.get("quantity", 0) or 0)
+        if quantity <= 0:
+            continue
+        items.append(f"{item.get('id', '?')}x{quantity}")
+    return ",".join(items) if items else "无"
 
 
 def format_attacks(combatant: dict[str, Any]) -> str:
@@ -1176,6 +1201,25 @@ def active_space_map_summary(space: dict[str, Any]) -> str:
     )
 
 
+def format_narrative_ally_snapshot(uid: str, unit: dict[str, Any]) -> str:
+    """探索态暴露友方关键资源，避免模型忽略可用治疗、施法和职业动作。"""
+    class_actions = available_class_actions(unit)
+    parts = [
+        f"{unit.get('name', uid)}[ID:{uid}",
+        f"HP:{unit.get('hp')}/{unit.get('max_hp')}",
+        f"AC:{compute_ac(unit)}",
+        f"resources:{format_resources(unit)}",
+        f"items:{format_consumables(unit)}",
+        f"magic:{format_magic(unit)}",
+    ]
+    if class_actions:
+        parts.append("class_actions:" + ",".join(class_actions))
+    actions = format_actions(unit)
+    if actions != "无":
+        parts.append("actions:" + actions)
+    return ", ".join(parts) + "]"
+
+
 def format_combat_side_snapshot(participants: dict[str, Any], side: str) -> str:
     """短战斗帧按阵营列出关键战斗状态，避免完整参战者 JSON 干扰缓存。"""
     items: list[str] = []
@@ -1185,6 +1229,7 @@ def format_combat_side_snapshot(participants: dict[str, Any], side: str) -> str:
         items.append(
             f"{combatant.get('name', uid)}[ID:{uid}, HP:{combatant.get('hp')}/{combatant.get('max_hp')}, "
             f"AC:{compute_ac(combatant)}, resources:{format_resources(combatant)}, "
+            f"items:{format_consumables(combatant)}, "
             f"conditions:{format_conditions(combatant)}, magic:{format_magic(combatant)}, actions:{format_actions(combatant)}]"
         )
     return "；".join(items)
@@ -1309,6 +1354,10 @@ def summarize_tool_message(message: ToolMessage) -> str:
     if tool_name == "cast_spell":
         # 多目标法术（如魔法飞弹）每个目标的 HP 变化都在工具返回里，不能只保留前三行。
         return f"[工具:{tool_name}] {compact_text(raw_text, 2000)}"
+
+    if tool_name == "buy_item":
+        # 价目表是后续购物决策依据，不能被通用两行摘要折叠掉。
+        return f"[工具:{tool_name}] {compact_text(raw_text, 3000)}"
 
     summary_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
     summary = " | ".join(summary_lines[:2])

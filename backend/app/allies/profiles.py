@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.calculation.abilities import ability_to_modifier
+from app.equipment.items import default_potion_inventory
 
 
 ALLY_PROFILES: dict[str, dict] = {
@@ -113,6 +114,7 @@ def get_ally_profile(profile_id: str) -> dict:
         for ability, score in profile.get("abilities", {}).items()
     }
     profile.setdefault("conditions", [])
+    profile.setdefault("inventory", default_potion_inventory())
     profile.setdefault("side", "ally")
     profile.setdefault("death_save_successes", 0)
     profile.setdefault("death_save_failures", 0)
