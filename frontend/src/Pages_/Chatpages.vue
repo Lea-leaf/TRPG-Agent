@@ -95,6 +95,7 @@
         :space="spaceState"
         :scene-units="sceneUnitsState"
         :dead-units="deadUnitsState"
+        :send-tactical-move-request="sendTextMessage"
       />
     </div>
 

@@ -39,6 +39,7 @@
         :combat="combat"
         :scene-units="sceneUnits"
         :dead-units="deadUnits"
+        :send-tactical-move-request="sendTacticalMoveRequest"
       />
 
       <CharacterPanel
@@ -75,6 +76,7 @@ defineProps<{
   space?: any | null
   sceneUnits?: Record<string, any> | null
   deadUnits?: Record<string, any> | null
+  sendTacticalMoveRequest?: ((message: string) => Promise<void>) | null
 }>()
 
 const panelOrder: SidebarPanelMode[] = ['character', 'hp', 'inventory']
