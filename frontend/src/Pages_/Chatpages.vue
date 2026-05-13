@@ -108,8 +108,6 @@
         {{ rightWidth === 0 ? '◀' : '▶' }}
       </button>
     </Transition>
-
-    <Dice3D v-if="showDiceAnimation" ref="dice3dRef" class="chat-dice-overlay" />
   </div>
 </template>
 
@@ -120,7 +118,6 @@ import ChatMessage from '../components/Chat/ChatMessage.vue'
 import ChatInput from '../components/Chat/ChatInput.vue'
 import ActionPanel from '../components/Chat/ActionPanel.vue'
 import CharacterSidebar from '../components/Chat/SideCharacterPanel/CharacterSidebar.vue'
-import Dice3D from '../components/Dice3D/Dice3D.vue'
 import { useChatSession } from '../composables/useChatSession'
 import { useChatMessages } from '../composables/useChatMessages'
 import { useChatSender } from '../composables/useChatSender'
@@ -133,9 +130,7 @@ import '../styles_/Chatpages.css'
 // 右侧面板状态
 const containerRef = ref<HTMLElement | null>(null)
 const messageListRef = ref<HTMLElement | null>(null)
-const dice3dRef = ref<InstanceType<typeof Dice3D> | null>(null)
 const characterSidebarRef = ref<InstanceType<typeof CharacterSidebar> | null>(null)
-const showDiceAnimation = ref(false)
 const rightWidth = ref(25)
 const showToggleBtn = ref(false)
 const isDragging = ref(false)
@@ -157,6 +152,7 @@ const {
   addAssistantMessage,
   addCombatMessage,
   addToolMessage,
+  addDiceRollMessage,
   addConfirmedMessage,
   setPendingAction,
   setPlayerState,
@@ -188,16 +184,6 @@ watch(combatState, (hasCombat) => {
   }
 }, { immediate: true })
 
-const handleDiceRollAnim = async (rawRoll: number) => {
-  showDiceAnimation.value = true
-  await nextTick()
-  if (dice3dRef.value) {
-    await dice3dRef.value.throwDice(rawRoll)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-  }
-  showDiceAnimation.value = false
-}
-
 const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReaction } = useChatSender(
   sessionId,
   updateSessionId,
@@ -205,6 +191,7 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   addAssistantMessage,
   addCombatMessage,
   addToolMessage,
+  addDiceRollMessage,
   addConfirmedMessage,
   setPendingAction,
   setPlayerState,
@@ -215,7 +202,6 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   setSending,
   clearError,
   pendingAction,
-  handleDiceRollAnim,
   startLoading,
   stopLoading
 )

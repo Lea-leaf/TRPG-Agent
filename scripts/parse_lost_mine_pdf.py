@@ -320,7 +320,7 @@ def main() -> None:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("backend/data/adventures/lost_mine/nodes.json"),
+        default=Path("backend/data/adventures/lost_mine/nodes.parsed.preview.json"),
     )
     args = parser.parse_args()
 

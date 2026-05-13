@@ -114,10 +114,15 @@ class ContextAssemblerTests(unittest.TestCase):
                     "id": "apprentice_wizard",
                     "name": "伊莲",
                     "side": "ally",
+                    "hp": 8,
+                    "max_hp": 10,
+                    "ac": 12,
                     "resources": {"spell_slot_lv1": 2},
                     "resource_caps": {"spell_slot_lv1": 3},
                     "known_spells": ["magic_missile"],
                     "known_cantrips": ["ray_of_frost"],
+                    "class_features": ["action_surge", "arcane_recovery"],
+                    "actions": [{"id": "dagger", "name": "Dagger", "kind": "attack"}],
                 },
                 "goblin_1": {"id": "goblin_1", "name": "Goblin", "side": "enemy"},
             },
@@ -132,6 +137,12 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("待确认出口: ['investigate_goblin_trail']", assembled.runtime_state_text)
         self.assertIn("可用法术单位: 伊莲[ID:apprentice_wizard", assembled.runtime_state_text)
         self.assertIn("spells=magic_missile; cantrips=ray_of_frost", assembled.runtime_state_text)
+        self.assertIn("可见友方: 伊莲[ID:apprentice_wizard", assembled.runtime_state_text)
+        self.assertIn("HP:8/10", assembled.runtime_state_text)
+        self.assertIn("resources:spell_slot_lv1=2/3", assembled.runtime_state_text)
+        self.assertIn("class_actions:action_surge", assembled.runtime_state_text)
+        self.assertIn("arcane_recovery", assembled.runtime_state_text)
+        self.assertIn("actions:Dagger(dagger, attack)", assembled.runtime_state_text)
 
     def test_narrative_runtime_state_includes_current_node_facts_and_related_hits(self):
         assembler = ContextAssembler()
@@ -728,6 +739,30 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIn("Goblin A HP: 7 → 2", projected)
         self.assertIn("Goblin B HP: 7 → 3", projected)
         self.assertIn("剩余1环法术位", projected)
+
+    def test_buy_item_projection_keeps_shop_catalog_prices(self):
+        tool_message = ToolMessage(
+            content=(
+                "[商店待售清单]\n"
+                "- potion_of_healing: 治疗药水 / Potion of Healing，50 gp。饮用此药水可以恢复2d4+2点生命值。\n"
+                "- potion_of_greater_healing: 强效治疗药水 / Potion of Greater Healing，200 gp。饮用此药水可以恢复4d4+4点生命值。\n"
+                "- potion_of_invisibility: 隐身药水 / Potion of Invisibility，200 gp。\n"
+                "- potion_of_vitality: 活力药水 / Potion of Vitality，200 gp。\n\n"
+                "[交易结果]\n购物完成：购买 1 个治疗药水，花费 50 gp；剩余 25 gp。"
+            ),
+            tool_call_id="call_buy",
+            name="buy_item",
+        )
+
+        projected = summarize_tool_message(tool_message)
+
+        self.assertIn("[工具:buy_item]", projected)
+        self.assertIn("[商店待售清单]", projected)
+        self.assertIn("potion_of_healing", projected)
+        self.assertIn("50 gp", projected)
+        self.assertIn("potion_of_greater_healing", projected)
+        self.assertIn("200 gp", projected)
+        self.assertIn("[交易结果]", projected)
 
     def test_attack_projection_keeps_hp_resolution_line(self):
         tool_message = ToolMessage(

@@ -118,10 +118,12 @@ const spellNameMap: Record<string, string> = {
  */
 const itemNameMap: Record<string, string> = {
   potion_of_healing: '治疗药水',
+  potion_of_greater_healing: '强效治疗药水',
   greater_potion_of_healing: '强效治疗药水',
   superior_potion_of_healing: '高等治疗药水',
   supreme_potion_of_healing: '极效治疗药水',
   potion_of_invisibility: '隐形药水',
+  potion_of_vitality: '活力药水',
   potion_of_hill_giant_strength: '山丘巨人力量药水',
   potion_of_fire_breath: '火焰吐息药水',
   scroll_of_fireball: '火球术卷轴',

@@ -30,6 +30,14 @@ from app.utils.agent_trace import (
     start_adventure_director_trace,
 )
 
+_LEGACY_EXIT_ID_ALIASES: dict[tuple[str, str], str] = {
+    ("adventure_hook_meet_me_in_phandalin", "continue_to_ambush"): "begin_escort_journey",
+    ("goblin_ambush", "follow_goblin_trail"): "investigate_goblin_trail",
+    ("goblin_ambush", "continue_to_phandalin"): "go_to_phandalin_first",
+    ("goblin_trail_to_cragmaw_hideout", "arrive_cragmaw_hideout"): "follow_trail_to_hideout",
+    ("cragmaw_hideout_goblin_den", "return_to_eating_cave_for_sildar"): "to_overpass",
+}
+
 
 DIRECTOR_SYSTEM_PROMPT = (
     "你是 TRPG 冒险模组进度裁定器，只输出 JSON。"
@@ -392,11 +400,12 @@ def _try_commit_director_transition(
     """优先提交硬出口；没有硬出口时再按 Director 指定目标切换。"""
     store = get_adventure_store()
     allowed_exit_ids = {item.id for item in node.exits if store.resolve_node_id(item.next_node_id) in store._nodes}
-    if decision.exit_option_id in allowed_exit_ids:
+    exit_option_id = _resolve_exit_option_id(node.id, decision.exit_option_id, allowed_exit_ids)
+    if exit_option_id in allowed_exit_ids:
         transition = _apply_exit_transition(
             adventure,
             node,
-            decision.exit_option_id,
+            exit_option_id,
             decision,
             state_update=state_update,
             directive_kind="node_advanced",
@@ -415,6 +424,18 @@ def _try_commit_director_transition(
         state_update=state_update,
         directive_kind=decision.transition_kind or "node_switched",
     )
+
+
+def _resolve_exit_option_id(node_id: str, exit_option_id: str | None, allowed_exit_ids: set[str]) -> str | None:
+    """兼容旧 Director/旧存档里的出口名，运行时实际仍只走 canonical 出口。"""
+    if not exit_option_id:
+        return None
+    if exit_option_id in allowed_exit_ids:
+        return exit_option_id
+    alias = _LEGACY_EXIT_ID_ALIASES.get((node_id, exit_option_id))
+    if alias in allowed_exit_ids:
+        return alias
+    return exit_option_id
 
 
 def _prefix_transition_applied(update: AdventureRuntimeUpdate, stage: Literal["pre_turn", "post_turn"]) -> None:

@@ -4,9 +4,18 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
 from app.graph.builder import build_graph
-from app.graph.constants import ASSISTANT_NODE, COMBAT_AGENT_MODE, COMBAT_ASSISTANT_NODE, COMBAT_RESOLUTION_NODE, END_NODE, NARRATIVE_AGENT_MODE
+from app.graph.constants import (
+    ASSISTANT_NODE,
+    COMBAT_AGENT_MODE,
+    COMBAT_ASSISTANT_NODE,
+    COMBAT_RESOLUTION_NODE,
+    DEATH_SAVE_PAUSE_NODE,
+    END_NODE,
+    NARRATIVE_AGENT_MODE,
+    STATE_DEATH_SAVE_PAUSE_TURN_KEY,
+)
 from app.graph.edges import route_from_assistant, route_from_combat_resolution, route_from_reaction_resolution, route_from_router, route_from_tool
-from app.graph.nodes import combat_assistant_node, combat_resolution_node
+from app.graph.nodes import combat_assistant_node, combat_resolution_node, death_save_pause_node
 from app.graph.state import GraphState
 from app.memory.context_assembler import ContextAssembler, trim_model_messages
 from app.prompts import get_assistant_system_prompt
@@ -119,6 +128,57 @@ def test_combat_resolution_route_returns_combat_assistant_for_monster_turn():
     }
 
     assert route_from_combat_resolution(state) == COMBAT_ASSISTANT_NODE
+
+
+def test_router_pauses_before_player_death_save_turn():
+    player = {**_player_state(), "hp": 0, "death_save_successes": 1, "death_save_failures": 1}
+    state = {
+        "phase": "combat",
+        "combat": _combat_state("player_hero"),
+        "player": player,
+        "messages": [HumanMessage(content="继续")],
+    }
+
+    assert route_from_router(state) == DEATH_SAVE_PAUSE_NODE
+
+
+def test_router_continues_after_death_save_pause_for_same_turn():
+    player = {**_player_state(), "hp": 0, "death_save_successes": 1, "death_save_failures": 1}
+    state = {
+        "phase": "combat",
+        "combat": _combat_state("player_hero"),
+        "player": player,
+        "messages": [HumanMessage(content="继续")],
+        STATE_DEATH_SAVE_PAUSE_TURN_KEY: "detached:2:player_hero",
+    }
+
+    assert route_from_router(state) == COMBAT_ASSISTANT_NODE
+
+
+def test_combat_resolution_pauses_when_next_turn_reaches_downed_player():
+    player = {**_player_state(), "hp": 0, "death_save_successes": 0, "death_save_failures": 0}
+    state = {
+        "phase": "combat",
+        "combat": _combat_state("player_hero"),
+        "player": player,
+    }
+
+    assert route_from_combat_resolution(state) == DEATH_SAVE_PAUSE_NODE
+
+
+def test_death_save_pause_node_marks_current_turn():
+    player = {**_player_state(), "hp": 0, "death_save_successes": 2, "death_save_failures": 0}
+    state = {
+        "phase": "combat",
+        "combat": _combat_state("player_hero"),
+        "player": player,
+    }
+
+    result = death_save_pause_node(state)
+
+    assert result[STATE_DEATH_SAVE_PAUSE_TURN_KEY] == "detached:2:player_hero"
+    assert "在掷死亡豁免之前" in result["messages"][0].content
+    assert "2 成功 / 0 失败" in result["messages"][0].content
 
 
 def test_tool_route_moves_combat_turn_into_resolution_node_before_assistant():
@@ -448,11 +508,18 @@ def test_tool_profiles_split_exploration_and_combat_visibility():
     assert "claim_adventure_reward" not in combat_tools
     assert "manage_scene_units" in narrative_tools
     assert "manage_scene_units" in combat_tools
+    assert "end_combat" not in narrative_tools
+    assert "end_combat" in combat_tools
     assert "spawn_ally" not in narrative_tools
     assert "spawn_monsters" not in narrative_tools
     assert "clear_dead_units" not in narrative_tools
     assert "start_combat" in narrative_tools
+    assert "remove_unit" not in combat_tools
     assert "start_combat" not in combat_tools
+    assert "take_rest" in narrative_tools
+    assert "take_rest" not in combat_tools
+    assert "use_class_feature" not in narrative_tools
+    assert "use_class_feature" not in combat_tools
     assert "attack_action" in combat_tools
     assert "attack_action" not in narrative_tools
     assert "manage_space" in narrative_tools
@@ -514,6 +581,7 @@ def test_manage_space_help_returns_skill_instructions():
     assert "平面空间管理技能" in content
     assert "manage_space" in content
     assert 'action="query_radius"' in content
+    assert "场景切换到新的房间、道路、洞穴、营地、建筑或遭遇区域" in content
 
 
 def test_adventure_module_skill_is_registered_for_on_demand_help():
@@ -674,6 +742,8 @@ def test_narrative_system_prompt_excludes_combat_only_guidelines():
     assert "工具返回是客观事实来源" in prompt
     assert "不要使用图标、emoji" in prompt
     assert "不要主动输出整块角色卡" in prompt
+    assert "场景切换到新的房间、道路、洞穴、营地、建筑或遭遇区域" in prompt
+    assert "先建立或切换地图" in prompt
     assert 'action="level_up"' not in prompt
     assert "character_state_management" not in prompt
     assert "后台导航器" in prompt
@@ -695,6 +765,7 @@ def test_combat_system_prompt_includes_combat_only_guidelines():
     assert "不要等待用户继续发话" in prompt
     assert "工具返回是客观事实来源" in prompt
     assert "不要主动输出整块角色卡" in prompt
+    assert "开战前必须确认当前地图对应本次遭遇地点" in prompt
 
 
 def test_combat_assistant_node_invokes_llm_with_monster_turn_directive_and_combat_tools():

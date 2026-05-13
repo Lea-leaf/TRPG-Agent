@@ -6,10 +6,12 @@ from app.graph.constants import (
     ASSISTANT_NODE,
     COMBAT_ASSISTANT_NODE,
     COMBAT_RESOLUTION_NODE,
+    DEATH_SAVE_PAUSE_NODE,
     END_NODE,
     ROUTER_NODE,
     TOOL_NODE,
     REACTION_RESOLUTION_NODE,
+    STATE_DEATH_SAVE_PAUSE_TURN_KEY,
 )
 from app.graph.state import GraphState
 
@@ -21,6 +23,37 @@ def _assistant_node_for_phase(state: GraphState) -> str:
     return ASSISTANT_NODE
 
 
+def _state_value_to_dict(value: object) -> dict:
+    """兼容 LangGraph 里混用 Pydantic 与 dict 的状态快照。"""
+    if not value:
+        return {}
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return dict(value)
+
+
+def _death_save_pause_turn_id(state: GraphState, combat: dict, actor_id: str) -> str:
+    """用轮次和行动者标识一次倒地玩家回合，避免玩家回复后重复暂停。"""
+    return f"{state.get('active_combat_message_start', 'detached')}:{combat.get('round', 0)}:{actor_id}"
+
+
+def _needs_player_death_save_pause(state: GraphState) -> bool:
+    """玩家倒地回合先停在图节点，把掷死亡豁免前的发言权交还给玩家。"""
+    if not _is_combat_active(state):
+        return False
+
+    combat = _state_value_to_dict(state.get("combat"))
+    player = _state_value_to_dict(state.get("player"))
+    actor_id = combat.get("current_actor_id")
+    if not actor_id or actor_id != player.get("id"):
+        return False
+    if player.get("hp", 0) > 0 or player.get("is_stable") or player.get("is_dead"):
+        return False
+
+    pause_turn_id = _death_save_pause_turn_id(state, combat, actor_id)
+    return state.get(STATE_DEATH_SAVE_PAUSE_TURN_KEY) != pause_turn_id
+
+
 def _is_combat_active(state: GraphState) -> bool:
     return state.get("phase") == "combat" and state.get("combat") is not None
 
@@ -30,6 +63,9 @@ def route_from_router(state: GraphState) -> str:
         if state.get("reaction_choice") is not None:
             return REACTION_RESOLUTION_NODE
         return END_NODE
+
+    if _needs_player_death_save_pause(state):
+        return DEATH_SAVE_PAUSE_NODE
 
     messages = state.get("messages", [])
     if not messages:
@@ -91,6 +127,8 @@ def route_from_combat_resolution(state: GraphState) -> str:
     """战斗后置收束：不再中断玩家倒地流程，直接回到 phase 对应 assistant。"""
     if state.get("pending_reaction"):
         return END_NODE
+    if _needs_player_death_save_pause(state):
+        return DEATH_SAVE_PAUSE_NODE
     return _assistant_node_for_phase(state)
 
 
@@ -107,6 +145,7 @@ ROUTE_OPTIONS = {
     ASSISTANT_NODE: ASSISTANT_NODE,
     COMBAT_ASSISTANT_NODE: COMBAT_ASSISTANT_NODE,
     COMBAT_RESOLUTION_NODE: COMBAT_RESOLUTION_NODE,
+    DEATH_SAVE_PAUSE_NODE: DEATH_SAVE_PAUSE_NODE,
     TOOL_NODE: TOOL_NODE,
     REACTION_RESOLUTION_NODE: REACTION_RESOLUTION_NODE,
     END_NODE: END_NODE,

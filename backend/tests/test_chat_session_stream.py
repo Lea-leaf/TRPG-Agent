@@ -142,6 +142,111 @@ def test_stream_ignores_attack_roll_payload_marked_as_non_visual():
     assert "dice_roll" not in event_names
 
 
+def test_stream_emits_dice_roll_card_payload_for_attack_roll():
+    initial_state = _FakeState({})
+    final_state = _FakeState({})
+    graph = _FakeGraph(
+        initial_state=initial_state,
+        final_state=final_state,
+        chunks=[{
+            "combat_resolution_node": {
+                "messages": [HumanMessage(
+                    content="[系统:怪物行动]\nGoblin 使用弯刀攻击。",
+                    additional_kwargs={
+                        "attack_roll": {
+                            "raw_roll": 12,
+                            "final_total": 16,
+                            "attack_bonus": 4,
+                            "target_ac": 14,
+                            "attack_name": "Scimitar",
+                        }
+                    },
+                )],
+                "hp_changes": [],
+            }
+        }],
+    )
+    service = _service(graph)
+
+    async def _collect_events():
+        return [event async for event in service.process_turn_stream(session_id="demo", message="test")]
+
+    raw_events = asyncio.run(_collect_events())
+    parsed_events = [_parse_sse_event(event) for event in raw_events]
+    dice_events = [payload for name, payload in parsed_events if name == "dice_roll"]
+
+    assert dice_events == [{
+        "kind": "attack",
+        "title": "Scimitar",
+        "raw_roll": 12,
+        "modifier": 4,
+        "final_total": 16,
+        "target": 14,
+        "target_label": "AC",
+        "formula": "1d20",
+        "advantage": "normal",
+    }]
+
+
+def test_stream_emits_state_update_before_followup_assistant_reply():
+    initial_state = _FakeState({"messages": []})
+    final_state = _FakeState({
+        "messages": [AIMessage(content="地图已经铺开，你看见了敌人。", tool_calls=[])],
+        "space": {
+            "active_map_id": "road",
+            "maps": {
+                "road": {"id": "road", "name": "三猪小径", "width": 60, "height": 40, "grid_size": 5}
+            },
+            "placements": {},
+        },
+    })
+    graph = _FakeGraph(
+        initial_state=initial_state,
+        final_state=final_state,
+        chunks=[
+            {
+                "tool": {
+                    "space": {
+                        "active_map_id": "road",
+                        "maps": {
+                            "road": {"id": "road", "name": "三猪小径", "width": 60, "height": 40, "grid_size": 5}
+                        },
+                        "placements": {},
+                    },
+                    "messages": [
+                        ToolMessage(
+                            content="已创建地图：三猪小径。",
+                            tool_call_id="call_1",
+                        )
+                    ],
+                }
+            },
+            {
+                "assistant": {
+                    "messages": [AIMessage(content="地图已经铺开，你看见了敌人。", tool_calls=[])],
+                }
+            },
+        ],
+    )
+    service = _service(graph)
+
+    async def _collect_events():
+        return [event async for event in service.process_turn_stream(session_id="demo", message="创建地图")]
+
+    raw_events = asyncio.run(_collect_events())
+    parsed_events = [_parse_sse_event(event) for event in raw_events]
+    event_names = [name for name, _ in parsed_events]
+
+    first_state_index = event_names.index("state_update")
+    followup_reply_index = next(
+        index
+        for index, (name, payload) in enumerate(parsed_events)
+        if name == "assistant_message" and payload["content"] == "地图已经铺开，你看见了敌人。"
+    )
+    assert first_state_index < followup_reply_index
+    assert parsed_events[first_state_index][1]["space"]["active_map_id"] == "road"
+
+
 def test_stream_ignores_hidden_tool_message_but_keeps_pending_action():
     initial_state = _FakeState({})
     final_state = _FakeState({

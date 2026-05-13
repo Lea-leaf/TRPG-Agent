@@ -32,6 +32,9 @@ def _make_goblin(uid: str = "goblin_1") -> dict:
         abilities={"str": 8, "dex": 14, "con": 10, "int": 10, "wis": 8, "cha": 8},
         modifiers={"str": -1, "dex": 2, "con": 0, "int": 0, "wis": -1, "cha": -1},
         attacks=[AttackInfo(name="Scimitar", attack_bonus=4, damage_dice="1d6+2", damage_type="slashing", reach_feet=5)],
+        monster_slug="goblin",
+        challenge_rating="1/4",
+        xp_value=50,
     ).model_dump()
 
 
@@ -755,10 +758,10 @@ class TestAllySystem:
         assert updated_ally["is_stable"] is False
         assert "死亡豁免 0 成功 / 0 失败" in result.update["messages"][0].content
 
-    def test_help_action_stabilizes_dying_ally(self):
-        """援助动作按 DC 10 Medicine 急救稳定 0 HP 友方。"""
+    def test_use_healing_potion_feeds_dying_ally(self):
+        """喂治疗药水可把 0 HP 友方拉起，并消耗动作。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import help_action
+        from app.services.tool_service import use_item
         from app.services.tools._helpers import prepare_character_for_combat
 
         actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -780,12 +783,14 @@ class TestAllySystem:
             },
         }
 
-        with patch("app.services.tools.combat_tools.d20.roll", return_value=d20.roll("10")):
+        with patch("app.services.tools.item_tools.d20.roll", return_value=d20.roll("6")):
             result = _invoke_tool(
-                help_action,
+                use_item,
                 tool_input={
+                    "item_id": "potion_of_healing",
                     "actor_id": "fighter_companion",
                     "target_id": "apprentice_wizard",
+                    "mode": "feed",
                     "state": state,
                 },
             )
@@ -793,15 +798,16 @@ class TestAllySystem:
         updated_actor = result.update["combat"]["participants"]["fighter_companion"]
         updated_target = result.update["combat"]["participants"]["apprentice_wizard"]
         assert updated_actor["action_available"] is False
-        assert updated_target["hp"] == 0
-        assert updated_target["is_stable"] is True
+        assert updated_actor["inventory"][0]["quantity"] == 1
+        assert updated_target["hp"] == 6
+        assert updated_target["is_stable"] is False
         assert updated_target["death_save_failures"] == 0
-        assert "伤势稳定" in result.update["messages"][0].content
+        assert "治疗药水恢复 6 HP" in result.update["messages"][0].content
 
-    def test_help_action_requires_touch_distance(self):
-        """急救稳定需要接触目标，不能隔空援助。"""
+    def test_use_healing_potion_feed_requires_touch_distance(self):
+        """喂药需要接触目标，不能隔空治疗。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import help_action
+        from app.services.tool_service import use_item
         from app.services.tools._helpers import prepare_character_for_combat
 
         actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -816,10 +822,12 @@ class TestAllySystem:
         }
 
         result = _invoke_tool(
-            help_action,
+            use_item,
             tool_input={
+                "item_id": "potion_of_healing",
                 "actor_id": "fighter_companion",
                 "target_id": "apprentice_wizard",
+                "mode": "feed",
                 "state": state,
             },
         )
@@ -1330,6 +1338,27 @@ class TestPhaseLifecycle:
         assert "goblin_1" not in result.update["space"]["placements"]
         assert "goblin_1" in result.update["dead_units"]
 
+    def test_end_combat_archives_departed_units_without_leaving_map_ghosts(self):
+        from app.services.tool_service import end_combat
+
+        goblin = _make_goblin()
+        goblin["hp"] = 7
+        combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1")
+        state = {
+            "combat": combat,
+            "space": _make_space_state(["goblin_1"]),
+            "scene_units": {"goblin_1": goblin},
+        }
+
+        result = _invoke_tool(end_combat, tool_input={"departed_unit_ids": ["goblin_1"], "state": state})
+
+        assert "goblin_1" not in result.update["space"]["placements"]
+        assert "goblin_1" not in result.update["scene_units"]
+        assert "goblin_1" not in result.update["dead_units"]
+        assert result.update["departed_units"]["goblin_1"]["hp"] == 7
+        assert result.update["departed_units"]["goblin_1"]["departure_reason"] == "departed"
+        assert "离场: Goblin" in result.update["messages"][0].content
+
     def test_end_combat_records_current_adventure_encounter_event(self):
         from app.services.tool_service import end_combat
 
@@ -1353,6 +1382,56 @@ class TestPhaseLifecycle:
 
         assert "goblin_ambush_resolved" in result.update["adventure"]["completed_event_ids"]
         assert "节点收束与后续书签推进由后台导航器处理" in result.update["messages"][0].content
+
+    def test_end_combat_awards_xp_for_fallen_enemies(self):
+        from app.services.tool_service import end_combat
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 0}
+        goblin = _make_goblin()
+        goblin["hp"] = 0
+        combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1", player_dict=player)
+        state = {"combat": combat, "player": player, "scene_units": {"goblin_1": goblin}}
+
+        result = _invoke_tool(end_combat, tool_input={"state": state})
+
+        assert result.update["player"]["xp"] == 50
+        assert result.update["player"]["claimed_combat_xp_ids"] == ["combat:goblin_1"]
+        assert result.update["player"]["combat_xp_log"][0]["total_xp"] == 50
+        assert "战斗 XP: +50" in result.update["messages"][0].content
+
+    def test_end_combat_awards_xp_for_captured_enemy_when_declared_defeated(self):
+        from app.services.tool_service import end_combat
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 10}
+        goblin = _make_goblin()
+        goblin["hp"] = 3
+        combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1", player_dict=player)
+        state = {"combat": combat, "player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["goblin_1"])}
+
+        result = _invoke_tool(
+            end_combat,
+            tool_input={"departed_unit_ids": ["goblin_1"], "defeated_unit_ids": ["goblin_1"], "state": state},
+        )
+
+        assert result.update["player"]["xp"] == 60
+        assert result.update["departed_units"]["goblin_1"]["departure_reason"] == "defeated"
+        assert "goblin_1" not in result.update["dead_units"]
+        assert "战斗 XP: +50" in result.update["messages"][0].content
+
+    def test_end_combat_does_not_award_xp_for_enemy_that_only_escaped(self):
+        from app.services.tool_service import end_combat
+
+        player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 10}
+        goblin = _make_goblin()
+        goblin["hp"] = 3
+        combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1", player_dict=player)
+        state = {"combat": combat, "player": player, "scene_units": {"goblin_1": goblin}, "space": _make_space_state(["goblin_1"])}
+
+        result = _invoke_tool(end_combat, tool_input={"departed_unit_ids": ["goblin_1"], "state": state})
+
+        assert result.update["player"]["xp"] == 10
+        assert "claimed_combat_xp_ids" not in result.update["player"]
+        assert "战斗 XP" not in result.update["messages"][0].content
 
 
 # ── Phase 6: WeaponData 模型验证 ────────────────────────────────
@@ -3057,6 +3136,27 @@ class TestDamageTypeAdjustments:
         assert combatant.damage_resistances == ["fire"]
         assert combatant.damage_immunities == ["poison"]
         assert combatant.damage_vulnerabilities == ["cold"]
+
+    def test_spawned_monster_records_cr_xp_snapshot(self):
+        from app.calculation.bestiary import spawn_combatants
+        from app.services.open5e_client import MonsterTemplate
+
+        template = MonsterTemplate(
+            slug="goblin",
+            name="Goblin",
+            hit_dice="1d8",
+            challenge_rating="1/4",
+        )
+
+        with patch("app.calculation.bestiary.get_monster_template", return_value=template), patch(
+            "app.calculation.bestiary.d20.roll",
+            return_value=d20.roll("8"),
+        ):
+            combatant = spawn_combatants("goblin", 1)[0]
+
+        assert combatant.monster_slug == "goblin"
+        assert combatant.challenge_rating == "1/4"
+        assert combatant.xp_value == 50
 
     def test_spell_resolver_passes_damage_type_to_damage_pipeline(self):
         from app.spells import fire_bolt

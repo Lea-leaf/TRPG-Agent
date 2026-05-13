@@ -7,6 +7,7 @@ from typing import Any
 
 SUPPORTED_REWARD_TYPES = frozenset({"xp", "gold", "treasure", "item"})
 REWARD_ARRIVAL_EVENT_PREFIXES = ("enter_", "arrive_", "arrived_", "reach_")
+COIN_CURRENCIES = frozenset({"cp", "sp", "ep", "gp", "pp"})
 
 
 def normalize_pending_reward_grants(values: list[Any] | None) -> list[dict[str, Any]]:
@@ -195,13 +196,23 @@ def claim_pending_xp_reward(
 
 
 def _apply_reward_to_player(state: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
-    """目前只有 XP 有正式角色卡字段；财物类先完成防重发结算。"""
-    if reward["type"] != "xp":
-        return None, ""
+    """把节点奖励落到角色卡；财宝保留原文，避免误拆混合币种和可售物。"""
     player_raw = state.get("player")
     if not player_raw:
         return None, "玩家尚未加载角色卡。"
     player = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw)
+    reward_type = str(reward["type"]).lower()
+    if reward_type == "xp":
+        return _apply_xp_reward(player, reward)
+    if reward_type == "gold":
+        return _apply_coin_reward(player, reward)
+    if reward_type in {"item", "treasure"}:
+        return _apply_inventory_reward(player, reward)
+    return None, f"暂不支持的奖励类型: {reward_type or 'unknown'}"
+
+
+def _apply_xp_reward(player: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """XP 直接累加到角色卡，并把前后值写回工具结果。"""
     amount = int(reward.get("amount", 0) or 0)
     if amount <= 0:
         return None, f"奖励金额无效: {reward['id']}"
@@ -210,3 +221,50 @@ def _apply_reward_to_player(state: dict[str, Any], reward: dict[str, Any]) -> tu
     reward["previous_xp"] = previous_xp
     reward["current_xp"] = player["xp"]
     return player, ""
+
+
+def _apply_coin_reward(player: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """金币类奖励进入钱袋；节点 scope 只用于说明，不在单人角色卡里拆分队伍份额。"""
+    amount = int(reward.get("amount", 0) or 0)
+    if amount <= 0:
+        return None, f"奖励金额无效: {reward['id']}"
+    currency = str(reward.get("currency") or "gp").lower()
+    if currency not in COIN_CURRENCIES:
+        return None, f"暂不支持的货币类型: {currency}"
+    coins = {key: int(value) for key, value in dict(player.get("coins", {})).items()}
+    previous_amount = coins.get(currency, 0)
+    coins[currency] = previous_amount + amount
+    player["coins"] = coins
+    reward["previous_amount"] = previous_amount
+    reward["current_amount"] = coins[currency]
+    return player, ""
+
+
+def _apply_inventory_reward(player: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """道具和财宝作为奖励条目入包，防重发由 claimed_reward_ids 兜住。"""
+    amount = int(reward.get("amount", 1) or 1)
+    if amount <= 0:
+        return None, f"奖励数量无效: {reward['id']}"
+    inventory = list(player.get("inventory", []))
+    inventory.append(
+        {
+            "id": reward["id"],
+            "name": _reward_inventory_name(reward),
+            "type": reward["type"],
+            "quantity": amount,
+            "description": str(reward.get("description", "")).strip(),
+            "source_reward_id": reward["id"],
+            "source_node_id": str(reward.get("node_id", "")).strip(),
+        }
+    )
+    player["inventory"] = inventory
+    reward["inventory_item_id"] = reward["id"]
+    return player, ""
+
+
+def _reward_inventory_name(reward: dict[str, Any]) -> str:
+    """奖励缺少独立名称时，用说明开头生成可读背包名。"""
+    description = str(reward.get("description", "")).strip()
+    if description:
+        return description.split("：", 1)[0].split(":", 1)[0].strip()
+    return str(reward["id"]).replace("_", " ")

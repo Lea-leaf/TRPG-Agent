@@ -304,6 +304,8 @@ def test_manage_space_help_returns_skill_instructions():
     assert "平面空间管理技能" in content
     assert "manage_space" in content
     assert 'action="move_unit"' in content
+    assert "场景切换到新的房间、道路、洞穴、营地、建筑或遭遇区域" in content
+    assert "已有其他地点地图则切换或新建" in content
 
 
 def test_manage_space_create_place_and_measure_distance():

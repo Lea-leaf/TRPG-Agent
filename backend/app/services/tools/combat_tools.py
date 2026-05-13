@@ -15,9 +15,9 @@ from app.allies.profiles import get_ally_profile
 from app.adventures.navigation import normalize_adventure_state
 from app.adventures.store import get_adventure_store
 from app.calculation.bestiary import spawn_combatants
+from app.calculation.combat_xp import grant_combat_xp
 from app.services.skills import load_skill_content
 from app.space.geometry import build_space_state
-from app.space.geometry import validate_unit_distance as validate_space_unit_distance
 from app.services.tools._helpers import (
     advance_turn,
     apply_hp_change,
@@ -306,92 +306,6 @@ def spawn_monsters(
         faction: 阵营，通常为 "enemy"、"ally" 或 "neutral"。
     """
     return _spawn_monsters_impl(monster_index, count, faction, state, tool_call_id)
-
-
-@tool
-def help_action(
-    actor_id: str,
-    target_id: str,
-    state: Annotated[dict, InjectedState] = None,
-    tool_call_id: Annotated[str, InjectedToolCallId] = None,
-) -> Command:
-    """执行援助动作。当前接入桌面规则中的急救稳定：对 0 HP 生物进行 DC 10 WIS(Medicine) 检定。
-    成功会让目标稳定在 0 HP，不恢复 HP；要让目标重新站起来仍需治疗或复活类状态调整。
-    参数示例：{"actor_id": "fighter_companion", "target_id": "温良"}。
-
-    Args:
-        actor_id: 执行援助的单位 ID，必须是当前回合行动者。
-        target_id: 要急救稳定的 0 HP 单位 ID。
-    """
-    combat_raw = state.get("combat")
-    if not combat_raw:
-        return Command(update={"messages": [ToolMessage(content="[援助失败] 当前不在战斗中。", tool_call_id=tool_call_id)]})
-
-    combat_dict = combat_raw.model_dump() if hasattr(combat_raw, "model_dump") else dict(combat_raw)
-    player_raw = state.get("player")
-    player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
-
-    actor = get_combatant(combat_dict, player_dict, actor_id)
-    target = get_combatant(combat_dict, player_dict, target_id)
-    resolved_actor_id = canonical_combatant_id(actor, actor_id)
-    resolved_target_id = canonical_combatant_id(target, target_id)
-
-    def _reject(msg: str) -> Command:
-        return Command(update={"messages": [ToolMessage(content=f"[援助失败] {msg}", tool_call_id=tool_call_id)]})
-
-    if not actor:
-        return _reject(f"找不到行动者 '{actor_id}'。")
-    if not target:
-        return _reject(f"找不到目标 '{target_id}'。")
-    if combat_dict.get("current_actor_id") != resolved_actor_id:
-        return _reject(f"现在不是 {actor.get('name', actor_id)} 的回合，当前行动者为 {combat_dict.get('current_actor_id')}。")
-    if actor.get("hp", 0) <= 0:
-        return _reject(f"{actor.get('name', actor_id)} 已经倒下，无法执行援助。")
-    if not has_action_resource(actor, "action"):
-        return _reject(f"{actor.get('name', actor_id)} 本回合的动作已用尽。")
-    if target.get("hp", 0) > 0:
-        return _reject(f"{target.get('name', target_id)} 仍有 HP，不需要急救稳定。")
-    if target.get("is_dead"):
-        return _reject(f"{target.get('name', target_id)} 已死亡，急救无法稳定；需要复活类能力。")
-    if target.get("is_stable"):
-        return _reject(f"{target.get('name', target_id)} 已经伤势稳定。")
-    if distance_error := validate_space_unit_distance(
-        state.get("space"),
-        resolved_actor_id,
-        resolved_target_id,
-        5,
-        action_label="援助急救",
-    ):
-        return _reject(distance_error)
-
-    wis_mod = int(actor.get("modifiers", {}).get("wis", 0) or 0)
-    prof = int(actor.get("proficiency_bonus", 2) or 2)
-    proficient = "medicine" in {str(item).lower() for item in actor.get("skill_proficiencies", [])}
-    bonus = wis_mod + (prof if proficient else 0)
-    result = d20.roll(f"1d20{bonus:+d}")
-    consume_action_resource(actor, "action")
-
-    lines = [
-        f"{actor.get('name', actor_id)} 使用援助动作急救 {target.get('name', target_id)}。",
-        f"WIS(Medicine) DC 10: {result}（{'含熟练' if proficient else '无熟练'}）",
-    ]
-    if result.total >= 10:
-        target["hp"] = 0
-        target["death_save_successes"] = 0
-        target["death_save_failures"] = 0
-        target["is_stable"] = True
-        target["is_dead"] = False
-        lines.append(f"{target.get('name', target_id)} 伤势稳定，保持 0 HP。")
-    else:
-        lines.append(f"{target.get('name', target_id)} 未能稳定，死亡豁免状态不变。")
-
-    update: dict = {
-        "combat": combat_dict,
-        "messages": [ToolMessage(content="\n".join(lines), tool_call_id=tool_call_id)],
-    }
-    if player_dict:
-        update["player"] = player_dict
-    return Command(update=update)
 
 
 @tool
@@ -693,13 +607,31 @@ def next_turn(
 
 @tool
 def end_combat(
+    departed_unit_ids: list[str] | str | None = None,
+    defeated_unit_ids: list[str] | str | None = None,
     *,
     state: Annotated[dict, InjectedState] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """结束当前战斗。存活的非玩家单位回归场景，死亡单位归入死亡档案（可搜尸等）。
-    参数示例：{}。
+    敌人逃跑、撤退、传送离开或剧情退场时，把单位 ID 放入 departed_unit_ids；
+    这些单位不会进入死亡档案，也不会继续留在当前地图或场景单位池。
+    敌人投降、被俘、被驱散或以非 0 HP 方式被战胜时，把单位 ID 放入 defeated_unit_ids 领取战斗 XP。
+    参数示例：{}；{"departed_unit_ids": ["goblin_1"]}；{"defeated_unit_ids": ["goblin_1"]}。
+
+    Args:
+        departed_unit_ids: 存活但已离开当前场景的非玩家单位 ID 列表。
+        defeated_unit_ids: 非 0 HP 但已被玩家战胜的敌方单位 ID 列表。
     """
+    departed_unit_ids = _normalize_string_list_arg("departed_unit_ids", departed_unit_ids, tool_call_id)
+    if isinstance(departed_unit_ids, Command):
+        return departed_unit_ids
+    defeated_unit_ids = _normalize_string_list_arg("defeated_unit_ids", defeated_unit_ids, tool_call_id)
+    if isinstance(defeated_unit_ids, Command):
+        return defeated_unit_ids
+    departed_ids = {str(unit_id).strip() for unit_id in departed_unit_ids if str(unit_id).strip()}
+    defeated_ids = {str(unit_id).strip() for unit_id in defeated_unit_ids if str(unit_id).strip()}
+
     combat_raw = state.get("combat")
     summary = "战斗结束。"
     update: dict = {
@@ -723,6 +655,8 @@ def end_combat(
         scene_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in scene_units.items()} if hasattr(scene_units, "items") else {}
         dead_units: dict = state.get("dead_units") or {}
         dead_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in dead_units.items()} if hasattr(dead_units, "items") else {}
+        departed_units: dict = state.get("departed_units") or {}
+        departed_raw = {k: v.model_dump() if hasattr(v, "model_dump") else dict(v) for k, v in departed_units.items()} if hasattr(departed_units, "items") else {}
 
         # 处理玩家 — HP 已在 player_dict 上保持最新，只需清除战斗覆盖字段
         if player_dict:
@@ -733,11 +667,17 @@ def end_combat(
             clear_player_combat_fields(player_dict)
 
         # 处理非玩家单位；友方不会因倒地被清理，便于后续治疗或复活。
+        departed_names: list[str] = []
         for uid, p in participants.items():
             name = p.get("name", uid)
             if p.get("side") == "ally":
                 alive_names.append(name)
                 scene_raw[uid] = p
+            elif uid in departed_ids:
+                departed_names.append(name)
+                departure_reason = "defeated" if uid in defeated_ids else "departed"
+                departed_raw[uid] = {**p, "departure_reason": departure_reason}
+                scene_raw.pop(uid, None)
             elif p.get("hp", 0) > 0:
                 alive_names.append(name)
                 scene_raw[uid] = p
@@ -751,7 +691,14 @@ def end_combat(
             parts.append(f"存活: {', '.join(alive_names)}")
         if fallen_names:
             parts.append(f"倒下: {', '.join(fallen_names)}")
+        if departed_names:
+            parts.append(f"离场: {', '.join(departed_names)}")
         summary = " ".join(parts)
+
+        xp_award = grant_combat_xp(player_dict, participants, defeated_ids)
+        if xp_award:
+            awards_text = ", ".join(f"{award['name']} {award['xp']} XP" for award in xp_award["awards"])
+            summary += f" 战斗 XP: +{xp_award['total_xp']}（{awards_text}），当前 XP {xp_award['current_xp']}。"
 
         adventure_update, recorded_events = _adventure_after_combat_update(state)
         if adventure_update:
@@ -760,15 +707,16 @@ def end_combat(
                 summary += f" 已记录冒险事件: {', '.join(recorded_events)}。"
             summary += " 节点收束与后续书签推进由后台导航器处理。"
 
-        dead_unit_ids = list(dead_raw.keys())
-        if dead_unit_ids:
+        removed_space_unit_ids = [*dead_raw.keys(), *departed_ids]
+        if removed_space_unit_ids:
             space_raw = state.get("space")
-            cleaned_space = _remove_space_units(space_raw, dead_unit_ids)
+            cleaned_space = _remove_space_units(space_raw, removed_space_unit_ids)
             if cleaned_space is not None:
                 update["space"] = cleaned_space
 
         update["scene_units"] = scene_raw
         update["dead_units"] = dead_raw
+        update["departed_units"] = departed_raw
 
     if player_dict:
         update["player"] = player_dict

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.services.class_action_catalog import REQUIRED_CLASS_ACTION_FEATURES
 from app.services.class_actions.types import ClassActionContext, ClassActionResult
 
 ClassActionHandler = Callable[[ClassActionContext], ClassActionResult]
 
 _REGISTRY: dict[str, ClassActionHandler] = {}
-_REQUIRED_FEATURES: dict[str, tuple[str, ...]] = {}
+_REQUIRED_FEATURES: dict[str, tuple[str, ...]] = dict(REQUIRED_CLASS_ACTION_FEATURES)
 
 
 def register_class_action(

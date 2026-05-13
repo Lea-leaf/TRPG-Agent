@@ -3,9 +3,9 @@
 from functools import lru_cache
 from time import perf_counter
 
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
+from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE, STATE_DEATH_SAVE_PAUSE_TURN_KEY
 from app.graph.state import GraphState
 from app.memory.context_assembler import (
     ContextAssembler,
@@ -266,6 +266,31 @@ def _build_player_death_summary(messages: list[BaseMessage]) -> str:
 def combat_resolution_node(state: GraphState) -> dict:
     """战斗后置收束节点保留为空壳；玩家倒地由死亡豁免与状态工具处理。"""
     return {}
+
+
+def death_save_pause_node(state: GraphState) -> dict:
+    """倒地玩家回合先交还话语权，避免死亡豁免在同一条流里自动跑完。"""
+    combat = _state_value_to_dict(state.get("combat")) or {}
+    player = _state_value_to_dict(state.get("player")) or {}
+    actor_id = combat.get("current_actor_id") or player.get("id", "player")
+    actor_name = player.get("name") or actor_id
+    successes = int(player.get("death_save_successes", 0) or 0)
+    failures = int(player.get("death_save_failures", 0) or 0)
+    content = (
+        f"{actor_name} 倒在地上，当前是你的回合。\n\n"
+        f"死亡豁免：{successes} 成功 / {failures} 失败。\n"
+        "在掷死亡豁免之前，你可以先说话、回忆、求援或描述这一刻。"
+        "当你准备好后，直接说“继续”或“掷死亡豁免”。"
+    )
+    return {
+        "messages": [AIMessage(content=content)],
+        STATE_DEATH_SAVE_PAUSE_TURN_KEY: _death_save_pause_turn_id(state, combat, actor_id),
+    }
+
+
+def _death_save_pause_turn_id(state: GraphState, combat: dict, actor_id: str) -> str:
+    """用轮次和行动者标识一次倒地玩家回合，下一轮同一玩家会重新获得插话机会。"""
+    return f"{state.get('active_combat_message_start', 'detached')}:{combat.get('round', 0)}:{actor_id}"
 
 
 def resolve_reaction_node(state: GraphState) -> dict:

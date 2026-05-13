@@ -19,7 +19,6 @@ from app.services.class_features import (
     run_feature,
     sync_eldritch_knight_spellcasting,
 )
-from app.services.tool_service import use_class_feature
 
 
 def test_get_critical_threshold_respects_champion_only():
@@ -89,42 +88,3 @@ def test_registry_registers_and_runs_feature_handler():
     assert result.lines == ["ok"]
     assert result.update["seen"] == {"amount": 1}
 
-
-def test_use_class_feature_lists_available_features():
-    """工具应在不指定特性时，返回当前触发点可用清单。"""
-    feature_id = "test_feature_listable"
-
-    def handler(context: FeatureContext) -> FeatureResult:
-        return FeatureResult(lines=["ok"], update={})
-
-    register_feature(feature_id, "active_use", handler)
-
-    result = use_class_feature.func(
-        feature_id="",
-        trigger="active_use",
-        state={"player": {"name": "Test Fighter", "class_features": [feature_id]}},
-        tool_call_id="call-test-list",
-    )
-
-    assert feature_id in result.update["messages"][0].content
-
-
-def test_use_class_feature_dispatches_registered_handler():
-    """工具应把已注册特性转给 registry 处理，并把结果回写到状态。"""
-    feature_id = "test_feature_use"
-
-    def handler(context: FeatureContext) -> FeatureResult:
-        return FeatureResult(lines=["used"], update={"feature_result": context.payload})
-
-    register_feature(feature_id, "active_use", handler)
-
-    result = use_class_feature.func(
-        feature_id=feature_id,
-        trigger="active_use",
-        payload={"times": 1},
-        state={"player": {"name": "Test Fighter", "class_features": [feature_id]}},
-        tool_call_id="call-test-use",
-    )
-
-    assert result.update["feature_result"] == {"times": 1}
-    assert "used" in result.update["messages"][0].content
