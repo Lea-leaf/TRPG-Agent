@@ -405,10 +405,10 @@ def claim_adventure_reward(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """领取后台已判定为待发放的剧情节点奖励，并把奖励内容告知玩家。
-    只能使用运行状态帧或冒险工具结果中列出的 pending_reward_grants.id；重复领取同一个 reward_id 不会再次加 XP。
-    XP 会写入角色卡；财物、金币、道具会被标记为已领取并返回内容，具体持有状态按当前剧情记录。
+    只能逐字复制运行状态帧或冒险工具结果中列出的 pending_reward_grants.id；没有待发放奖励时不得调用本工具。
+    不要根据工具说明、节点摘要或历史对话猜测 reward_id；重复领取同一个 reward_id 不会再次加 XP。
+    XP 会写入角色卡；金币写入钱袋；财宝和道具写入背包。
     成功后要让玩家知道拿到了什么奖励，以及这笔奖励为什么发放。
-    参数示例：{"reward_id": "goblin_ambush_hideout_75_xp"}。
 
     Args:
         reward_id: 待领取剧情奖励 ID，必须来自 pending_reward_grants。
@@ -429,6 +429,10 @@ def claim_adventure_reward(
             reward_summary["previous_xp"] = reward["previous_xp"]
         if "current_xp" in reward:
             reward_summary["current_xp"] = reward["current_xp"]
+        if "current_amount" in reward:
+            reward_summary["current_amount"] = reward["current_amount"]
+        if "inventory_item_id" in reward:
+            reward_summary["inventory_item_id"] = reward["inventory_item_id"]
         if reward.get("description"):
             reward_summary["description"] = reward["description"]
         payload: dict[str, Any] = {
@@ -448,7 +452,10 @@ def claim_adventure_reward(
                 "claimed_reward_ids": result.get("claimed_reward_ids", []),
             },
         }
-        payload["message"] = f"剧情奖励未发放：{result.get('error', '未知错误')}"
+        payload["message"] = (
+            f"剧情奖励未发放：{result.get('error', '未知错误')}。"
+            "只能领取 pending_reward_grants 中当前列出的奖励，不要根据工具说明或历史内容猜测奖励 ID。"
+        )
 
     update: dict[str, Any] = {"messages": [_tool_message(payload, tool_call_id)]}
     if result.get("ok") or result.get("error", "").startswith("奖励已领取"):
@@ -465,9 +472,9 @@ def _reward_claim_message(reward: dict[str, Any], description: str) -> str:
         message = f"已发放剧情奖励 {reward['id']}: +{reward['amount']} XP，当前 XP {reward['current_xp']}。"
     elif reward_type == "gold":
         currency = str(reward.get("currency") or "gp").upper()
-        message = f"已记录剧情奖励 {reward['id']}: {reward.get('amount', 0)} {currency}。"
+        message = f"已发放剧情奖励 {reward['id']}: +{reward.get('amount', 0)} {currency}，当前 {reward.get('current_amount', 0)} {currency}。"
     else:
-        message = f"已记录剧情奖励 {reward['id']}: {reward.get('amount', 0)} 项 {reward_type or 'reward'}。"
+        message = f"已加入背包 {reward['id']}: {reward.get('amount', 0)} 项 {reward_type or 'reward'}。"
     return message + (description if description else "")
 
 

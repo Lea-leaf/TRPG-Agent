@@ -40,6 +40,21 @@ from app.services.tools._helpers import (
     sync_movement_state,
 )
 
+_CLASS_HIT_DICE = {
+    "野蛮人": "1d12",
+    "战士": "1d10",
+    "圣武士": "1d10",
+    "游侠": "1d10",
+    "吟游诗人": "1d8",
+    "牧师": "1d8",
+    "德鲁伊": "1d8",
+    "武僧": "1d8",
+    "游荡者": "1d8",
+    "邪术师": "1d8",
+    "术士": "1d6",
+    "法师": "1d6",
+}
+
 
 _STATE_CHANGE_KEYS = frozenset({
     "hp_delta",
@@ -94,6 +109,17 @@ def _get_resource_caps(target: dict, player_dict: dict | None = None) -> dict[st
     return {}
 
 
+def _sync_hit_dice_after_level_change(target: dict) -> None:
+    """升级会增加生命骰总数，新生命骰默认可用，供休息工具直接消费。"""
+    role_class = str(target.get("role_class") or "")
+    level = max(1, int(target.get("level", 1) or 1))
+    old_total = max(0, int(target.get("hit_dice_total", 0) or 0))
+    old_remaining = max(0, int(target.get("hit_dice_remaining", old_total) or 0))
+    target["hit_die"] = str(target.get("hit_die") or _CLASS_HIT_DICE.get(role_class) or "1d8")
+    target["hit_dice_total"] = level
+    target["hit_dice_remaining"] = min(level, old_remaining + max(0, level - old_total))
+
+
 @tool
 def load_character_profile(
     role_class: str,
@@ -119,6 +145,7 @@ def load_character_profile(
     profile["name"] = character_name.strip() or key
     profile["id"] = profile["name"]
     profile["side"] = "player"
+    _sync_hit_dice_after_level_change(profile)
 
     return Command(
         update={
@@ -522,6 +549,7 @@ _WIZARD_LEVEL_TABLE: dict[int, dict] = {
     },
     2: {
         "spell_slots": {"spell_slot_lv1": 3},
+        "resources": {"arcane_recovery_uses": 1},
         "new_spells": ["shield"],
         "class_features": ["arcane_recovery"],
         "choose_tradition": True,  # 升到 2 级时选择奥术传承
@@ -567,6 +595,8 @@ def _apply_wizard_level_up(player_dict: dict, new_level: int) -> list[str]:
     hp_gain = max(1, hp_roll.total + con_mod)
     player_dict["max_hp"] = player_dict.get("max_hp", 0) + hp_gain
     player_dict["hp"] = player_dict.get("hp", 0) + hp_gain
+    player_dict["level"] = new_level
+    _sync_hit_dice_after_level_change(player_dict)
     lines.append(f"  HP: +{hp_gain}（{hp_roll} + CON {con_mod}），最大 HP → {player_dict['max_hp']}")
 
     # 法术位更新
@@ -579,6 +609,15 @@ def _apply_wizard_level_up(player_dict: dict, new_level: int) -> list[str]:
             resource_caps[slot_key] = count
             if count > old:
                 lines.append(f"  {slot_key}: {old} → {count}")
+
+    resources = player_dict.setdefault("resources", {})
+    resource_caps = player_dict.setdefault("resource_caps", {})
+    for resource_key, count in table.get("resources", {}).items():
+        old = resources.get(resource_key, 0)
+        resources[resource_key] = count
+        resource_caps[resource_key] = count
+        if count > old:
+            lines.append(f"  {resource_key}: {old} → {count}")
 
     # 新增法术
     known = player_dict.setdefault("known_spells", [])
@@ -623,6 +662,8 @@ def _apply_fighter_level_up(player_dict: dict, new_level: int) -> list[str]:
     hp_gain = max(1, 6 + con_mod)
     player_dict["max_hp"] = player_dict.get("max_hp", 0) + hp_gain
     player_dict["hp"] = player_dict.get("hp", 0) + hp_gain
+    player_dict["level"] = new_level
+    _sync_hit_dice_after_level_change(player_dict)
     lines.append(f"  HP: +{hp_gain}（6 + CON {con_mod}），最大 HP → {player_dict['max_hp']}")
 
     resources = player_dict.setdefault("resources", {})
@@ -646,7 +687,6 @@ def _apply_fighter_level_up(player_dict: dict, new_level: int) -> list[str]:
 
     from app.calculation.proficiency import calculate_proficiency_bonus
     player_dict["proficiency_bonus"] = calculate_proficiency_bonus(new_level)
-    player_dict["level"] = new_level
     lines.extend(sync_eldritch_knight_spellcasting(player_dict))
 
     return lines

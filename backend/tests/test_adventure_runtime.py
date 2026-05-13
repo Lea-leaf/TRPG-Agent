@@ -53,12 +53,12 @@ def _ambush_state() -> dict:
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "goblin_ambush",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "deferred_node_ids": [],
             "transition_log": [],
         }
@@ -88,7 +88,7 @@ def test_runtime_accepts_director_decision_with_current_node_ids_only():
     assert update.applied == "advanced"
     assert update.adventure["pending_exit_option_ids"] == []
     assert update.adventure["active_node_id"] == "goblin_trail_to_cragmaw_hideout"
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush", "goblin_trail_to_cragmaw_hideout"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "goblin_trail_to_cragmaw_hideout"]
     assert update.adventure["deferred_node_ids"] == []
     assert update.adventure["claimed_reward_ids"] == []
     assert "player" not in update.state_update
@@ -101,16 +101,16 @@ def test_runtime_does_not_double_award_claimed_node_reward_but_reconciles_arriva
             "module_id": "lost_mine",
             "active_node_id": "cragmaw_hideout_entrance",
             "unlocked_node_ids": [
-                "lost_mine_start",
+                "adventure_hook_meet_me_in_phandalin",
                 "goblin_ambush",
                 "cragmaw_hideout_entrance",
             ],
-            "completed_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "claimed_reward_ids": ["goblin_ambush_hideout_75_xp"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "cragmaw_hideout_entrance"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "cragmaw_hideout_entrance"],
             "deferred_node_ids": [],
             "transition_log": [],
         },
@@ -139,13 +139,13 @@ def test_runtime_marks_node_reward_pending_instead_of_granting_xp():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "goblin_ambush",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "completed_node_ids": [],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "deferred_node_ids": [],
             "transition_log": [],
         },
@@ -363,13 +363,13 @@ def test_runtime_commits_director_target_even_when_player_choice_remains_inside_
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "goblin_ambush",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "known_clue_ids": [],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin", "goblin_ambush"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin", "goblin_ambush"],
             "deferred_node_ids": ["phandalin"],
             "transition_log": [],
         },
@@ -401,8 +401,8 @@ def test_runtime_advances_when_director_confidently_selects_ready_exit():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -424,9 +424,9 @@ def test_runtime_advances_when_director_confidently_selects_ready_exit():
 
     assert update.applied == "advanced"
     assert update.adventure["active_node_id"] == "goblin_ambush"
-    assert update.adventure["completed_node_ids"] == ["lost_mine_start"]
-    assert update.adventure["unlocked_node_ids"] == ["lost_mine_start", "goblin_ambush"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush"]
+    assert update.adventure["completed_node_ids"] == ["adventure_hook_meet_me_in_phandalin"]
+    assert update.adventure["unlocked_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["node_id"] == "goblin_ambush"
 
 
@@ -471,8 +471,8 @@ def test_pre_turn_runtime_advances_before_main_reply_when_player_selects_exit():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -494,8 +494,8 @@ def test_pre_turn_runtime_advances_before_main_reply_when_player_selects_exit():
 
     assert update.applied == "pre_turn_advanced"
     assert update.adventure["active_node_id"] == "goblin_ambush"
-    assert update.adventure["completed_node_ids"] == ["lost_mine_start"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush"]
+    assert update.adventure["completed_node_ids"] == ["adventure_hook_meet_me_in_phandalin"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["node_id"] == "goblin_ambush"
 
 
@@ -503,8 +503,8 @@ def test_pre_turn_runtime_does_not_advance_uncertain_choice():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -527,7 +527,7 @@ def test_pre_turn_runtime_does_not_advance_uncertain_choice():
     assert update.applied == "pre_turn_advanced"
     assert update.adventure["active_node_id"] == "goblin_ambush"
     assert update.adventure["pending_exit_option_ids"] == []
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"]
 
 
 def test_pre_turn_runtime_does_not_commit_generic_continue_on_multi_exit_node():
@@ -570,8 +570,8 @@ def test_pre_turn_runtime_advances_clear_low_confidence_single_exit():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -593,7 +593,7 @@ def test_pre_turn_runtime_advances_clear_low_confidence_single_exit():
 
     assert update.applied == "pre_turn_advanced"
     assert update.adventure["active_node_id"] == "goblin_ambush"
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"]
 
 
 def test_pre_turn_runtime_switches_to_semantic_candidate_node():
@@ -601,12 +601,12 @@ def test_pre_turn_runtime_switches_to_semantic_candidate_node():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "known_clue_ids": ["redbrand_threat", "sildar_cragmaw_castle", "side_quests_unlocked"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         }
@@ -628,7 +628,7 @@ def test_pre_turn_runtime_switches_to_semantic_candidate_node():
     assert update.applied == "pre_turn_switched"
     assert update.adventure["active_node_id"] == "goblin_ambush"
     assert update.adventure["deferred_node_ids"] == ["phandalin"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["node_id"] == "goblin_ambush"
 
 
@@ -637,12 +637,12 @@ def test_runtime_switches_to_semantic_candidate_node_after_reply():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "known_clue_ids": ["redbrand_threat", "sildar_cragmaw_castle", "side_quests_unlocked"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         }
@@ -664,7 +664,7 @@ def test_runtime_switches_to_semantic_candidate_node_after_reply():
     assert update.applied == "switched"
     assert update.adventure["active_node_id"] == "goblin_ambush"
     assert update.adventure["deferred_node_ids"] == ["phandalin"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["node_id"] == "goblin_ambush"
 
 
@@ -674,13 +674,13 @@ def test_runtime_switches_to_director_room_without_module_specific_entrance_rewr
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
-            "completed_node_ids": ["lost_mine_start"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         },
@@ -766,13 +766,13 @@ def test_runtime_uses_node_routing_instead_of_module_specific_switch_rules():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
-            "completed_node_ids": ["lost_mine_start"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         },
@@ -802,12 +802,12 @@ def test_runtime_revisits_deferred_node_when_director_requests_backtrack():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "phandalin_arrival"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         }
@@ -829,7 +829,7 @@ def test_runtime_revisits_deferred_node_when_director_requests_backtrack():
     assert update.applied == "revisited"
     assert update.adventure["active_node_id"] == "goblin_ambush"
     assert update.adventure["deferred_node_ids"] == ["phandalin"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["kind"] == "node_revisited"
 
 
@@ -838,12 +838,12 @@ def test_runtime_revisits_completed_breadcrumb_node_after_phandalin_detour():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "known_clue_ids": [],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": [],
             "transition_log": [],
         }
@@ -865,7 +865,7 @@ def test_runtime_revisits_completed_breadcrumb_node_after_phandalin_detour():
     assert update.applied == "revisited"
     assert update.adventure["active_node_id"] == "goblin_ambush"
     assert update.adventure["deferred_node_ids"] == ["phandalin"]
-    assert update.adventure["breadcrumb_node_ids"] == ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin", "goblin_ambush"]
+    assert update.adventure["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin", "goblin_ambush"]
     assert update.state_update["adventure_runtime_directive"]["kind"] == "node_revisited"
 
 
@@ -874,12 +874,12 @@ def test_pre_turn_runtime_revisits_deferred_node_before_main_reply():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
-            "completed_node_ids": ["lost_mine_start", "phandalin_arrival"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
+            "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin_arrival", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": ["goblin_ambush"],
             "transition_log": [],
         }
@@ -929,8 +929,8 @@ def test_runtime_does_not_warn_for_system_authorized_opening_companion():
         "player": {"name": "温良"},
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -987,12 +987,12 @@ def test_director_payload_keeps_full_history_and_structured_runtime_context():
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "goblin_ambush",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "completed_node_ids": [],
             "known_clue_ids": ["goblin_trail"],
             "completed_event_ids": ["goblin_ambush_resolved"],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
             "deferred_node_ids": [],
             "transition_log": [],
         },
@@ -1312,13 +1312,13 @@ def test_runtime_writes_director_visible_clue_window_without_dropping_full_clues
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "phandalin",
-            "unlocked_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": ["delivery_job", "redbrands_control_phandalin", "glasstaff_name", "sildar_plan"],
             "completed_event_ids": [],
             "claimed_reward_ids": [],
             "pending_exit_option_ids": [],
-            "breadcrumb_node_ids": ["lost_mine_start", "goblin_ambush", "phandalin"],
+            "breadcrumb_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush", "phandalin"],
             "deferred_node_ids": [],
             "transition_log": [],
         }

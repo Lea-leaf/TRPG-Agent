@@ -201,7 +201,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "adventure": {
                 "module_id": "lost_mine",
                 "active_node_id": "goblin_ambush",
-                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
                 "completed_node_ids": [],
                 "known_clue_ids": [],
                 "completed_event_ids": [],
@@ -245,7 +245,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "adventure": {
                 "module_id": "lost_mine",
                 "active_node_id": "goblin_ambush",
-                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
                 "completed_node_ids": [],
                 "known_clue_ids": [],
                 "completed_event_ids": [],
@@ -280,8 +280,8 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "phase": "exploration",
             "adventure": {
                 "module_id": "lost_mine",
-                "active_node_id": "lost_mine_start",
-                "unlocked_node_ids": ["lost_mine_start"],
+                "active_node_id": "adventure_hook_meet_me_in_phandalin",
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
                 "completed_node_ids": [],
                 "known_clue_ids": [],
                 "completed_event_ids": [],
@@ -311,8 +311,8 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "adventure": {
                 "module_id": "lost_mine",
                 "active_node_id": "goblin_ambush",
-                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
-                "completed_node_ids": ["lost_mine_start"],
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
+                "completed_node_ids": ["adventure_hook_meet_me_in_phandalin"],
                 "known_clue_ids": [],
                 "completed_event_ids": [],
                 "pending_exit_option_ids": [],
@@ -395,7 +395,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "adventure": {
                 "module_id": "lost_mine",
                 "active_node_id": "goblin_ambush",
-                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
                 "completed_node_ids": [],
                 "known_clue_ids": [],
                 "completed_event_ids": [],
@@ -406,7 +406,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         history = await service.get_history(session_id="demo", limit=10)
 
-        self.assertEqual(["lost_mine_start", "goblin_ambush"], history["adventure"]["unlocked_node_ids"])
+        self.assertEqual(["adventure_hook_meet_me_in_phandalin", "goblin_ambush"], history["adventure"]["unlocked_node_ids"])
         self.assertEqual(["goblin_ambush"], history["adventure"]["breadcrumb_node_ids"])
         self.assertEqual([], history["adventure"]["deferred_node_ids"])
 

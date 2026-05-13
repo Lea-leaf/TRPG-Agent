@@ -1,12 +1,18 @@
 <!-- frontend/src/components/Dice3D/Dice3D.vue -->
 <template>
-  <div ref="containerRef" class="dice-3d-container"></div>
+  <div ref="containerRef" class="dice-3d-container" :class="{ embedded }"></div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
+
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 // ==================== 响应式变量 ====================
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -18,8 +24,11 @@ let diceMesh: THREE.Mesh | null = null
 let diceBody: CANNON.Body | null = null
 let world: CANNON.World | null = null
 let animationId: number | null = null
+let scriptedAnimationId: number | null = null
 let isRolling = false
 let isDecelerating = false
+let isScriptedRolling = false
+let isDisplayLocked = false
 let decelerationStartTime = 0
 let decelerationDuration = 3000 // 最大引导时长3秒
 let resolveRoll: ((value: number) => void) | null = null
@@ -42,6 +51,8 @@ let currentGlowNumber: number = -1
 let glowTimer: ReturnType<typeof setTimeout> | null = null
 let faceCenters: THREE.Vector3[] = []
 
+const getDiceRadius = () => props.embedded ? 1.65 : 1.2
+
 // ==================== 视觉偏移 ====================
 const getVisualOffset = (num: number): number => {
   const offsets: Record<number, number> = {
@@ -59,51 +70,81 @@ const createNumberTexture = (num: number, glow: boolean = false): THREE.CanvasTe
   canvas.width = 512
   canvas.height = 512
   const ctx = canvas.getContext('2d')!
-  
-  ctx.fillStyle = '#1a0f0a'
+
+  const gradient = ctx.createLinearGradient(96, 32, 416, 480)
+  gradient.addColorStop(0, '#263fd8')
+  gradient.addColorStop(0.48, '#1020a8')
+  gradient.addColorStop(1, '#07125c')
+  ctx.fillStyle = gradient
   ctx.fillRect(0, 0, canvas.width, canvas.height)
-  
-  ctx.strokeStyle = '#c4923a'
-  ctx.lineWidth = 12
-  ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40)
-  
-  ctx.strokeStyle = '#d4a060'
+
+  // 用金线三角结构强化 D20 面片的仪式感，避免依赖额外贴图资源。
+  const outerTriangle = new Path2D()
+  outerTriangle.moveTo(256, 46)
+  outerTriangle.lineTo(442, 424)
+  outerTriangle.lineTo(70, 424)
+  outerTriangle.closePath()
+
+  const innerTriangle = new Path2D()
+  innerTriangle.moveTo(256, 118)
+  innerTriangle.lineTo(370, 356)
+  innerTriangle.lineTo(142, 356)
+  innerTriangle.closePath()
+
+  ctx.strokeStyle = '#d9b85f'
+  ctx.lineWidth = 16
+  ctx.lineJoin = 'round'
+  ctx.stroke(outerTriangle)
+
+  ctx.strokeStyle = '#f0cf73'
+  ctx.lineWidth = 5
+  ctx.stroke(innerTriangle)
+
+  ctx.strokeStyle = 'rgba(217, 184, 95, 0.75)'
+  ctx.lineWidth = 4
+  ctx.beginPath()
+  ctx.moveTo(256, 46)
+  ctx.lineTo(142, 356)
+  ctx.moveTo(256, 46)
+  ctx.lineTo(370, 356)
+  ctx.moveTo(70, 424)
+  ctx.lineTo(370, 356)
+  ctx.moveTo(442, 424)
+  ctx.lineTo(142, 356)
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(246, 213, 117, 0.55)'
   ctx.lineWidth = 3
-  ctx.strokeRect(35, 35, canvas.width - 70, canvas.height - 70)
-  
+  ctx.beginPath()
+  ctx.moveTo(112, 156)
+  ctx.lineTo(212, 92)
+  ctx.moveTo(400, 156)
+  ctx.lineTo(300, 92)
+  ctx.moveTo(138, 402)
+  ctx.lineTo(220, 426)
+  ctx.moveTo(374, 402)
+  ctx.lineTo(292, 426)
+  ctx.stroke()
+
   const offsetY = getVisualOffset(num)
   const centerY = canvas.height / 2 + offsetY
   
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `bold 190px "Cinzel", "Georgia", serif`
   if (glow) {
-    ctx.shadowColor = '#ffffff'
-    ctx.shadowBlur = 40
-    ctx.fillStyle = '#ffffff'
-    ctx.font = `bold 200px "Cinzel", "Georgia", serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
+    ctx.shadowColor = '#70a7ff'
+    ctx.shadowBlur = 46
+    ctx.fillStyle = '#fff5c4'
     ctx.fillText(num.toString(), canvas.width / 2, centerY)
-    
-    ctx.shadowBlur = 20
-    ctx.fillStyle = '#ffffaa'
-    ctx.fillText(num.toString(), canvas.width / 2, centerY)
-    
-    ctx.shadowBlur = 5
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(num.toString(), canvas.width / 2, centerY)
-    
-    ctx.shadowBlur = 0
   } else {
-    ctx.fillStyle = '#ffcc80'
-    ctx.font = `bold 200px "Cinzel", "Georgia", serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
+    ctx.shadowColor = 'rgba(4, 10, 45, 0.85)'
+    ctx.shadowBlur = 12
+    ctx.fillStyle = '#ffd84f'
     ctx.fillText(num.toString(), canvas.width / 2, centerY)
   }
-  
-  ctx.fillStyle = '#8a6a4a'
-  ctx.font = `20px "Cinzel", serif`
-  ctx.fillText('⚔', 50, 60)
-  ctx.fillText('⚔', canvas.width - 70, canvas.height - 50)
+
+  ctx.shadowBlur = 0
   
   const texture = new THREE.CanvasTexture(canvas)
   texture.needsUpdate = true
@@ -214,7 +255,8 @@ const computeFaceCenters = (geometry: THREE.BufferGeometry) => {
 
 // ==================== 创建骰子 ====================
 const createDice = () => {
-  const geometry = new THREE.IcosahedronGeometry(1.2, 0)
+  const diceRadius = getDiceRadius()
+  const geometry = new THREE.IcosahedronGeometry(diceRadius, 0)
   createCustomUVs(geometry)
   
   faceCenters = computeFaceCenters(geometry)
@@ -226,10 +268,10 @@ const createDice = () => {
     const material = new THREE.MeshStandardMaterial({
       map: faceTextures[i],
       color: 0xffffff,
-      metalness: 0.2,
-      roughness: 0.4,
-      emissive: 0x442200,
-      emissiveIntensity: 0.2
+      metalness: 0.42,
+      roughness: 0.28,
+      emissive: 0x071f88,
+      emissiveIntensity: 0.18
     })
     materials.push(material)
   }
@@ -242,8 +284,8 @@ const createDice = () => {
   mesh.castShadow = true
   mesh.receiveShadow = false
   
-  const edgesGeo = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.2, 0))
-  const edgesMat = new THREE.LineBasicMaterial({ color: 0xc4923a })
+  const edgesGeo = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(diceRadius, 0))
+  const edgesMat = new THREE.LineBasicMaterial({ color: 0xf0cf73 })
   const wireframe = new THREE.LineSegments(edgesGeo, edgesMat)
   mesh.add(wireframe)
   
@@ -363,6 +405,81 @@ const initPhysics = () => {
   world.defaultContactMaterial.materials = [diceMaterial, groundMaterial]
 }
 
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
+const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+// 卡片里的骰子不需要完整物理落地，直接用短动画把目标面锁到正面。
+const playScriptedRoll = (targetNumber: number): Promise<number> => {
+  return new Promise((resolve) => {
+    if (!diceMesh || !camera) {
+      resolve(targetNumber)
+      return
+    }
+
+    if (scriptedAnimationId) {
+      cancelAnimationFrame(scriptedAnimationId)
+      scriptedAnimationId = null
+    }
+
+    isRolling = false
+    isDecelerating = false
+    isScriptedRolling = true
+    isDisplayLocked = false
+    targetQuatCannon = null
+    expectedResult = targetNumber
+
+    diceMesh.position.set(-2.2, 1.8, 0)
+    diceMesh.rotation.set(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI
+    )
+
+    const startTime = performance.now()
+    const rollDuration = 1700
+    const startQuat = diceMesh.quaternion.clone()
+    const spinAxis = new THREE.Vector3(0.55, 1, 0.32).normalize()
+    const spinQuat = new THREE.Quaternion().setFromAxisAngle(spinAxis, Math.PI * 7.6)
+    const targetQuat = getTargetQuaternion(targetNumber)
+    const preTargetQuat = spinQuat.clone().multiply(startQuat)
+
+    const tick = () => {
+      if (!diceMesh || !camera) {
+        isScriptedRolling = false
+        resolve(targetNumber)
+        return
+      }
+
+      const elapsed = performance.now() - startTime
+      const progress = Math.min(elapsed / rollDuration, 1)
+      const travel = easeOutCubic(progress)
+      const settle = easeInOutCubic(Math.max(0, (progress - 0.45) / 0.55))
+      const travelY = 1.8 - travel * 1.8 + Math.sin(travel * Math.PI) * 0.52
+
+      diceMesh.position.set(-2.2 + travel * 2.2, travelY, 0)
+      diceMesh.quaternion
+        .copy(startQuat)
+        .slerp(preTargetQuat, Math.min(progress / 0.55, 1))
+        .slerp(targetQuat, settle)
+
+      if (progress < 1) {
+        scriptedAnimationId = requestAnimationFrame(tick)
+        return
+      }
+
+      diceMesh.position.set(0, 0, 0)
+      diceMesh.quaternion.copy(targetQuat)
+      isScriptedRolling = false
+      isDisplayLocked = true
+      scriptedAnimationId = null
+      glowByNumber(targetNumber)
+      resolve(targetNumber)
+    }
+
+    tick()
+  })
+}
+
 // ==================== 掷骰子 ====================
 const throwDice = (expectedNumber?: number): Promise<number> => {
   return new Promise((resolve) => {
@@ -375,6 +492,11 @@ const throwDice = (expectedNumber?: number): Promise<number> => {
       expectedResult = Math.floor(Math.random() * 20) + 1
     } else {
       expectedResult = expectedNumber
+    }
+
+    if (props.embedded) {
+      playScriptedRoll(expectedResult).then(resolve)
+      return
     }
     
     isRolling = true
@@ -448,14 +570,17 @@ const checkStopped = () => {
 const initScene = () => {
   if (!containerRef.value) return
   
-  const width = window.innerWidth
-  const height = window.innerHeight
+  const { width, height } = getViewportSize()
   
   scene = new THREE.Scene()
   scene.background = null
   
   camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000)
-  camera.position.set(5.5, 2.5, 7)
+  if (props.embedded) {
+    camera.position.set(0, 0.25, 5.6)
+  } else {
+    camera.position.set(4.7, 2.2, 6.2)
+  }
   camera.lookAt(0, 0, 0)
   
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
@@ -465,23 +590,23 @@ const initScene = () => {
   renderer.shadowMap.enabled = true
   containerRef.value.appendChild(renderer.domElement)
   
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.6)
+  const ambientLight = new THREE.AmbientLight(0x5969aa, 0.72)
   scene.add(ambientLight)
   
-  const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5)
+  const mainLight = new THREE.DirectionalLight(0xffedb0, 1.75)
   mainLight.position.set(2, 5, 3)
   mainLight.castShadow = true
   scene.add(mainLight)
   
-  const backLight = new THREE.DirectionalLight(0xccaa88, 0.8)
+  const backLight = new THREE.DirectionalLight(0x7091ff, 0.75)
   backLight.position.set(-2, 2, -4)
   scene.add(backLight)
   
-  const fillLight = new THREE.PointLight(0xaa8866, 0.5)
+  const fillLight = new THREE.PointLight(0x456dff, 0.52)
   fillLight.position.set(1, 2, 2)
   scene.add(fillLight)
   
-  const rimLight = new THREE.PointLight(0xc4923a, 0.5)
+  const rimLight = new THREE.PointLight(0xf0cf73, 0.8)
   rimLight.position.set(0, 1, -4.5)
   scene.add(rimLight)
   
@@ -493,7 +618,15 @@ const initScene = () => {
 const animate = () => {
   const now = performance.now()
   
-  if (world && diceBody && diceMesh) {
+  if (isScriptedRolling) {
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera)
+    }
+    animationId = requestAnimationFrame(animate)
+    return
+  }
+
+  if (world && diceBody && diceMesh && !isDisplayLocked) {
     if (isDecelerating && targetQuatCannon) {
       // 扭矩引导模式
       const qCurrent = diceBody.quaternion
@@ -571,10 +704,23 @@ const animate = () => {
 }
 
 // ==================== 窗口适配 ====================
+const getViewportSize = () => {
+  if (props.embedded && containerRef.value) {
+    const rect = containerRef.value.getBoundingClientRect()
+    return {
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
+    }
+  }
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }
+}
+
 const handleResize = () => {
   if (!containerRef.value || !renderer || !camera) return
-  const width = window.innerWidth
-  const height = window.innerHeight
+  const { width, height } = getViewportSize()
   camera.aspect = width / height
   camera.updateProjectionMatrix()
   renderer.setSize(width, height)
@@ -585,6 +731,10 @@ const cleanup = () => {
   if (animationId) {
     cancelAnimationFrame(animationId)
     animationId = null
+  }
+  if (scriptedAnimationId) {
+    cancelAnimationFrame(scriptedAnimationId)
+    scriptedAnimationId = null
   }
   if (glowTimer) {
     clearTimeout(glowTimer)
@@ -636,6 +786,9 @@ const cleanup = () => {
   resolveRoll = null
   expectedResult = null
   isDecelerating = false
+  isRolling = false
+  isScriptedRolling = false
+  isDisplayLocked = false
   targetQuatCannon = null
   lowHeightStartTime = null
 }
@@ -666,6 +819,15 @@ onUnmounted(() => {
   pointer-events: none;
   z-index: 9999;
 }
+
+.dice-3d-container.embedded {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  z-index: 1;
+}
+
 .dice-3d-container canvas {
   pointer-events: auto;
 }

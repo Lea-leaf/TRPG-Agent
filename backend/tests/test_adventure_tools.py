@@ -97,6 +97,13 @@ def test_manage_adventure_schema_exposes_only_hosting_path_actions():
     assert "include_help" not in schema["properties"]
 
 
+def test_claim_reward_tool_schema_does_not_leak_concrete_reward_ids():
+    schema_text = json.dumps(claim_adventure_reward.args_schema.model_json_schema(), ensure_ascii=False)
+
+    assert "goblin_ambush_hideout_75_xp" not in claim_adventure_reward.description
+    assert "goblin_ambush_hideout_75_xp" not in schema_text
+
+
 def test_manage_adventure_advance_settles_single_exit_local_requirements():
     state = {
         "adventure": {
@@ -253,7 +260,7 @@ def test_manage_adventure_can_resolve_clue_and_advance():
 
 def test_claim_adventure_reward_records_treasure_without_touching_player_xp():
     state = {
-        "player": {"name": "温良", "xp": 75},
+        "player": {"name": "温良", "xp": 75, "inventory": []},
         "adventure": {
             "module_id": "lost_mine",
             "active_node_id": "cragmaw_hideout_klarg_cave",
@@ -285,13 +292,61 @@ def test_claim_adventure_reward_records_treasure_without_touching_player_xp():
         tool_input={"reward_id": "klarg_treasure_cache", "state": state},
     )
 
-    assert "player" not in claimed.update
+    assert claimed.update["player"]["xp"] == 75
+    assert claimed.update["player"]["inventory"][0]["id"] == "klarg_treasure_cache"
+    assert claimed.update["player"]["inventory"][0]["type"] == "treasure"
+    assert claimed.update["player"]["inventory"][0]["quantity"] == 1
+    assert "克拉格的小金库" in claimed.update["player"]["inventory"][0]["description"]
     assert claimed.update["adventure"]["claimed_reward_ids"] == ["klarg_treasure_cache"]
     assert claimed.update["adventure"]["pending_reward_grants"] == []
     payload = _payload(claimed)
     assert payload["result"]["type"] == "treasure"
     assert payload["result"]["amount"] == 1
+    assert payload["result"]["inventory_item_id"] == "klarg_treasure_cache"
     assert "克拉格的小金库" in payload["message"]
+
+
+def test_claim_adventure_reward_adds_gold_to_player_coins():
+    state = {
+        "player": {"name": "温良", "xp": 75, "coins": {"gp": 2}},
+        "adventure": {
+            "module_id": "lost_mine",
+            "active_node_id": "barthen_provisions",
+            "unlocked_node_ids": ["barthen_provisions"],
+            "completed_node_ids": [],
+            "known_clue_ids": [],
+            "completed_event_ids": ["phandalin_supplies_delivered"],
+            "claimed_reward_ids": [],
+            "pending_reward_grants": [
+                {
+                    "id": "phandalin_delivery_10gp",
+                    "node_id": "barthen_provisions",
+                    "type": "gold",
+                    "amount": 10,
+                    "scope": "per_player",
+                    "currency": "gp",
+                    "description": "把开局护送的补给货车交到巴森补给后，每名玩家获得10 gp报酬。",
+                    "requires": ["phandalin_supplies_delivered"],
+                }
+            ],
+            "pending_exit_option_ids": [],
+            "breadcrumb_node_ids": ["barthen_provisions"],
+            "deferred_node_ids": [],
+            "transition_log": [],
+        },
+    }
+
+    claimed = _invoke_tool(
+        claim_adventure_reward,
+        tool_input={"reward_id": "phandalin_delivery_10gp", "state": state},
+    )
+
+    assert claimed.update["player"]["coins"]["gp"] == 12
+    assert claimed.update["player"]["xp"] == 75
+    assert claimed.update["adventure"]["claimed_reward_ids"] == ["phandalin_delivery_10gp"]
+    payload = _payload(claimed)
+    assert payload["result"]["current_amount"] == 12
+    assert "+10 GP" in payload["message"]
 
 
 def test_manage_adventure_resolve_returns_available_exits_after_scene_result():
@@ -334,8 +389,8 @@ def test_manage_adventure_resolve_rejects_events_outside_current_node():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -359,8 +414,8 @@ def test_compat_mark_event_rejects_events_outside_current_node():
             "state": {
                 "adventure": {
                     "module_id": "lost_mine",
-                    "active_node_id": "lost_mine_start",
-                    "unlocked_node_ids": ["lost_mine_start"],
+                    "active_node_id": "adventure_hook_meet_me_in_phandalin",
+                    "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
                     "completed_node_ids": [],
                     "known_clue_ids": [],
                     "completed_event_ids": [],
@@ -449,8 +504,8 @@ def test_switch_adventure_node_updates_bookmark_without_exit_requirement():
     state = {
         "adventure": {
             "module_id": "lost_mine",
-            "active_node_id": "lost_mine_start",
-            "unlocked_node_ids": ["lost_mine_start"],
+            "active_node_id": "adventure_hook_meet_me_in_phandalin",
+            "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin"],
             "completed_node_ids": [],
             "known_clue_ids": [],
             "completed_event_ids": [],
@@ -461,7 +516,7 @@ def test_switch_adventure_node_updates_bookmark_without_exit_requirement():
     result = _invoke_tool(
         switch_adventure_node,
         tool_input={
-            "node_id": "phandalin_arrival",
+            "node_id": "phandalin",
             "reason": "玩家决定暂时不追踪地精，继续护送补给。",
             "state": state,
         },
@@ -469,7 +524,7 @@ def test_switch_adventure_node_updates_bookmark_without_exit_requirement():
 
     assert result.update["adventure"]["active_node_id"] == "phandalin"
     assert result.update["adventure"]["completed_node_ids"] == []
-    assert result.update["adventure"]["deferred_node_ids"] == ["lost_mine_start"]
-    assert result.update["adventure"]["breadcrumb_node_ids"] == ["lost_mine_start", "phandalin"]
+    assert result.update["adventure"]["deferred_node_ids"] == ["adventure_hook_meet_me_in_phandalin"]
+    assert result.update["adventure"]["breadcrumb_node_ids"] == ["adventure_hook_meet_me_in_phandalin", "phandalin"]
     payload = _payload(result)
     assert payload["result"]["to"] == "phandalin"

@@ -16,6 +16,12 @@
     </div>
   </div>
 
+  <DiceRollCard
+    v-else-if="message.type === 'dice_roll' && diceRoll"
+    :roll="diceRoll"
+    class="message-dice-card"
+  />
+
   <!-- 普通消息 -->
   <div v-else :class="['message-wrapper', message.role]" @pointerdown="handleMessagePointerDown">
     <div class="avatar">
@@ -47,6 +53,7 @@ import { computed, inject, watch, onUnmounted, reactive, ref, type ComputedRef }
 import { marked } from 'marked'
 import type { ChatMessage } from '../../Services_/chatService'
 import HpBar from './SideCharacterPanel/HpBar.vue'
+import DiceRollCard from './DiceRollCard.vue'
 import { adaptLLMOutput } from '../../composables/markdownAdapter'
 import { useTypewriter } from '../../composables/useTypewriter'
 
@@ -81,6 +88,8 @@ const hpChanges = computed(() => {
     return { ...change, old_hp: oldHp }
   })
 })
+
+const diceRoll = computed(() => props.message.metadata?.dice_roll)
 
 const avatarUrl = computed(() => props.message.avatar ?? undefined)
 const displayName = computed(() => {

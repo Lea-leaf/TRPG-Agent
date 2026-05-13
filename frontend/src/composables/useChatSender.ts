@@ -1,6 +1,6 @@
 // frontend/src/composables/useChatSender.ts
 import { ChatApiError, chatService } from '../Services_/chatService'
-import type { HpChange, ReactionResponse } from '../Services_/chatService'
+import type { HpChange, ReactionResponse, DiceRollEvent } from '../Services_/chatService'
 import type { Ref } from 'vue'
 
 const buildUserError = (error: unknown): string => {
@@ -21,6 +21,7 @@ export function useChatSender(
   addAssistantMessage: (content: string, isStreamingChunk?: boolean) => void,
   addCombatMessage: (content: string, hpChanges: HpChange[]) => void,
   addToolMessage: (content: string) => void,
+  addDiceRollMessage: (roll: DiceRollEvent) => void,
   addConfirmedMessage: (reason?: string) => void,
   setPendingAction: (action: any) => void,
   setPlayerState: (state: any) => void,
@@ -31,7 +32,6 @@ export function useChatSender(
   setSending: (sending: boolean) => void,
   clearError: () => void,
   pendingActionRef: Ref<any>,
-  onDiceRollAnimation?: (rawRoll: number) => Promise<void>,
   startLoading?: () => void,
   stopLoading?: () => void
 ) {
@@ -73,10 +73,9 @@ export function useChatSender(
           stopLoadingOnce() // 工具消息立即停止 loading
           addToolMessage(content)
         },
-        onDiceRoll: async (rawRoll) => {
-          if (onDiceRollAnimation) {
-            await onDiceRollAnimation(rawRoll)
-          }
+        onDiceRoll: async (roll) => {
+          stopLoadingOnce()
+          addDiceRollMessage(roll)
         },
         onStateUpdate: (player, combat, _sceneUnits, _deadUnits, space) => {
           if (player !== undefined) setPlayerState(player)

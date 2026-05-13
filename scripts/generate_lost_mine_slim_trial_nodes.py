@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PDF = Path(
     r"C:\Users\wenliang\Downloads\DND_5E\DND_5E_规则书\DND_5E_新手入门套装CN\DnD_5E_新手套组_冒险模组CN.pdf"
 )
-DEFAULT_OUT = ROOT / "backend" / "data" / "adventures" / "lost_mine" / "nodes.canonical.json"
-DEFAULT_REPORT = ROOT / "backend" / "data" / "adventures" / "lost_mine" / "nodes.canonical.report.json"
+DEFAULT_OUT = ROOT / "backend" / "data" / "adventures" / "lost_mine" / "nodes.json"
+DEFAULT_REPORT = ROOT / "backend" / "data" / "adventures" / "lost_mine" / "nodes.report.json"
 DEFAULT_REFERENCE = ROOT / "backend" / "data" / "adventures" / "lost_mine" / "node_generation_reference.json"
 
 

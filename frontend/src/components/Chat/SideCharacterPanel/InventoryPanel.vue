@@ -29,8 +29,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { PlayerState, WeaponData } from '../../../Services_/characterStateService'
-import { translateWeaponName } from '../../../Services_/nameTranslator'
+import type { InventoryItemData, PlayerState, WeaponData } from '../../../Services_/characterStateService'
+import { translateItemName, translateWeaponName } from '../../../Services_/nameTranslator'
 
 type InventoryEntry = {
   key: string
@@ -44,12 +44,58 @@ const props = defineProps<{
   externalPlayer: PlayerState | null
 }>()
 
-// 背包页直接消费后端当前真实会传的 weapons；后续若接入 items 字段，在这里扩展即可
+const currencyOrder = ['pp', 'gp', 'ep', 'sp', 'cp']
+const currencyLabels: Record<string, string> = {
+  cp: 'CP',
+  sp: 'SP',
+  ep: 'EP',
+  gp: 'GP',
+  pp: 'PP',
+}
+
+// 背包条目以 id 为稳定事实源，name 缺失时仍能展示药水。
+const resolveItemName = (item: InventoryItemData): string => {
+  if (item.name?.trim()) return item.name
+  if (item.id?.trim()) return translateItemName(item.id)
+  if (item.name_en?.trim()) return translateItemName(item.name_en)
+  return '未知道具'
+}
+
+// 价格是购物后的校验信息；剧情财宝没有标价时只显示描述。
+const formatItemDetail = (item: InventoryItemData): string => {
+  const parts = [item.description?.trim()].filter(Boolean) as string[]
+  if (typeof item.price_gp === 'number') {
+    parts.push(`参考价 ${item.price_gp} GP`)
+  }
+  return parts.join(' · ')
+}
+
+// 背包页展示角色卡里的真实持有状态：钱袋、剧情奖励物品和武器。
 const inventoryEntries = computed<InventoryEntry[]>(() => {
   const player = props.externalPlayer
   if (!player) return []
 
-  return (player.weapons ?? [])
+  const coinEntries = currencyOrder
+    .filter((currency) => (player.coins?.[currency] ?? 0) > 0)
+    .map((currency) => ({
+      key: `coin-${currency}`,
+      name: currencyLabels[currency],
+      kind: '货币',
+      detail: '剧情奖励钱袋',
+      quantityText: `${player.coins?.[currency] ?? 0}`,
+    }))
+
+  const rewardEntries = (player.inventory ?? [])
+    .filter((item): item is InventoryItemData => Boolean(item?.id || item?.name || item?.name_en))
+    .map((item, index) => ({
+      key: item.id || `${item.name}-${index}`,
+      name: resolveItemName(item),
+      kind: item.type === 'treasure' ? '财宝' : item.type === 'potion' ? '药水' : '道具',
+      detail: formatItemDetail(item),
+      quantityText: `x${item.quantity ?? 1}`,
+    }))
+
+  const weaponEntries = (player.weapons ?? [])
     .filter((weapon): weapon is WeaponData => Boolean(weapon?.name))
     .map((weapon, index) => ({
       key: `${weapon.name}-${index}`,
@@ -58,6 +104,8 @@ const inventoryEntries = computed<InventoryEntry[]>(() => {
       detail: [weapon.damage_dice, weapon.damage_type].filter(Boolean).join(' '),
       quantityText: 'x1',
     }))
+
+  return [...coinEntries, ...rewardEntries, ...weaponEntries]
 })
 </script>
 

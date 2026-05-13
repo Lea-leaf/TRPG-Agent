@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import d20
 
-from app.services.tools._helpers import consume_action_resource, has_action_resource
 from app.services.class_actions.types import ClassActionContext, ClassActionResult
 
 BATTLE_MASTER_ACTION_IDS: tuple[str, ...] = (
@@ -134,6 +133,8 @@ def use_trip_attack(context: ClassActionContext) -> ClassActionResult:
 
 def use_rally(context: ClassActionContext) -> ClassActionResult:
     """鼓舞是独立附赠动作：消耗卓越骰，为能听见或看见你的盟友提供临时 HP。"""
+    from app.services.tools._helpers import consume_action_resource, has_action_resource
+
     actor = context.actor
     target = context.target
     actor_name = actor.get("name", "角色")
