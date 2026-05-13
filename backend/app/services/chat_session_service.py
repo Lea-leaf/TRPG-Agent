@@ -12,13 +12,27 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
 from app.adventures.models import AdventureState
+from app.adventures.navigation import normalize_adventure_state
+from app.adventures.runtime import (
+    AdventureDirector,
+    LLMAdventureDirector,
+    AdventureRuntimeUpdate,
+    adjudicate_and_apply_adventure_progress,
+    adjudicate_and_apply_pre_turn_adventure_progress,
+)
 from app.config.settings import settings
 from app.graph.builder import build_graph
 from app.memory.checkpointer import close_checkpointer, get_checkpointer
 from app.memory.context_assembler import is_runtime_state_message
 from app.services.session_store import purge_chat_session_data, touch_chat_session
 from app.services.tools._helpers import compute_ac
-from app.utils.agent_trace import trace_chat_error, trace_chat_request, trace_chat_result
+from app.utils.agent_trace import (
+    trace_adventure_runtime_failed,
+    trace_adventure_runtime_update,
+    trace_chat_error,
+    trace_chat_request,
+    trace_chat_result,
+)
 
 
 _CHAT_SESSION_SERVICE: ChatSessionService | None = None
@@ -31,8 +45,11 @@ class ChatSessionService:
     def __init__(
         self,
         graph: Any,
+        adventure_director: AdventureDirector | None = None,
     ) -> None:
         self._graph = graph
+        self._adventure_director = adventure_director
+        self._default_adventure_director: AdventureDirector | None = None
 
     def _graph_config(self, session_id: str) -> dict[str, Any]:
         """统一声明 LangGraph 运行参数；工具串行化后复杂场景需要更多图步数。"""
@@ -81,6 +98,11 @@ class ChatSessionService:
             raise ValueError("Must resolve the pending action before sending a new message.")
 
         await self._apply_runtime_context(config, current_session_id)
+        reward_notifications: list[dict[str, Any]] = []
+        if message and not resume_action and reaction_response is None:
+            pre_turn_update = await self._apply_pre_turn_adventure_runtime(config, current_session_id, message)
+            if pre_turn_update:
+                reward_notifications.extend(pre_turn_update.player_notifications)
 
         if reaction_response is not None:
             await self._graph.ainvoke({"reaction_choice": reaction_response}, config=config)
@@ -98,6 +120,10 @@ class ChatSessionService:
 
         state = await self._graph.aget_state(config)
         new_messages = self._extract_new_messages(state, baseline_msg_id)
+        post_turn_update = await self._apply_adventure_runtime(config, current_session_id, state, list(state.values.get("messages", [])))
+        if post_turn_update:
+            reward_notifications.extend(post_turn_update.player_notifications)
+        state = await self._graph.aget_state(config)
         
         player_data = None
         combat_data = None
@@ -107,7 +133,7 @@ class ChatSessionService:
         if hasattr(state, "values"):
             adventure = state.values.get("adventure")
             if adventure:
-                adventure_data = self._state_value_to_dict(adventure)
+                adventure_data = normalize_adventure_state(self._state_value_to_dict(adventure))
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
@@ -124,7 +150,7 @@ class ChatSessionService:
             if scene_units:
                 scene_units_data = self._mapping_state_to_dict(scene_units)
 
-        reply = self._extract_reply_from_messages(new_messages)
+        reply = self._append_reward_announcement(self._extract_reply_from_messages(new_messages), reward_notifications)
         pending_action = self._get_pending_action(state)
         trace_chat_result(
             current_session_id,
@@ -217,6 +243,33 @@ class ChatSessionService:
 
         return "\n\n".join(reply_parts).strip()
 
+    def _append_reward_announcement(self, reply: str, player_notifications: list[dict[str, Any]]) -> str:
+        """把本轮奖励事件转成最终可见文本，不回灌给主模型。"""
+        announcement = self._build_reward_announcement(player_notifications)
+        if not announcement or announcement in reply:
+            return reply
+        return f"{reply}\n\n{announcement}".strip() if reply else announcement
+
+    def _build_reward_announcement(self, player_notifications: list[dict[str, Any]]) -> str:
+        """只把 runtime 返回的奖励事件转成玩家可见文本。"""
+        xp_rewards = [notification for notification in player_notifications if notification.get("kind") == "xp_granted"]
+        if not xp_rewards:
+            return ""
+
+        lines: list[str] = []
+        for reward in xp_rewards:
+            amount = int(reward.get("amount", 0) or 0)
+            current_xp = reward.get("current_xp")
+            description = str(reward.get("description", "")).strip()
+            line = f"【经验奖励】你获得 {amount} XP，已计入角色卡"
+            if current_xp is not None:
+                line += f"，当前 XP {current_xp}"
+            line += "。"
+            if description:
+                line += description
+            lines.append(line)
+        return "\n\n".join(lines)
+
     def _snapshot_state(self, state: Any) -> dict[str, Any]:
         """将关键状态投影成纯 Python 结构，避免后台任务持有可变对象引用。"""
         values = state.values if state and hasattr(state, "values") else {}
@@ -271,8 +324,90 @@ class ChatSessionService:
     def _current_or_default_adventure(self, state: Any) -> dict[str, Any]:
         """新会话默认进入 Lost Mine 起点，已有会话保持原进度。"""
         if state and hasattr(state, "values") and state.values.get("adventure"):
-            return self._state_value_to_dict(state.values["adventure"])
+            return normalize_adventure_state(self._state_value_to_dict(state.values["adventure"]))
         return AdventureState().model_dump()
+
+    async def _apply_adventure_runtime(
+        self,
+        config: dict[str, Any],
+        session_id: str,
+        state: Any,
+        recent_messages: list[Any],
+    ) -> AdventureRuntimeUpdate | None:
+        """主图之后运行后台冒险裁定；不插入主对话消息，避免破坏 KC 前缀。"""
+        if not recent_messages or not hasattr(self._graph, "aupdate_state") or not state or not hasattr(state, "values"):
+            return None
+        if state.values.get("phase") == "combat":
+            return None
+        try:
+            update = adjudicate_and_apply_adventure_progress(
+                self._state_value_to_dict(state.values),
+                recent_messages=recent_messages,
+                director=self._get_adventure_director(),
+                session_id=session_id,
+            )
+        except Exception as exc:
+            trace_adventure_runtime_failed(session_id, error=exc)
+            return None
+        trace_adventure_runtime_update(
+            session_id,
+            applied=update.applied,
+            decision=update.decision,
+            adventure_update=update.adventure,
+            state_update=update.state_update,
+            player_notifications=update.player_notifications,
+        )
+        state_update = dict(update.state_update)
+        if update.adventure:
+            state_update["adventure"] = update.adventure
+        if state_update:
+            await self._graph.aupdate_state(config, state_update)
+        return update
+
+    async def _apply_pre_turn_adventure_runtime(
+        self,
+        config: dict[str, Any],
+        session_id: str,
+        player_message: str,
+    ) -> AdventureRuntimeUpdate | None:
+        """主 LLM 回复前先推进明确出口，避免叙事先跑、书签后追。"""
+        if not hasattr(self._graph, "aupdate_state"):
+            return None
+        state = await self._graph.aget_state(config)
+        if not state or not hasattr(state, "values") or state.values.get("phase") == "combat":
+            return None
+        try:
+            update = adjudicate_and_apply_pre_turn_adventure_progress(
+                self._state_value_to_dict(state.values),
+                player_message=player_message,
+                director=self._get_adventure_director(),
+                session_id=session_id,
+            )
+        except Exception as exc:
+            trace_adventure_runtime_failed(session_id, error=exc)
+            return None
+        trace_adventure_runtime_update(
+            session_id,
+            applied=update.applied,
+            decision=update.decision,
+            adventure_update=update.adventure,
+            state_update=update.state_update,
+            player_notifications=update.player_notifications,
+        )
+        state_update = dict(update.state_update)
+        if update.adventure:
+            state_update["adventure"] = update.adventure
+        if state_update:
+            await self._graph.aupdate_state(config, state_update)
+        return update
+
+    def _get_adventure_director(self) -> AdventureDirector:
+        """懒加载后台 director，避免每轮重复初始化 LLM 客户端。"""
+        if self._adventure_director is not None:
+            return self._adventure_director
+        if self._default_adventure_director is None:
+            self._default_adventure_director = LLMAdventureDirector()
+        return self._default_adventure_director
 
     async def aclose(self) -> None:
         """保留异步关闭接口，方便 FastAPI 生命周期统一调用。"""
@@ -344,6 +479,11 @@ class ChatSessionService:
             return
 
         await self._apply_runtime_context(config, current_session_id)
+        reward_notifications: list[dict[str, Any]] = []
+        if message and reaction_response is None and resume_action is None:
+            pre_turn_update = await self._apply_pre_turn_adventure_runtime(config, current_session_id, message)
+            if pre_turn_update:
+                reward_notifications.extend(pre_turn_update.player_notifications)
 
         if reaction_response is not None:
             graph_input = {"reaction_choice": reaction_response}
@@ -443,6 +583,12 @@ class ChatSessionService:
 
         # 流结束后：获取最终状态，发送 state_update + pending_action + done
         state = await self._graph.aget_state(config)
+        new_messages = self._extract_new_messages(state, baseline_msg_id)
+        full_messages = list(state.values.get("messages", [])) if hasattr(state, "values") else new_messages
+        post_turn_update = await self._apply_adventure_runtime(config, current_session_id, state, full_messages)
+        if post_turn_update:
+            reward_notifications.extend(post_turn_update.player_notifications)
+        state = await self._graph.aget_state(config)
 
         player_data = None
         combat_data = None
@@ -453,7 +599,7 @@ class ChatSessionService:
         if hasattr(state, "values"):
             adventure = state.values.get("adventure")
             if adventure:
-                adventure_data = self._state_value_to_dict(adventure)
+                adventure_data = normalize_adventure_state(self._state_value_to_dict(adventure))
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)
@@ -473,6 +619,10 @@ class ChatSessionService:
             if space:
                 space_data = space.model_dump() if hasattr(space, "model_dump") else dict(space)
 
+        reward_announcement = self._build_reward_announcement(reward_notifications)
+        if reward_announcement:
+            yield self._sse_event("assistant_message", {"content": reward_announcement})
+
         yield self._sse_event("state_update", {
             "player": player_data,
             "combat": combat_data,
@@ -483,8 +633,7 @@ class ChatSessionService:
         })
 
         pending = self._get_pending_action(state)
-        new_messages = self._extract_new_messages(state, baseline_msg_id)
-        reply = self._extract_reply_from_messages(new_messages)
+        reply = self._append_reward_announcement(self._extract_reply_from_messages(new_messages), reward_notifications)
         trace_chat_result(
             current_session_id,
             entrypoint="stream",
@@ -530,7 +679,7 @@ class ChatSessionService:
         if hasattr(state, "values"):
             adventure = state.values.get("adventure")
             if adventure:
-                adventure_data = self._state_value_to_dict(adventure)
+                adventure_data = normalize_adventure_state(self._state_value_to_dict(adventure))
             player = state.values.get("player")
             if player:
                 player_data = player.model_dump() if hasattr(player, "model_dump") else dict(player)

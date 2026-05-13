@@ -67,7 +67,7 @@ export function adaptLLMOutput(text: string): string {
 }
 
 // ==================== 辅助函数：HTML 转义 ====================
-function escapeHtml(str: string): string {
+export function escapeHtml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

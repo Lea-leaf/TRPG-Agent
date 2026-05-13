@@ -84,7 +84,18 @@
     "secrets": [],
     "checks": [],
     "encounters": [],
-    "rewards": [],
+    "rewards": [
+      {
+        "id": "goblin_ambush_hideout_75_xp",
+        "type": "xp",
+        "amount": 75,
+        "requires": [
+          "goblin_ambush_resolved",
+          "goblin_trail"
+        ],
+        "description": "打败伏击的地精并抵达克拉摩窝点入口后，发放 75 XP。"
+      }
+    ],
     "clues": [],
     "events": [],
     "exits": [

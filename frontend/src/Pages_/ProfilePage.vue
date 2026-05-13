@@ -5,17 +5,26 @@
     <div class="profile-header">
       <div class="avatar-frame">
         <div class="avatar-inner">
-          <User class="avatar-icon" :size="64" stroke-width="1.2" />
+          <img
+            v-if="profile.avatarUrl"
+            :src="profile.avatarUrl"
+            alt="用户头像"
+            class="avatar-image"
+          />
+          <User v-else class="avatar-icon" :size="64" stroke-width="1.2" />
         </div>
       </div>
       <div class="profile-info">
-        <h1 class="display-name">{{ userInfo.displayName }}</h1>
-        <p class="user-title">{{ userInfo.title }}</p>
+        <h1 class="display-name">{{ profile.displayName }}</h1>
+        <p class="user-title">{{ profile.title }}</p>
       </div>
     </div>
 
     <!-- 渐隐分隔线 -->
     <div class="divider-line"></div>
+
+    <p v-if="loading" class="page-tip">正在加载资料...</p>
+    <p v-else-if="errorText" class="page-tip error">{{ errorText }}</p>
 
     <!-- 冒险者档案 -->
     <div class="info-card">
@@ -29,19 +38,19 @@
       <div class="info-list">
         <div class="info-item">
           <span class="info-label"><Mail :size="14" />冒险者ID</span>
-          <span class="info-value">{{ userInfo.username }}</span>
+          <span class="info-value">{{ profile.username }}</span>
         </div>
         <div class="info-item">
           <span class="info-label"><Calendar :size="14" />加入日期</span>
-          <span class="info-value">{{ userInfo.joinDate }}</span>
+          <span class="info-value">{{ profile.joinDate }}</span>
         </div>
         <div class="info-item">
           <span class="info-label"><MapPin :size="14" />账号 ID</span>
-          <span class="info-value">{{ userInfo.accountId }}</span>
+          <span class="info-value">{{ profile.accountId }}</span>
         </div>
         <div class="info-item full-width">
           <span class="info-label"><MessageSquare :size="14" />冒险宣言</span>
-          <span class="info-value bio">{{ userInfo.bio || '暂无宣言' }}</span>
+          <span class="info-value bio">{{ profile.bio || '暂无宣言' }}</span>
         </div>
       </div>
     </div>
@@ -49,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, type Component } from 'vue'
+import { onMounted, ref } from 'vue'
 import {
   User,
   Mail,
@@ -59,21 +68,37 @@ import {
   FileText,
   Wrench,
 } from 'lucide-vue-next'
+import {
+  fetchProfilePageData,
+  PROFILE_PAGE_MOCK_DATA,
+  type ProfilePageData,
+} from '../Services_/ProfilePageService'
 
-// 用户基本信息
-const userInfo = reactive({
-  username: 'Dragon_Knight_47',
-  displayName: '格里芬·龙裔',
-  title: '🌟 传奇冒险者 · 龙骑士团长',
-  joinDate: '2024年·霜降之月',
-  accountId: 'UID: 102347',        // 账号 ID
-  bio: '',                          // 冒险宣言已清空
-})
+// 页面只依赖 service 提供的数据模型，后端字段变化收敛到接口层处理。
+const profile = ref<ProfilePageData>(PROFILE_PAGE_MOCK_DATA)
+const loading = ref(true)
+const errorText = ref('')
 
-// 方法
+// 资料页的第一版只做读取；后端未接入时保留 mock 以维持界面可用。
+const loadProfile = async () => {
+  try {
+    profile.value = await fetchProfilePageData()
+    errorText.value = ''
+  } catch (error) {
+    errorText.value = error instanceof Error ? `${error.message}，当前展示本地占位数据` : '获取用户资料失败，当前展示本地占位数据'
+    profile.value = PROFILE_PAGE_MOCK_DATA
+  } finally {
+    loading.value = false
+  }
+}
+
 const handleEditProfile = () => {
   alert('档案编辑功能开发中...')
 }
+
+onMounted(() => {
+  void loadProfile()
+})
 </script>
 
 <style scoped>
@@ -131,6 +156,12 @@ const handleEditProfile = () => {
   transition: all 0.3s ease;
 }
 
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .avatar-icon {
   color: #b88a44;
 }
@@ -169,6 +200,16 @@ const handleEditProfile = () => {
     transparent 100%
   );
   margin: 32px 0;
+}
+
+.page-tip {
+  margin: 0 0 20px;
+  color: rgba(230, 230, 195, 0.7);
+  font-size: 0.92rem;
+}
+
+.page-tip.error {
+  color: #d6a26e;
 }
 
 /* 卡片通用样式 */

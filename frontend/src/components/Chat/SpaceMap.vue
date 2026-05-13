@@ -104,18 +104,6 @@
 import { computed, ref, watch } from 'vue'
 import { X } from 'lucide-vue-next'
 
-type Point = {
-  x?: number
-  y?: number
-}
-
-type Placement = {
-  unit_id: string
-  map_id: string
-  position: Point
-  facing_deg?: number
-}
-
 type PlaneMap = {
   id: string
   name: string
@@ -151,6 +139,8 @@ type VisibleUnit = {
   conditions: string[]
 }
 
+type LooseRecord = Record<string, any>
+
 const props = defineProps<{
   space: any | null
   player: any | null
@@ -160,10 +150,62 @@ const props = defineProps<{
 
 const selectedUnitId = ref<string | null>(null)
 
+// 地图状态来自多路流式更新，先做宽松归一化，避免中间态直接打断整页渲染
+const isRecord = (value: unknown): value is LooseRecord => {
+  return typeof value === 'object' && value !== null
+}
+
+const toEntries = (value: unknown): Array<[string, any]> => {
+  return isRecord(value) ? Object.entries(value) : []
+}
+
+const toNumber = (value: unknown, fallback: number): number => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const toOptionalNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+const toLabelText = (value: unknown, fallback: string): string => {
+  if (typeof value === 'string' && value.trim()) return value
+  if (typeof value === 'number') return String(value)
+  return fallback
+}
+
+const normalizeConditions = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.map((condition) => {
+    if (typeof condition === 'string' || typeof condition === 'number') {
+      return String(condition)
+    }
+    if (isRecord(condition)) {
+      return toLabelText(condition.name_cn ?? condition.id, '?')
+    }
+    return '?'
+  })
+}
+
 const activeMap = computed<PlaneMap | null>(() => {
-  const space = props.space
-  if (!space?.maps || !space.active_map_id) return null
-  return space.maps[space.active_map_id] ?? null
+  if (!isRecord(props.space)) return null
+
+  const maps = isRecord(props.space.maps) ? props.space.maps : null
+  const activeMapId = toLabelText(props.space.active_map_id, '')
+  if (!maps || !activeMapId) return null
+
+  const rawMap = maps[activeMapId]
+  if (!isRecord(rawMap)) return null
+
+  return {
+    id: toLabelText(rawMap.id, activeMapId),
+    name: toLabelText(rawMap.name, activeMapId),
+    width: toNumber(rawMap.width, 1),
+    height: toNumber(rawMap.height, 1),
+    grid_size: toOptionalNumber(rawMap.grid_size),
+  }
 })
 
 const viewBoxWidth = computed(() => Math.max(1, Number(activeMap.value?.width ?? 1)))
@@ -172,20 +214,18 @@ const viewBoxHeight = computed(() => Math.max(1, Number(activeMap.value?.height 
 const unitsById = computed<Record<string, UnitInfo>>(() => {
   const result: Record<string, UnitInfo> = {}
 
-  if (props.sceneUnits) {
-    Object.entries(props.sceneUnits).forEach(([id, unit]) => {
-      result[id] = { ...(unit as UnitInfo), id }
-    })
-  }
+  toEntries(props.sceneUnits).forEach(([id, unit]) => {
+    result[id] = isRecord(unit) ? { ...(unit as UnitInfo), id } : { id }
+  })
 
-  if (props.combat?.participants) {
-    Object.entries(props.combat.participants).forEach(([id, unit]) => {
-      result[id] = { ...(unit as UnitInfo), id }
-    })
-  }
+  const participants = isRecord(props.combat) ? props.combat.participants : null
+  toEntries(participants).forEach(([id, unit]) => {
+    result[id] = isRecord(unit) ? { ...(unit as UnitInfo), id } : { id }
+  })
 
-  if (props.player) {
-    const playerId = props.player.id || `player_${props.player.name || 'player'}`
+  if (isRecord(props.player)) {
+    const playerName = toLabelText(props.player.name, 'player')
+    const playerId = toLabelText(props.player.id, `player_${playerName}`)
     result[playerId] = { id: playerId, ...props.player, side: 'player' }
   }
 
@@ -194,17 +234,18 @@ const unitsById = computed<Record<string, UnitInfo>>(() => {
 
 const visibleUnits = computed<VisibleUnit[]>(() => {
   const map = activeMap.value
-  const placements = props.space?.placements ?? {}
+  const placements = isRecord(props.space) && isRecord(props.space.placements) ? props.space.placements : {}
   if (!map) return []
 
-  return Object.entries(placements)
+  return toEntries(placements)
     .map(([unitId, rawPlacement]) => {
-      const placement = rawPlacement as Placement
-      const x = Number(placement.position?.x ?? 0)
-      const y = Number(placement.position?.y ?? 0)
+      const placement = isRecord(rawPlacement) ? rawPlacement : {}
+      const position = isRecord(placement.position) ? placement.position : {}
+      const x = toNumber(position.x, 0)
+      const y = toNumber(position.y, 0)
       const info = unitsById.value[unitId] ?? { id: unitId }
-      const side = info.side || 'neutral'
-      const name = info.name || unitId
+      const side = typeof info.side === 'string' && info.side ? info.side : 'neutral'
+      const name = toLabelText(info.name, unitId)
       const selected = unitId === selectedUnitId.value
 
       return {
@@ -218,13 +259,16 @@ const visibleUnits = computed<VisibleUnit[]>(() => {
         screenX: clamp(x, 0, map.width),
         screenY: clamp(map.height - y, 0, map.height),
         selected,
-        hp: info.hp,
-        max_hp: info.max_hp,
-        ac: info.ac,
-        conditions: (info.conditions ?? []).map((condition) => condition.name_cn || condition.id || '?'),
+        hp: toOptionalNumber(info.hp),
+        max_hp: toOptionalNumber(info.max_hp),
+        ac: toOptionalNumber(info.ac),
+        conditions: normalizeConditions(info.conditions),
       }
     })
-    .filter((unit) => (props.space?.placements?.[unit.id] as Placement | undefined)?.map_id === map.id)
+    .filter((unit) => {
+      const placement = placements[unit.id]
+      return isRecord(placement) && toLabelText(placement.map_id, '') === map.id
+    })
 })
 
 const selectedUnit = computed(() => {

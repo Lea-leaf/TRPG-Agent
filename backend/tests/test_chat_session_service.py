@@ -1,10 +1,11 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from app.adventures.runtime import AdventurePreTurnDecision, AdventureProgressDecision, AdventureRuntimeUpdate
 from app.services.chat_session_service import ChatSessionService
 
 
@@ -28,7 +29,7 @@ class FakeGraph:
     async def ainvoke(self, graph_input, config):
         self.last_input = graph_input
         self.last_config = config
-        self.values = self.result
+        self.values = {**self.values, **self.result}
         return self.result
 
     async def aget_state(self, config):
@@ -39,6 +40,30 @@ class FakeGraph:
         self.last_config = config
         self.state_updates.append(values)
         self.values = {**self.values, **values}
+
+
+class FakeAdventureDirector:
+    def __init__(
+        self,
+        decision: AdventureProgressDecision | None = None,
+        pre_turn_decision: AdventurePreTurnDecision | None = None,
+    ):
+        self.decision = decision or AdventureProgressDecision()
+        self.pre_turn_decision = pre_turn_decision or AdventurePreTurnDecision()
+        self.calls = []
+        self.pre_turn_calls = []
+
+    def adjudicate_pre_turn(self, *, state, player_message, session_id=None):
+        self.pre_turn_calls.append({"state": state, "player_message": player_message, "session_id": session_id})
+        return self.pre_turn_decision
+
+    def adjudicate(self, *, state, recent_messages, session_id=None):
+        self.calls.append({"state": state, "recent_messages": recent_messages, "session_id": session_id})
+        return self.decision
+
+
+def _noop_director():
+    return FakeAdventureDirector()
 
 
 class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -59,12 +84,24 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "app.services.chat_session_service.trace_chat_error",
             side_effect=_noop_trace,
         )
+        self._trace_adventure_update_patcher = patch(
+            "app.services.chat_session_service.trace_adventure_runtime_update",
+            side_effect=_noop_trace,
+        )
+        self._trace_adventure_failed_patcher = patch(
+            "app.services.chat_session_service.trace_adventure_runtime_failed",
+            side_effect=_noop_trace,
+        )
         self._touch_session_patcher.start()
         self._trace_request_patcher.start()
         self._trace_result_patcher.start()
         self._trace_error_patcher.start()
+        self._trace_adventure_update_patcher.start()
+        self._trace_adventure_failed_patcher.start()
 
     async def asyncTearDown(self):
+        self._trace_adventure_failed_patcher.stop()
+        self._trace_adventure_update_patcher.stop()
         self._trace_error_patcher.stop()
         self._trace_result_patcher.stop()
         self._trace_request_patcher.stop()
@@ -79,7 +116,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 ]
             }
         )
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         result = await service.process_turn(message="查一下北京", session_id="s1")
 
@@ -96,7 +133,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             "messages": [],
             "episodic_context": ["旧热摘要不应继续注入。"],
         }
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         result = await service.process_turn(message="继续", session_id="episodic-demo")
 
@@ -106,7 +143,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_process_turn_generates_session_id_when_missing(self):
         graph = FakeGraph({"messages": [AIMessage(content="ok", tool_calls=[])]})
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         result = await service.process_turn(message="hello")
 
@@ -117,7 +154,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
     @patch("app.services.chat_session_service.trace_chat_request")
     async def test_process_turn_records_trace_events(self, mock_trace_request, mock_trace_result):
         graph = FakeGraph({"messages": [AIMessage(content="继续推进。", tool_calls=[])]})
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         result = await service.process_turn(message="继续", session_id="trace-demo")
 
@@ -126,6 +163,176 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_trace_result.assert_called_once()
         self.assertEqual("trace-demo", mock_trace_request.call_args.args[0])
         self.assertEqual("trace-demo", mock_trace_result.call_args.args[0])
+
+    async def test_process_turn_appends_reward_announcement_after_model_reply(self):
+        graph = FakeGraph({
+            "messages": [AIMessage(content="你击败了地精。", tool_calls=[])],
+            "phase": "combat",
+        })
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
+        service._apply_pre_turn_adventure_runtime = AsyncMock(return_value=AdventureRuntimeUpdate())
+        service._apply_adventure_runtime = AsyncMock(
+            return_value=AdventureRuntimeUpdate(
+                player_notifications=[
+                    {
+                        "kind": "xp_granted",
+                        "node_id": "cragmaw_hideout_entrance",
+                        "id": "goblin_ambush_hideout_75_xp",
+                        "type": "xp",
+                        "amount": 75,
+                        "previous_xp": 0,
+                        "current_xp": 75,
+                        "description": "打败伏击地精并抵达克拉摩窝点后发放。",
+                    }
+                ]
+            )
+        )
+
+        result = await service.process_turn(message="继续", session_id="reward-demo")
+
+        self.assertIn("你击败了地精。", result["reply"])
+        self.assertIn("【经验奖励】你获得 75 XP，已计入角色卡", result["reply"])
+        self.assertIn("打败伏击地精并抵达克拉摩窝点后发放。", result["reply"])
+
+    async def test_process_turn_applies_adventure_director_after_graph_run(self):
+        graph = FakeGraph({
+            "messages": [AIMessage(content="地精倒下，你发现林中有拖拽痕迹。", tool_calls=[])],
+            "phase": "exploration",
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        })
+        director = FakeAdventureDirector(
+            AdventureProgressDecision(
+                completed_event_ids=["goblin_ambush_resolved"],
+                discovered_clue_ids=["goblin_trail"],
+                exit_option_id="investigate_goblin_trail",
+                confidence=0.9,
+            )
+        )
+        service = ChatSessionService(graph=graph, adventure_director=director)
+
+        result = await service.process_turn(message="我搜索伏击现场", session_id="adventure-runtime-demo")
+
+        self.assertEqual("地精倒下，你发现林中有拖拽痕迹。", result["reply"])
+        self.assertEqual(["goblin_trail"], result["adventure"]["known_clue_ids"])
+        self.assertEqual(
+            ["goblin_ambush_resolved"],
+            result["adventure"]["completed_event_ids"],
+        )
+        self.assertEqual([], result["adventure"]["pending_exit_option_ids"])
+        self.assertEqual("goblin_trail_to_cragmaw_hideout", result["adventure"]["active_node_id"])
+        self.assertEqual(1, len(director.calls))
+        self.assertEqual("adventure-runtime-demo", director.calls[0]["session_id"])
+
+    async def test_process_turn_passes_full_message_history_to_adventure_director(self):
+        graph = FakeGraph({
+            "messages": [
+                HumanMessage(content="第一轮旧玩家输入"),
+                AIMessage(content="第一轮旧主持回复", tool_calls=[]),
+                HumanMessage(content="第二轮旧玩家输入"),
+                AIMessage(content="第二轮旧主持回复", tool_calls=[]),
+                HumanMessage(content="本轮新玩家输入"),
+                AIMessage(content="本轮主持回复", tool_calls=[]),
+            ],
+            "phase": "exploration",
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        })
+        director = FakeAdventureDirector()
+        service = ChatSessionService(graph=graph, adventure_director=director)
+
+        await service.process_turn(message="本轮新玩家输入", session_id="history-demo")
+
+        self.assertEqual(1, len(director.calls))
+        self.assertEqual(
+            [
+                "第一轮旧玩家输入",
+                "第一轮旧主持回复",
+                "第二轮旧玩家输入",
+                "第二轮旧主持回复",
+                "本轮新玩家输入",
+                "本轮主持回复",
+            ],
+            [getattr(message, "content", "") for message in director.calls[0]["recent_messages"]],
+        )
+
+    async def test_process_turn_applies_pre_turn_adventure_director_before_graph_run(self):
+        graph = FakeGraph({
+            "messages": [AIMessage(content="你们沿着三猪小径前进，前方出现两匹倒毙的马。", tool_calls=[])],
+            "phase": "exploration",
+        })
+        graph.values = {
+            "messages": [],
+            "phase": "exploration",
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "lost_mine_start",
+                "unlocked_node_ids": ["lost_mine_start"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        }
+        director = FakeAdventureDirector(
+            pre_turn_decision=AdventurePreTurnDecision(
+                exit_option_id="continue_to_ambush",
+                confidence=0.92,
+                needs_player_choice=False,
+            )
+        )
+        service = ChatSessionService(graph=graph, adventure_director=director)
+
+        result = await service.process_turn(message="一起出发", session_id="pre-turn-demo")
+
+        self.assertEqual("goblin_ambush", result["adventure"]["active_node_id"])
+        self.assertEqual("goblin_ambush", graph.state_updates[1]["adventure"]["active_node_id"])
+        self.assertEqual(1, len(director.pre_turn_calls))
+        self.assertEqual("一起出发", graph.last_input["messages"][0].content)
+
+    async def test_process_turn_keeps_desynced_reply_player_visible_and_records_guardrail(self):
+        graph = FakeGraph({
+            "messages": [AIMessage(content="你们已经在酒馆救出了冈德伦。", tool_calls=[])],
+            "phase": "exploration",
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": ["lost_mine_start"],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        })
+        director = FakeAdventureDirector(
+            decision=AdventureProgressDecision(
+                desync_detected=True,
+                unsupported_claims=["冈德伦已被救出", "酒馆剧情"],
+                warning="回到地精伏击节点。",
+                reason="主持回复越过当前节点。",
+            )
+        )
+        service = ChatSessionService(graph=graph, adventure_director=director)
+
+        result = await service.process_turn(message="继续", session_id="guardrail-demo")
+
+        self.assertEqual("你们已经在酒馆救出了冈德伦。", result["reply"])
+        self.assertIn("adventure_guardrail_warning", graph.state_updates[-1])
+        self.assertEqual(["冈德伦已被救出", "酒馆剧情"], graph.state_updates[-1]["adventure_guardrail_warning"]["unsupported_claims"])
 
     async def test_get_history_keeps_original_transcript_without_tool_placeholders(self):
         graph = FakeGraph({"messages": []})
@@ -138,7 +345,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 AIMessage(content="哥布林被你逼退了半步。", tool_calls=[]),
             ]
         }
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         history = await service.get_history(session_id="demo", limit=10)
 
@@ -168,7 +375,7 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         }
-        service = ChatSessionService(graph=graph)
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
 
         history = await service.get_history(session_id="demo", limit=10)
 
@@ -180,6 +387,28 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             ],
             history["messages"],
         )
+
+    async def test_get_history_normalizes_adventure_state_for_frontend(self):
+        graph = FakeGraph({"messages": []})
+        graph.values = {
+            "messages": [],
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        }
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
+
+        history = await service.get_history(session_id="demo", limit=10)
+
+        self.assertEqual(["lost_mine_start", "goblin_ambush"], history["adventure"]["unlocked_node_ids"])
+        self.assertEqual(["goblin_ambush"], history["adventure"]["breadcrumb_node_ids"])
+        self.assertEqual([], history["adventure"]["deferred_node_ids"])
 
 
 if __name__ == "__main__":

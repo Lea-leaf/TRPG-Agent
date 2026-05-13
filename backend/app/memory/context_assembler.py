@@ -9,7 +9,9 @@ from typing import Any, Protocol
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
-from app.adventures.models import AdventureState
+from app.adventures.clue_projection import format_known_clue_window, project_known_clue_window
+from app.adventures.navigation import normalize_adventure_state, recent_breadcrumb_ids, returnable_node_ids
+from app.adventures.rewards import normalize_pending_reward_grants
 from app.adventures.store import get_adventure_store
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
 from app.graph.state import GraphState
@@ -19,8 +21,9 @@ from app.services.tools._helpers import compute_ac
 CONTEXT_COMPACTION_MESSAGE_PREFIX = "[系统:上下文预算归档]"
 RUNTIME_STATE_MESSAGE_PREFIX = "[系统:运行状态帧]"
 MODEL_CONTEXT_TOKEN_LIMIT = 1_000_000
-CONTEXT_SOFT_COMPACT_TOKEN_BUDGET = 700_000
-CONTEXT_HARD_TRIM_TOKEN_BUDGET = 850_000
+# 中文注释：前缀保持稳定时，宁可更早压缩，也不要让长历史把有效前缀拖得太贵。
+CONTEXT_SOFT_COMPACT_TOKEN_BUDGET = 450_000
+CONTEXT_HARD_TRIM_TOKEN_BUDGET = 600_000
 CONTEXT_COMPACTION_RETENTION_RATIO = 0.3
 CONTEXT_COMPACTION_MAX_CHARS = 120_000
 CONTEXT_COMPACTION_MIN_CHARS = 1200
@@ -38,6 +41,231 @@ class NoopExternalContextProvider:
         return []
 
 
+def _node_source_pages(node: Any) -> str:
+    """以 source_refs 为准展示页码；旧节点保留 page_start/page_end。"""
+    refs = getattr(node, "source_refs", []) or []
+    page_starts: list[int] = []
+    page_ends: list[int] = []
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        try:
+            page_starts.append(int(ref.get("page_start")))
+            page_ends.append(int(ref.get("page_end")))
+        except (TypeError, ValueError):
+            continue
+    if page_starts and page_ends:
+        start = min(page_starts)
+        end = max(page_ends)
+        return str(start) if start == end else f"{start}-{end}"
+    page_start = getattr(node, "page_start", "")
+    page_end = getattr(node, "page_end", "")
+    if page_start and page_end:
+        return str(page_start) if page_start == page_end else f"{page_start}-{page_end}"
+    return "未知"
+
+
+def _compact_lines(values: list[Any], limit: int, *, char_limit: int = 120) -> list[str]:
+    """节点卡片只投影最关键几条，完整内容仍保留在 load_node 工具结果里。"""
+    return [compact_text(str(item), char_limit) for item in values[:limit] if str(item).strip()]
+
+
+def _compact_non_xp_lines(values: list[Any], limit: int, *, char_limit: int = 120) -> list[str]:
+    """XP 结算由冒险 runtime 接管，节点卡片只保留可演绎的场景与规则。"""
+    filtered = [item for item in values if not _looks_like_xp_reward_note(item)]
+    return _compact_lines(filtered, limit, char_limit=char_limit)
+
+
+def _looks_like_xp_reward_note(value: Any) -> bool:
+    """避免把结构化奖励元数据重新包装成给主模型的发放指令。"""
+    text = str(value).lower()
+    return "xp" in text or "经验" in text or ("奖励" in text and ("发放" in text or "结算" in text))
+
+
+def _sanitize_adventure_summary(text: str) -> str:
+    """把里程碑金额从节点摘要里拿掉，保留可演绎的剧情事实。"""
+    if not text:
+        return ""
+    sentences = [segment.strip() for segment in text.replace("\n", "。").split("。") if segment.strip()]
+    cleaned: list[str] = []
+    reward_markers = ("xp", "经验", "里程碑", "发放", "结算")
+    for sentence in sentences:
+        if any(marker in sentence.lower() for marker in reward_markers):
+            continue
+        cleaned.append(sentence)
+    if cleaned:
+        return "。".join(cleaned) + "。"
+    if any(marker in text.lower() for marker in reward_markers):
+        return "相关里程碑奖励由专用奖励工具发放。"
+    return text
+
+
+def _format_pending_reward_grants(values: list[Any] | None, limit: int = 4) -> str:
+    """把待领取奖励压成可操作短句，提醒主模型先写回再叙事。"""
+    rewards = normalize_pending_reward_grants(values)
+    if not rewards:
+        return ""
+    lines: list[str] = []
+    for reward in rewards[:limit]:
+        reward_type = reward.get("type", "")
+        amount = reward.get("amount", 0)
+        description = compact_text(str(reward.get("description", "")), 80)
+        label = f"{reward['id']}: {amount} {str(reward_type).upper()}".strip()
+        if description:
+            label += f"（{description}）"
+        lines.append(label)
+    if len(rewards) > limit:
+        lines.append(f"另有 {len(rewards) - limit} 项")
+    return "；".join(lines)
+
+
+def _compact_ids(values: list[Any], limit: int) -> list[str]:
+    """长 ID 列表只保留前几项，后面的数量交给计数提示。"""
+    ids = [str(item).strip() for item in values if str(item).strip()]
+    if limit <= 0:
+        return []
+    return ids[:limit]
+
+
+def _compact_fallbacks(values: list[Any], limit: int) -> list[str]:
+    """回退分支保留条件和裁定意图，帮助模型处理绕路。"""
+    fallbacks: list[str] = []
+    for item in values[:limit]:
+        if not isinstance(item, dict):
+            continue
+        fallback_id = str(item.get("id", "")).strip()
+        condition = compact_text(str(item.get("condition", "")), 100)
+        guidance = compact_text(str(item.get("dm_guidance", "")), 120)
+        if _looks_like_xp_reward_note(guidance):
+            guidance = "奖励条件由后台待发放队列判定；继续按实际情况主持。"
+        label = fallback_id or "fallback"
+        if condition and guidance:
+            fallbacks.append(f"{label}: {condition} -> {guidance}")
+        elif condition:
+            fallbacks.append(f"{label}: {condition}")
+    return fallbacks
+
+
+class AdventureNodeRetrievalContextProvider:
+    """给冒险节点加一层轻量 RAG，专门喂当前节点和相邻命中。"""
+
+    def get_context_blocks(self, *, state: GraphState, mode: str) -> list[str]:
+        if mode != NARRATIVE_AGENT_MODE:
+            return []
+
+        adventure_dict = normalize_adventure_state(state_value_to_dict(state.get("adventure")) or {})
+        if not adventure_dict.get("active_node_id"):
+            return []
+
+        try:
+            node = get_adventure_store().get_node(adventure_dict["active_node_id"])
+        except Exception:
+            return []
+
+        blocks = [self._build_current_node_block(node, adventure_dict)]
+        route_block = self._build_route_memory_block(adventure_dict)
+        if route_block:
+            blocks.append(route_block)
+
+        query = _latest_external_human_text(state.get("messages", []))
+        if query:
+            related_nodes = [
+                item
+                for item in get_adventure_store().search_nodes(query, limit=3)
+                if item[0].id != node.id
+            ]
+            if related_nodes:
+                blocks.append(self._build_search_block(query, related_nodes))
+
+        return blocks
+
+    def _build_current_node_block(self, node: Any, adventure: dict[str, Any]) -> str:
+        exits = [f"{item.id}: {item.label} -> {getattr(item, 'next_node_id', '')}" for item in getattr(node, "exits", [])]
+        clue_ids = [str(item.get("id", "")) for item in getattr(node, "clues", []) if isinstance(item, dict) and item.get("id")]
+        source_pages = _node_source_pages(node)
+        scene_beats = _compact_non_xp_lines(getattr(node, "scene_beats", []), 3)
+        rules_notes = _compact_non_xp_lines(getattr(node, "rules_notes", []), 2)
+        routing_notes = _compact_non_xp_lines(getattr(node, "routing_notes", []), 2, char_limit=100)
+        fallbacks = _compact_fallbacks(getattr(node, "fallbacks", []), 3)
+        lines = [
+            "[冒险节点事实]",
+            f"当前节点: {node.title} [ID:{node.id}]",
+            f"页码: {source_pages}",
+            f"节点摘要: {_sanitize_adventure_summary(compact_text(node.dm_summary, 240))}",
+        ]
+        if getattr(node, "player_visible_intro", ""):
+            lines.append(f"开场可见: {compact_text(node.player_visible_intro, 180)}")
+        if scene_beats:
+            lines.append("关键推进: " + " | ".join(scene_beats))
+        if rules_notes:
+            lines.append("规则提醒: " + " | ".join(rules_notes))
+        if routing_notes:
+            lines.append("路线原则: " + " | ".join(routing_notes))
+        if clue_ids:
+            preview = _compact_ids(clue_ids, 8)
+            lines.append(
+                "节点线索: "
+                + ", ".join(preview)
+                + (f"（另有 {len(clue_ids) - len(preview)} 条）" if len(clue_ids) > len(preview) else "")
+            )
+        if exits:
+            lines.append(f"节点出口: {'；'.join(exits)}")
+        if fallbacks:
+            lines.append("回退分支: " + "；".join(fallbacks))
+        if len(adventure.get("breadcrumb_node_ids", [])) > 1 or adventure.get("deferred_node_ids"):
+            deferred_lines = self._summarize_route_nodes(adventure.get("deferred_node_ids", [])[:6])
+            if deferred_lines:
+                lines.append(f"待回访节点: {'；'.join(deferred_lines)}")
+        return "\n".join(lines)
+
+    def _build_route_memory_block(self, adventure: dict[str, Any]) -> str:
+        returnable_ids = returnable_node_ids(adventure, adventure.get("active_node_id", ""))
+        visible_route_ids = set(returnable_ids)
+        visible_route_ids.add(str(adventure.get("active_node_id", "")))
+        breadcrumb_ids = [node_id for node_id in recent_breadcrumb_ids(adventure, limit=6) if node_id in visible_route_ids]
+        if len(breadcrumb_ids) <= 1 and not adventure.get("deferred_node_ids"):
+            return ""
+
+        lines = ["[冒险路径记忆]"]
+        if breadcrumb_ids:
+            lines.append("路径回溯: " + " -> ".join(self._summarize_route_nodes(breadcrumb_ids)))
+        if adventure.get("deferred_node_ids"):
+            deferred = self._summarize_route_nodes([node_id for node_id in adventure.get("deferred_node_ids", []) if node_id in visible_route_ids][:6])
+            if deferred:
+                lines.append("待回访节点: " + "；".join(deferred))
+        returnable = self._summarize_route_nodes(returnable_ids[:6])
+        if returnable:
+            lines.append("可回访节点: " + "；".join(returnable))
+        return "\n".join(lines)
+
+    def _summarize_route_nodes(self, node_ids: list[str]) -> list[str]:
+        labels: list[str] = []
+        for node_id in node_ids:
+            try:
+                node = get_adventure_store().get_node(node_id)
+            except Exception:
+                labels.append(node_id)
+                continue
+            labels.append(f"{node.title}[ID:{node.id}]")
+        return labels
+
+    def _build_search_block(self, query: str, results: list[tuple[Any, float]]) -> str:
+        lines = [
+            "[冒险节点检索]",
+            f"最近意图: {compact_text(query, 120)}",
+            "约束: 以下仅是候选资料；不得把候选节点当作已经发生的场景。只有当前节点出口、路径回访或后台运行指令能改变当前位置。",
+        ]
+        for node, score in results:
+            exits = [item.label for item in getattr(node, "exits", [])]
+            lines.append(
+                f"- {node.id} | {node.title} | 页 {node.page_start}-{node.page_end} | "
+                f"score={score:.1f} | 摘要={compact_text(node.dm_summary, 140)}"
+            )
+            if exits:
+                lines.append(f"  出口: {'；'.join(exits[:3])}")
+        return "\n".join(lines)
+
+
 @dataclass(slots=True)
 class AssembledContext:
     system_prompt: str
@@ -50,7 +278,7 @@ class ContextAssembler:
     """统一拼装系统提示、HUD 和模型可见消息窗口。"""
 
     def __init__(self, external_context_provider: ExternalContextProvider | None = None) -> None:
-        self._external_context_provider = external_context_provider or NoopExternalContextProvider()
+        self._external_context_provider = external_context_provider or AdventureNodeRetrievalContextProvider()
 
     def assemble(self, state: GraphState, mode: str, *, base_system_prompt: str) -> AssembledContext:
         """把图状态投影为一次模型调用所需的完整上下文。"""
@@ -94,6 +322,14 @@ class ContextAssembler:
                 "使用友方创建能力生成 fighter_companion；创建后再继续推进冒险。"
             )
 
+        runtime_directive = self._build_adventure_runtime_directive(state, mode)
+        if runtime_directive:
+            sections.append(runtime_directive)
+
+        guardrail_warning = self._build_adventure_guardrail_warning(state, mode)
+        if guardrail_warning:
+            sections.append(guardrail_warning)
+
         external_blocks = self._external_context_provider.get_context_blocks(state=state, mode=mode)
         if external_blocks:
             sections.append("[扩展上下文]\n" + "\n\n".join(block for block in external_blocks if block))
@@ -107,7 +343,13 @@ class ContextAssembler:
     def build_hud_text(self, state: GraphState) -> str:
         sections: list[str] = []
 
-        sections.append("[当前冒险状态]\n" + format_adventure_summary(state_value_to_dict(state.get("adventure"))))
+        sections.append(
+            "[当前冒险状态]\n"
+            + format_adventure_summary(
+                state_value_to_dict(state.get("adventure")),
+                visible_clue_ids=state_value_to_dict(state.get("adventure_visible_clue_ids")),
+            )
+        )
 
         player_dict = state_value_to_dict(state.get("player"))
         if player_dict:
@@ -171,7 +413,7 @@ class ContextAssembler:
         return "\n\n=== 状态快照 ===\n" + "\n\n".join(sections) + "\n===========================\n"
 
     def build_model_input_messages(self, state: GraphState, mode: str, runtime_state_text: str) -> list[BaseMessage]:
-        # 中文注释：DeepSeek KC 成本可接受时，战后也保留原始战斗记录，避免摘要过弱导致模型误以为战斗未发生。
+        # DeepSeek KC 成本可接受时，战后也保留原始战斗记录，避免摘要过弱导致模型误以为战斗未发生。
         source_messages = list(state.get("messages", []))
         trimmed_messages = trim_model_messages(source_messages, mode, state=state)
         projected_messages: list[BaseMessage] = []
@@ -263,10 +505,68 @@ class ContextAssembler:
         else:
             lines.append("玩家: 尚未加载角色卡。")
 
-        adventure_dict = AdventureState.model_validate(state_value_to_dict(state.get("adventure")) or {}).model_dump()
+        adventure_dict = normalize_adventure_state(state_value_to_dict(state.get("adventure")) or {})
         lines.append(f"冒险节点: {adventure_dict['module_id']} / {adventure_dict['active_node_id']}")
+        if adventure_dict.get("known_clue_ids"):
+            clue_window = _visible_adventure_clue_window(
+                adventure_dict,
+                visible_clue_ids=state_value_to_dict(state.get("adventure_visible_clue_ids")),
+                query=_latest_external_human_text(state.get("messages", [])),
+            )
+            lines.append(
+                "已知线索: "
+                + format_known_clue_window(clue_window, total_count=len(adventure_dict["known_clue_ids"]))
+            )
+        if adventure_dict.get("completed_event_ids"):
+            lines.append(f"已完成事件: {adventure_dict['completed_event_ids']}")
+        if len(adventure_dict.get("breadcrumb_node_ids", [])) > 1:
+            lines.append(f"路径回溯: {recent_breadcrumb_ids(adventure_dict, limit=6)}")
+        if adventure_dict.get("deferred_node_ids"):
+            lines.append(f"待回访节点: {adventure_dict['deferred_node_ids'][:6]}")
+        if adventure_dict.get("pending_exit_option_ids"):
+            lines.append(f"待确认出口: {adventure_dict['pending_exit_option_ids']}")
+        pending_rewards = _format_pending_reward_grants(adventure_dict.get("pending_reward_grants"))
+        if pending_rewards:
+            lines.append(f"待发放剧情奖励: {pending_rewards}")
+            lines.append(
+                "当前必须执行: 本轮第一步调用 claim_adventure_reward 领取最前面的待发放奖励；"
+                "工具成功后再向玩家确认并继续叙事。不要口头宣告未写入的奖励。"
+            )
 
         return "[运行状态帧]\n" + "\n".join(lines)
+
+    def _build_adventure_guardrail_warning(self, state: GraphState, mode: str) -> str:
+        """只给模型短流程约束；详细越界审计留在 trace/state，避免被复述给玩家。"""
+        if mode != NARRATIVE_AGENT_MODE:
+            return ""
+        warning = state_value_to_dict(state.get("adventure_guardrail_warning"))
+        if not warning:
+            return ""
+        lines = [
+            "[内部冒险校准]",
+            "上一轮存在未确认的冒险内容；这是内部流程约束，不得向玩家复述或解释。",
+            f"当前可信节点: {warning.get('node_id', '')}。",
+            "本轮若继续模组剧情，先按当前冒险节点事实重整叙事，再自然回应。",
+        ]
+        return "\n".join(lines)
+
+    def _build_adventure_runtime_directive(self, state: GraphState, mode: str) -> str:
+        """后台推进节点后，用最短指令要求主模型先读取新节点。"""
+        if mode != NARRATIVE_AGENT_MODE:
+            return ""
+        directive = state_value_to_dict(state.get("adventure_runtime_directive"))
+        if not directive:
+            return ""
+        if directive.get("kind") not in {"node_advanced", "node_switched", "node_revisited"}:
+            return ""
+        kind = directive.get("kind")
+        verb = "推进到" if kind == "node_advanced" else "回访到" if kind == "node_revisited" else "切换到"
+        return (
+            "[内部冒险流程]\n"
+            f"后台已将冒险书签{verb} {directive.get('node_id', '')}。"
+            "这是内部流程约束，不得向玩家复述或解释。"
+            "本轮第一步先按当前节点事实重整叙事，只依据新节点事实继续主持。"
+        )
 
     def _build_narrative_state_frame(self, state: GraphState) -> str:
         """探索态只给模型焦点摘要；完整地图和单位细节留给工具按需读取。"""
@@ -290,7 +590,7 @@ class ContextAssembler:
         else:
             lines.append("空间: 未建图；若叙事涉及位置、距离、范围、入场或移动，先建立或切换地图。")
 
-        lines.append("需要完整角色、单位、坐标、地图或节点原文时调用对应工具读取，不要沿用旧 HUD。")
+        lines.append("需要完整角色、单位、坐标或地图时以对应工具结果为准；节点事实已由当前节点上下文注入，不要沿用旧 HUD。")
         return "[探索状态]\n" + "\n".join(lines)
 
     def _build_combat_frame(self, state: GraphState) -> str:
@@ -403,13 +703,13 @@ class ContextAssembler:
         if human_turn_count == 0 or human_turn_count % 4 != 0:
             return ""
 
-        adventure_dict = AdventureState.model_validate(state_value_to_dict(state.get("adventure")) or {}).model_dump()
+        adventure_dict = normalize_adventure_state(state_value_to_dict(state.get("adventure")) or {})
         return (
             "[冒险节点校准]\n"
             f"当前仍处于模组 {adventure_dict['module_id']} 的节点 {adventure_dict['active_node_id']}。"
-            "若本轮将新增或改变剧情事实、线索、出口、遭遇结果、已完成事件或节点进度，"
-            "必须先调用冒险工具读取或更新节点状态；若只是闲聊、规则解释或战斗内动作结算，不调用。"
-            "不要因为多轮闲聊而脱离当前模组进度或提前揭露未获得的信息。"
+            "本轮回应前先校对玩家行动与当前节点的关系：应优先沿当前节点给出可执行后果、线索或下一步压力。"
+            "若玩家明确想回到之前离开的节点，优先从路径回溯与待回访节点中找，不要把它们当作新剧情。"
+            "不要顺着即兴逻辑游离到未建立的地点、NPC 或主线，也不要提前揭露未获得的信息。"
         )
 
 
@@ -691,6 +991,17 @@ def count_external_human_turns(messages: list[BaseMessage]) -> int:
     )
 
 
+def _latest_external_human_text(messages: list[BaseMessage]) -> str:
+    """取最近一条真实玩家输入，给轻量检索层当查询。"""
+    for message in reversed(messages):
+        if not isinstance(message, HumanMessage):
+            continue
+        if is_runtime_state_message(message) or is_internal_system_human_message(message):
+            continue
+        return message_content_to_text(getattr(message, "content", "")).strip()
+    return ""
+
+
 def clone_message_with_content(message: BaseMessage, content: Any) -> BaseMessage:
     cloned_message = copy(message)
     cloned_message.content = content
@@ -892,28 +1203,69 @@ def format_scene_magic_snapshots(units: dict[str, Any]) -> str:
     return "；".join(items[:6])
 
 
-def format_adventure_summary(adventure: dict[str, Any] | None) -> str:
+def format_adventure_summary(
+    adventure: dict[str, Any] | None,
+    *,
+    visible_clue_ids: list[str] | None = None,
+) -> str:
     """把冒险状态压缩进 HUD，避免模型每轮都重读完整节点。"""
-    adventure_dict = AdventureState.model_validate(adventure or {}).model_dump()
+    adventure_dict = normalize_adventure_state(adventure or {})
     try:
         node = get_adventure_store().get_node(adventure_dict["active_node_id"])
         node_title = node.title
-        exit_labels = [f"{item.id}: {item.label}" for item in node.exits]
+        node_summary = node.dm_summary
+        exit_labels = [f"{item.id}: {item.label} -> {item.next_node_id}" for item in node.exits]
+        source_pages = _node_source_pages(node)
     except Exception:
         node_title = adventure_dict["active_node_id"]
+        node_summary = ""
         exit_labels = []
+        source_pages = "未知"
 
     lines = [
         f"模组: {adventure_dict['module_id']}",
         f"当前节点: {node_title} [ID:{adventure_dict['active_node_id']}]",
-        f"已知线索: {adventure_dict.get('known_clue_ids') or []}",
+        f"页码: {source_pages}",
+        f"节点摘要: {_sanitize_adventure_summary(node_summary)}",
+        "已知线索: "
+        + format_known_clue_window(
+            _visible_adventure_clue_window(adventure_dict, visible_clue_ids=visible_clue_ids),
+            total_count=len(adventure_dict.get("known_clue_ids") or []),
+        ),
         f"已完成事件: {adventure_dict.get('completed_event_ids') or []}",
         f"已解锁节点: {adventure_dict.get('unlocked_node_ids') or []}",
     ]
+    if len(adventure_dict.get("breadcrumb_node_ids", [])) > 1:
+        lines.append(f"路径回溯: {recent_breadcrumb_ids(adventure_dict, limit=6)}")
+    if adventure_dict.get("deferred_node_ids"):
+        lines.append(f"待回访节点: {(adventure_dict.get('deferred_node_ids') or [])[:6]}")
+    pending_rewards = _format_pending_reward_grants(adventure_dict.get("pending_reward_grants"))
+    if pending_rewards:
+        lines.append(f"待发放奖励: {pending_rewards}")
+        lines.append("当前必须先调用 claim_adventure_reward 领取待发放奖励，成功后再继续叙事。")
     if exit_labels:
         lines.append("当前节点出口: " + "；".join(exit_labels))
-    lines.append("若本轮涉及剧情事实、线索或推进，先调用冒险工具读取或更新节点状态。")
+    lines.append("节点奖励先进入待发放队列；发放时使用剧情奖励专用工具，不要自行发放或重复发放。")
+    lines.append("每次探索回应都必须贴合当前节点；若本轮涉及剧情事实、线索或推进，先依据当前节点与路径回溯自然演绎，不要自造新地点。")
     return "\n".join(lines)
+
+
+def _visible_adventure_clue_window(
+    adventure_dict: dict[str, Any],
+    *,
+    visible_clue_ids: list[str] | None = None,
+    query: str = "",
+) -> list[str]:
+    """优先使用 Director 指定窗口；否则按当前节点和玩家意图投影。"""
+    known = set(adventure_dict.get("known_clue_ids") or [])
+    directed = [clue_id for clue_id in visible_clue_ids or [] if clue_id in known]
+    if directed:
+        return directed[:6]
+    return project_known_clue_window(
+        adventure_dict,
+        current_node_id=adventure_dict["active_node_id"],
+        query=query,
+    )
 
 
 def summarize_tool_message(message: ToolMessage) -> str:
@@ -1017,24 +1369,34 @@ def summarize_adventure_node_tool(raw_text: str) -> str:
             "title": node.get("title"),
             "kind": node.get("kind"),
             "source_pages": node.get("source_pages"),
+            "source_refs": node.get("source_refs", []),
             "source_excerpt": node.get("source_excerpt"),
             "source_text": compact_text(str(node.get("source_text", "")), 6000),
             "subsections": node.get("subsections", []),
             "dm_summary": node.get("dm_summary"),
             "player_visible_intro": node.get("player_visible_intro"),
+            "scene_beats": node.get("scene_beats", []),
+            "rules_notes": node.get("rules_notes", []),
+            "npc_reveals": node.get("npc_reveals", []),
             "secrets": node.get("secrets", []),
             "checks": node.get("checks", []),
             "encounters": node.get("encounters", []),
             "rewards": node.get("rewards", []),
             "clues": node.get("clues", []),
             "events": node.get("events", []),
+            "fallbacks": node.get("fallbacks", []),
             "dm_guidance": node.get("dm_guidance", {}),
             "rules_overrides": node.get("rules_overrides", []),
-            "candidate_exits": node.get("candidate_exits", []),
         },
+        "progression_rule": payload.get(
+            "progression_rule",
+            "剧情推进出口只看顶层 available_exits；available_exits 非空且 available=true 时即可用对应 id 调用 advance。",
+        ),
         "available_exits": payload.get("available_exits", []),
         "adventure_state": payload.get("adventure_state", {}),
     }
+    if node.get("candidate_exits"):
+        projected["node"]["candidate_exits"] = node["candidate_exits"]
     return "[工具:load_adventure_node] " + compact_text(json.dumps(projected, ensure_ascii=False), 10000)
 
 

@@ -73,7 +73,7 @@ export function useChatSender(
           stopLoadingOnce() // 工具消息立即停止 loading
           addToolMessage(content)
         },
-        onDiceRoll: async (rawRoll, finalTotal) => {
+        onDiceRoll: async (rawRoll) => {
           if (onDiceRollAnimation) {
             await onDiceRollAnimation(rawRoll)
           }

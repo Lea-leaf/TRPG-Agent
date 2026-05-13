@@ -1330,6 +1330,30 @@ class TestPhaseLifecycle:
         assert "goblin_1" not in result.update["space"]["placements"]
         assert "goblin_1" in result.update["dead_units"]
 
+    def test_end_combat_records_current_adventure_encounter_event(self):
+        from app.services.tool_service import end_combat
+
+        goblin = _make_goblin()
+        goblin["hp"] = 0
+        combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1")
+        state = {
+            "combat": combat,
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["lost_mine_start", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        }
+
+        result = _invoke_tool(end_combat, tool_input={"state": state})
+
+        assert "goblin_ambush_resolved" in result.update["adventure"]["completed_event_ids"]
+        assert "节点收束与后续书签推进由后台导航器处理" in result.update["messages"][0].content
+
 
 # ── Phase 6: WeaponData 模型验证 ────────────────────────────────
 
@@ -1669,6 +1693,31 @@ class TestModifyCharacterStateResources:
         assert isinstance(result, Command)
         assert result.update["player"]["xp"] == player.get("xp", 0) + 300
         assert 'action="level_up"' in result.update["messages"][0].content
+
+    def test_grant_xp_action_is_blocked_when_adventure_runtime_is_active(self):
+        from app.services.tool_service import modify_character_state
+
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
+        state = {
+            "player": player,
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "cragmaw_hideout_entrance",
+            },
+        }
+
+        result = _invoke_tool(
+            modify_character_state,
+            tool_input={
+                "action": "grant_xp",
+                "payload": {"amount": 75, "reason": "打败伏击地精并发现克拉摩窝点"},
+                "state": state,
+            },
+        )
+
+        assert isinstance(result, Command)
+        assert "player" not in result.update
+        assert "本次未修改 XP" in result.update["messages"][0].content
 
     def test_grant_xp_action_can_target_scene_ally(self):
         from app.allies.profiles import get_ally_profile
