@@ -38,6 +38,7 @@
         :player="externalPlayer"
         :combat="combat"
         :scene-units="sceneUnits"
+        :dead-units="deadUnits"
       />
 
       <CharacterPanel
@@ -73,6 +74,7 @@ defineProps<{
   combat?: any | null
   space?: any | null
   sceneUnits?: Record<string, any> | null
+  deadUnits?: Record<string, any> | null
 }>()
 
 const panelOrder: SidebarPanelMode[] = ['character', 'hp', 'inventory']

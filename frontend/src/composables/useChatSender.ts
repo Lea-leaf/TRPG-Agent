@@ -27,6 +27,7 @@ export function useChatSender(
   setCombatState: (state: any) => void,
   setSpaceState: (state: any) => void,
   setSceneUnitsState: (state: Record<string, any> | null) => void,
+  setDeadUnitsState: (state: Record<string, any> | null) => void,
   setError: (error: string) => void,
   setSending: (sending: boolean) => void,
   clearError: () => void,
@@ -82,6 +83,7 @@ export function useChatSender(
           if (player !== undefined) setPlayerState(player)
           if (combat !== undefined) setCombatState(combat)
           if (_sceneUnits !== undefined) setSceneUnitsState(_sceneUnits)
+          if (_deadUnits !== undefined) setDeadUnitsState(_deadUnits)
           if (space !== undefined) setSpaceState(space)
         },
         onPendingAction: (action) => {

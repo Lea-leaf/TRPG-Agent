@@ -94,6 +94,7 @@
         :combat="combatState"
         :space="spaceState"
         :scene-units="sceneUnitsState"
+        :dead-units="deadUnitsState"
       />
     </div>
 
@@ -151,6 +152,7 @@ const {
   combatState,
   spaceState,
   sceneUnitsState,
+  deadUnitsState,
   playerState,
   debugMode,
   addUserMessage,
@@ -163,6 +165,7 @@ const {
   setCombatState,
   setSpaceState,
   setSceneUnitsState,
+  setDeadUnitsState,
   setError,
   setSending,
   clearError,
@@ -211,6 +214,7 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   setCombatState,
   setSpaceState,
   setSceneUnitsState,
+  setDeadUnitsState,
   setError,
   setSending,
   clearError,
@@ -276,6 +280,7 @@ const hydrateCurrentSession = async () => {
     if (history.combat) setCombatState(history.combat)
     if ((history as any).space) setSpaceState((history as any).space)
     if ((history as any).scene_units) setSceneUnitsState((history as any).scene_units)
+    if ((history as any).dead_units) setDeadUnitsState((history as any).dead_units)
   } catch {
     clearSessionId()
   }

@@ -7,68 +7,108 @@
           {{ activeMap.name }} · {{ formatNumber(activeMap.width) }}x{{ formatNumber(activeMap.height) }} 尺
         </div>
       </div>
-      <button
-        class="clear-selection-btn"
-        type="button"
-        :disabled="!selectedUnit"
-        title="清除选择"
-        @click="selectedUnitId = null"
-      >
-        <X :size="14" stroke-width="1.8" />
-      </button>
+      <div class="map-actions">
+        <button
+          class="map-toggle-btn"
+          type="button"
+          :disabled="!activeMap"
+          :title="isMapCollapsed ? '显示地图' : '隐藏地图'"
+          @click="toggleMapVisibility"
+        >
+          <component :is="isMapCollapsed ? Eye : EyeOff" :size="14" stroke-width="1.8" />
+        </button>
+        <button
+          class="focus-player-btn"
+          type="button"
+          :disabled="!playerVisibleUnit"
+          title="定位到主角位置"
+          @click="focusPlayer"
+        >
+          <LocateFixed :size="14" stroke-width="1.8" />
+        </button>
+      </div>
     </div>
 
     <div v-if="!activeMap" class="empty-map">
       暂无地图数据
     </div>
 
-    <div v-else class="map-shell">
+    <div v-else-if="isMapCollapsed" class="empty-map">
+      地图已隐藏
+    </div>
+
+    <div
+      v-else
+      class="map-shell"
+      :class="{ interactive: isMapInteractive, panning: isPanning }"
+      @click="activateMap"
+      @wheel="handleMapWheel"
+      @mousedown="handlePanStart"
+    >
       <svg
+        ref="mapCanvasRef"
         class="map-canvas"
         :viewBox="`0 0 ${viewBoxWidth} ${viewBoxHeight}`"
         role="img"
         :aria-label="`${activeMap.name} 平面地图`"
       >
-        <rect
-          class="map-bg"
-          :x="0"
-          :y="0"
-          :width="viewBoxWidth"
-          :height="viewBoxHeight"
-          rx="0"
-        />
-        <path
-          v-for="line in gridLines"
-          :key="line.key"
-          class="grid-line"
-          :d="line.path"
-        />
-        <g
-          v-for="unit in visibleUnits"
-          :key="unit.id"
-          class="unit-node"
-          :class="[{ selected: unit.id === selectedUnitId }, unit.sideClass]"
-          role="button"
-          tabindex="0"
-          :aria-label="`${unit.name} 坐标 ${formatNumber(unit.x)}, ${formatNumber(unit.y)}`"
-          @click="selectedUnitId = unit.id"
-          @keydown.enter.prevent="selectedUnitId = unit.id"
-          @keydown.space.prevent="selectedUnitId = unit.id"
-        >
-          <circle class="unit-aura" :cx="unit.screenX" :cy="unit.screenY" :r="unit.selected ? 9 : 7" />
-          <circle class="unit-dot" :cx="unit.screenX" :cy="unit.screenY" :r="4" />
-          <text class="unit-label" :x="unit.screenX" :y="unit.screenY - 8">
-            {{ unit.initial }}
-          </text>
+        <g :transform="panTransform">
+          <g :transform="viewportTransform">
+            <rect
+              class="map-bg"
+              :x="0"
+              :y="0"
+              :width="viewBoxWidth"
+              :height="viewBoxHeight"
+              rx="0"
+            />
+            <path
+              v-for="line in gridLines"
+              :key="line.key"
+              class="grid-line"
+              :d="line.path"
+            />
+            <g
+              v-for="unit in visibleUnits"
+              :key="unit.id"
+              class="unit-node"
+              :class="[{ selected: unit.id === selectedUnitId, 'is-dead': unit.isDead }, unit.sideClass]"
+              role="button"
+              tabindex="0"
+              :aria-label="`${unit.name} 坐标 ${formatNumber(unit.x)}, ${formatNumber(unit.y)}`"
+              @click.stop="handleUnitClick(unit.id)"
+              @keydown.enter.prevent="selectedUnitId = unit.id"
+              @keydown.space.prevent="selectedUnitId = unit.id"
+            >
+              <circle class="unit-aura" :cx="unit.screenX" :cy="unit.screenY" :r="unit.selected ? 2.25 : 1.75" />
+              <circle class="unit-dot" :cx="unit.screenX" :cy="unit.screenY" :r="1" />
+              <text
+                class="unit-label"
+                :class="{ expanded: showFullLabels }"
+                :x="unit.screenX + (showFullLabels ? 2.2 : 0)"
+                :y="unit.screenY - (showFullLabels ? 2 : 3.25)"
+                :text-anchor="showFullLabels ? 'start' : 'middle'"
+              >
+                {{ showFullLabels ? unit.name : unit.initial }}
+              </text>
+            </g>
+          </g>
         </g>
       </svg>
       <div class="axis-row">
-        <span>0,0</span>
-        <span>{{ formatNumber(activeMap.width) }},{{ formatNumber(activeMap.height) }}</span>
+        <span class="zoom-indicator">
+          {{
+            isPanning
+              ? '拖动中'
+              : isMapInteractive
+                ? `缩放 ${zoomScale.toFixed(1)}x；按住 Ctrl + 鼠标拖动`
+                : '点击地图后可滚轮缩放；按住 Ctrl + 鼠标拖动'
+          }}
+        </span>
       </div>
     </div>
 
-    <div v-if="selectedUnit" class="unit-detail">
+    <div v-if="selectedUnit && !isMapCollapsed" class="unit-detail">
       <div class="unit-detail-head">
         <span class="unit-name">{{ selectedUnit.name }}</span>
         <span class="unit-id">{{ selectedUnit.id }}</span>
@@ -101,8 +141,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { X } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Eye, EyeOff, LocateFixed } from 'lucide-vue-next'
 
 type PlaneMap = {
   id: string
@@ -133,6 +173,7 @@ type VisibleUnit = {
   screenX: number
   screenY: number
   selected: boolean
+  isDead: boolean
   hp?: number
   max_hp?: number
   ac?: number
@@ -146,9 +187,20 @@ const props = defineProps<{
   player: any | null
   combat?: any | null
   sceneUnits?: Record<string, any> | null
+  deadUnits?: Record<string, any> | null
 }>()
 
 const selectedUnitId = ref<string | null>(null)
+const isMapCollapsed = ref(false)
+const isMapInteractive = ref(false)
+const zoomScale = ref(1)
+const panX = ref(0)
+const panY = ref(0)
+const isPanning = ref(false)
+const mapCanvasRef = ref<SVGSVGElement | null>(null)
+const panStartState = ref<{ mouseX: number; mouseY: number; panX: number; panY: number } | null>(null)
+const isCtrlPressed = ref(false)
+const lastCtrlKeydownAt = ref(0)
 
 // 地图状态来自多路流式更新，先做宽松归一化，避免中间态直接打断整页渲染
 const isRecord = (value: unknown): value is LooseRecord => {
@@ -210,6 +262,17 @@ const activeMap = computed<PlaneMap | null>(() => {
 
 const viewBoxWidth = computed(() => Math.max(1, Number(activeMap.value?.width ?? 1)))
 const viewBoxHeight = computed(() => Math.max(1, Number(activeMap.value?.height ?? 1)))
+const panTransform = computed(() => `translate(${panX.value} ${panY.value})`)
+const viewportTransform = computed(() => {
+  const centerX = viewBoxWidth.value / 2
+  const centerY = viewBoxHeight.value / 2
+  return [
+    `translate(${centerX} ${centerY})`,
+    `scale(${zoomScale.value})`,
+    `translate(${-centerX} ${-centerY})`,
+  ].join(' ')
+})
+const showFullLabels = computed(() => zoomScale.value >= 1.8)
 
 const unitsById = computed<Record<string, UnitInfo>>(() => {
   const result: Record<string, UnitInfo> = {}
@@ -229,12 +292,43 @@ const unitsById = computed<Record<string, UnitInfo>>(() => {
     result[playerId] = { id: playerId, ...props.player, side: 'player' }
   }
 
+  toEntries(props.deadUnits).forEach(([id, unit]) => {
+    const current = result[id] ?? { id }
+    result[id] = isRecord(unit) ? { ...current, ...(unit as UnitInfo), id } : current
+  })
+
   return result
+})
+
+const deadUnitIds = computed(() => {
+  const ids = new Set<string>()
+
+  toEntries(props.deadUnits).forEach(([id]) => {
+    ids.add(id)
+  })
+
+  toEntries(props.sceneUnits).forEach(([id, unit]) => {
+    if (isRecord(unit) && toNumber(unit.hp, 1) <= 0) ids.add(id)
+  })
+
+  const participants = isRecord(props.combat) ? props.combat.participants : null
+  toEntries(participants).forEach(([id, unit]) => {
+    if (isRecord(unit) && toNumber(unit.hp, 1) <= 0) ids.add(id)
+  })
+
+  if (isRecord(props.player)) {
+    const playerName = toLabelText(props.player.name, 'player')
+    const playerId = toLabelText(props.player.id, `player_${playerName}`)
+    if (toNumber(props.player.hp, 1) <= 0) ids.add(playerId)
+  }
+
+  return ids
 })
 
 const visibleUnits = computed<VisibleUnit[]>(() => {
   const map = activeMap.value
   const placements = isRecord(props.space) && isRecord(props.space.placements) ? props.space.placements : {}
+  const combatActive = isRecord(props.combat)
   if (!map) return []
 
   return toEntries(placements)
@@ -247,6 +341,7 @@ const visibleUnits = computed<VisibleUnit[]>(() => {
       const side = typeof info.side === 'string' && info.side ? info.side : 'neutral'
       const name = toLabelText(info.name, unitId)
       const selected = unitId === selectedUnitId.value
+      const isDead = deadUnitIds.value.has(unitId)
 
       return {
         id: unitId,
@@ -259,6 +354,7 @@ const visibleUnits = computed<VisibleUnit[]>(() => {
         screenX: clamp(x, 0, map.width),
         screenY: clamp(map.height - y, 0, map.height),
         selected,
+        isDead,
         hp: toOptionalNumber(info.hp),
         max_hp: toOptionalNumber(info.max_hp),
         ac: toOptionalNumber(info.ac),
@@ -267,12 +363,26 @@ const visibleUnits = computed<VisibleUnit[]>(() => {
     })
     .filter((unit) => {
       const placement = placements[unit.id]
-      return isRecord(placement) && toLabelText(placement.map_id, '') === map.id
+      if (!isRecord(placement) || toLabelText(placement.map_id, '') !== map.id) return false
+      if (!combatActive && unit.side === 'enemy') return false
+      return true
     })
 })
 
 const selectedUnit = computed(() => {
   return visibleUnits.value.find((unit) => unit.id === selectedUnitId.value) ?? visibleUnits.value[0] ?? null
+})
+
+const playerUnitId = computed(() => {
+  if (!isRecord(props.player)) return null
+  const playerName = toLabelText(props.player.name, 'player')
+  return toLabelText(props.player.id, `player_${playerName}`)
+})
+
+const playerVisibleUnit = computed(() => {
+  const unitId = playerUnitId.value
+  if (!unitId) return null
+  return visibleUnits.value.find((unit) => unit.id === unitId) ?? null
 })
 
 const gridLines = computed(() => {
@@ -297,7 +407,144 @@ watch(visibleUnits, (units) => {
   selectedUnitId.value = units[0]?.id ?? null
 }, { immediate: true })
 
+watch(activeMap, () => {
+  resetViewport()
+  isMapInteractive.value = false
+  isMapCollapsed.value = false
+})
+
+watch(zoomScale, () => {
+  clampPanIntoBounds()
+})
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+
+const maxPanX = computed(() => Math.max(0, (viewBoxWidth.value * (zoomScale.value - 1)) / 2))
+const maxPanY = computed(() => Math.max(0, (viewBoxHeight.value * (zoomScale.value - 1)) / 2))
+
+const clampPanIntoBounds = () => {
+  panX.value = clamp(Number(panX.value.toFixed(2)), -maxPanX.value, maxPanX.value)
+  panY.value = clamp(Number(panY.value.toFixed(2)), -maxPanY.value, maxPanY.value)
+}
+
+const resetViewport = () => {
+  zoomScale.value = 1
+  panX.value = 0
+  panY.value = 0
+  isPanning.value = false
+  panStartState.value = null
+}
+
+const activateMap = (event?: MouseEvent) => {
+  const now = Date.now()
+  if (event?.ctrlKey || isCtrlPressed.value || now - lastCtrlKeydownAt.value <= 560 || isPanning.value) {
+    return
+  }
+  if (isMapInteractive.value) {
+    resetViewport()
+    isMapInteractive.value = false
+    return
+  }
+  isMapInteractive.value = true
+}
+
+const toggleMapVisibility = () => {
+  isMapCollapsed.value = !isMapCollapsed.value
+  if (isMapCollapsed.value) {
+    isMapInteractive.value = false
+    isPanning.value = false
+  }
+}
+
+const handleMapWheel = (event: WheelEvent) => {
+  if (!isMapInteractive.value) return
+  event.preventDefault()
+  const nextScale = zoomScale.value + (event.deltaY < 0 ? 0.2 : -0.2)
+  zoomScale.value = clamp(Number(nextScale.toFixed(2)), 1, 3)
+  clampPanIntoBounds()
+}
+
+const handlePanStart = (event: MouseEvent) => {
+  if (!isMapInteractive.value || !event.ctrlKey || !mapCanvasRef.value) return
+  if (zoomScale.value <= 1) return
+  event.preventDefault()
+  event.stopPropagation()
+  isPanning.value = true
+  panStartState.value = {
+    mouseX: event.clientX,
+    mouseY: event.clientY,
+    panX: panX.value,
+    panY: panY.value,
+  }
+  window.addEventListener('mousemove', handlePanMove)
+  window.addEventListener('mouseup', handlePanEnd)
+}
+
+const handlePanMove = (event: MouseEvent) => {
+  if (!isPanning.value || !panStartState.value || !mapCanvasRef.value) return
+  const rect = mapCanvasRef.value.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
+
+  const deltaX = (event.clientX - panStartState.value.mouseX) * (viewBoxWidth.value / rect.width) / zoomScale.value
+  const deltaY = (event.clientY - panStartState.value.mouseY) * (viewBoxHeight.value / rect.height) / zoomScale.value
+
+  panX.value = Number((panStartState.value.panX + deltaX).toFixed(2))
+  panY.value = Number((panStartState.value.panY + deltaY).toFixed(2))
+  clampPanIntoBounds()
+}
+
+const handlePanEnd = () => {
+  isPanning.value = false
+  panStartState.value = null
+  window.removeEventListener('mousemove', handlePanMove)
+  window.removeEventListener('mouseup', handlePanEnd)
+}
+
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.key !== 'Control') return
+  isCtrlPressed.value = true
+  lastCtrlKeydownAt.value = Date.now()
+}
+
+const handleKeyUp = (event: KeyboardEvent) => {
+  if (event.key !== 'Control') return
+  isCtrlPressed.value = false
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+})
+
+onBeforeUnmount(() => {
+  handlePanEnd()
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+})
+
+const handleUnitClick = (unitId: string) => {
+  selectedUnitId.value = unitId
+}
+
+const focusPlayer = () => {
+  const unit = playerVisibleUnit.value
+  if (!unit) return
+
+  selectedUnitId.value = unit.id
+  isMapInteractive.value = true
+
+  if (zoomScale.value <= 1) {
+    panX.value = 0
+    panY.value = 0
+    return
+  }
+
+  const centerX = viewBoxWidth.value / 2
+  const centerY = viewBoxHeight.value / 2
+  panX.value = (centerX - unit.screenX) * (zoomScale.value - 1)
+  panY.value = (centerY - unit.screenY) * (zoomScale.value - 1)
+  clampPanIntoBounds()
+}
 
 const formatNumber = (value: number | undefined) => {
   if (value === undefined || Number.isNaN(value)) return '?'
@@ -335,6 +582,12 @@ const sideClass = (side: string) => {
   gap: 10px;
 }
 
+.map-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .section-title {
   color: #c9a87b;
   font-size: 14px;
@@ -347,7 +600,7 @@ const sideClass = (side: string) => {
   font-size: 12px;
 }
 
-.clear-selection-btn {
+.focus-player-btn {
   width: 28px;
   height: 28px;
   display: inline-flex;
@@ -360,13 +613,41 @@ const sideClass = (side: string) => {
   cursor: pointer;
 }
 
-.clear-selection-btn:disabled {
+.map-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.map-toggle-btn:disabled,
+.focus-player-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
 .map-shell {
   width: 100%;
+}
+
+.map-shell.interactive {
+  cursor: zoom-in;
+}
+
+.map-shell.interactive .map-canvas {
+  border-color: rgba(250, 204, 21, 0.45);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.12) inset;
+}
+
+.map-shell.panning,
+.map-shell.panning .map-canvas {
+  cursor: grabbing;
 }
 
 .map-canvas {
@@ -403,7 +684,7 @@ const sideClass = (side: string) => {
 
 .unit-dot {
   stroke: rgba(0, 0, 0, 0.65);
-  stroke-width: 1;
+  stroke-width: 0.7;
   vector-effect: non-scaling-stroke;
 }
 
@@ -416,6 +697,10 @@ const sideClass = (side: string) => {
   stroke: rgba(0, 0, 0, 0.75);
   stroke-width: 1.3;
   pointer-events: none;
+}
+
+.unit-label.expanded {
+  font-size: 3.1px;
 }
 
 .unit-node.selected .unit-aura {
@@ -439,12 +724,41 @@ const sideClass = (side: string) => {
   fill: #a78bfa;
 }
 
+.unit-node .unit-aura {
+  opacity: 0.9;
+}
+
+.unit-node.is-dead .unit-dot,
+.unit-node.is-dead.side-player .unit-dot,
+.unit-node.is-dead.side-ally .unit-dot,
+.unit-node.is-dead.side-enemy .unit-dot,
+.unit-node.is-dead.side-neutral .unit-dot {
+  fill: #6b7280;
+}
+
+.unit-node.is-dead .unit-aura {
+  fill: rgba(107, 114, 128, 0.12);
+  stroke: rgba(148, 163, 184, 0.42);
+}
+
+.unit-node.is-dead .unit-label {
+  fill: #d4d4d8;
+}
+
 .axis-row {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
   color: #71717a;
   font-size: 11px;
   margin-top: 4px;
+}
+
+.zoom-indicator {
+  flex: 1;
+  text-align: center;
+  color: #a1a1aa;
 }
 
 .unit-detail {

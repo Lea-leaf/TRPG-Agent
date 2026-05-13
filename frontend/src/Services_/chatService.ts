@@ -266,6 +266,7 @@ export const chatService = {
     combat: any
     space?: any
     scene_units?: any
+    dead_units?: any
   }> {
     const url = `/api/chat/history?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`
     const retryDelays = [300, 700, 1200]
