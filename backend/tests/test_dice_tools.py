@@ -27,7 +27,7 @@ def _invoke_tool(tool_func, *, tool_input: dict) -> object:
 
 
 def test_request_dice_roll_supports_disadvantage_for_surprise_context():
-    from app.services.tool_service import request_dice_roll
+    from app.services.tools.dice_tools import request_dice_roll
 
     rolled_exprs: list[str] = []
     real_roll = d20.roll

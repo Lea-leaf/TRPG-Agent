@@ -9,30 +9,21 @@ from langchain_core.tools import BaseTool
 
 from app.services.tools.dice_tools import request_dice_roll
 from app.services.tools.character_tools import (
-    choose_arcane_tradition,
-    choose_fighter_archetype,
-    grant_xp,
     inspect_unit,
-    level_up,
     load_character_profile,
     modify_character_state,
 )
 from app.services.tools.combat_tools import (
     attack_action,
-    clear_dead_units,
     end_combat,
     manage_scene_units,
     next_turn,
-    spawn_ally,
-    spawn_monsters,
     start_combat,
 )
 from app.services.tools.item_tools import buy_item, use_item
 from app.services.tools.spell_tools import cast_spell
-from app.services.tools.condition_tools import apply_condition, remove_condition
 from app.services.tools.rag_tools import consult_rules_handbook
 from app.services.tools.rest_tools import take_rest
-from app.services.tools.skill_tools import load_skill
 from app.services.tools.space_tools import (
     create_plane_map,
     manage_space,
@@ -41,7 +32,6 @@ from app.services.tools.space_tools import (
     remove_unit,
     place_unit,
     query_units_in_radius,
-    switch_plane_map,
 )
 from app.services.tools.monster_action_tools import use_monster_action
 from app.services.tools.class_action_tools import use_class_action
@@ -74,9 +64,6 @@ from app.services.tools.reactions import (
     execute_player_reaction,
     resolve_npc_reaction,
 )
-
-# 向后兼容旧名称
-build_player_combatant = prepare_player_for_combat
 
 ToolProfile = Literal["narrative", "combat"]
 
@@ -122,21 +109,7 @@ _COMPATIBILITY_TOOLS: tuple[BaseTool, ...] = (
     reveal_adventure_clue,
     mark_adventure_event,
     advance_adventure,
-    claim_adventure_reward,
-    spawn_ally,
-    spawn_monsters,
-    clear_dead_units,
-    load_skill,
-    apply_condition,
-    remove_condition,
-    grant_xp,
-    level_up,
-    choose_arcane_tradition,
-    choose_fighter_archetype,
-    buy_item,
-    use_class_action,
     create_plane_map,
-    switch_plane_map,
     place_unit,
     move_unit,
     remove_unit,

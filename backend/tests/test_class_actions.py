@@ -11,7 +11,8 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from app.graph.state import CombatState
-from app.services.tool_service import use_class_action
+from app.services.tools.class_action_tools import use_class_action
+from app.services.tools import get_tool_profile, get_tools
 
 
 def _combat_state_for(actor: dict) -> CombatState:
@@ -75,6 +76,17 @@ def test_use_class_action_lists_available_actions():
     content = result.update["messages"][0].content
     assert "second_wind" in content
     assert "action_surge" in content
+
+
+def test_use_class_feature_is_removed_from_all_tool_entries():
+    """旧职业特性入口已删除，主动职业动作统一走 use_class_action。"""
+    narrative_tools = {tool.name for tool in get_tool_profile("narrative")}
+    combat_tools = {tool.name for tool in get_tool_profile("combat")}
+    all_tools = {tool.name for tool in get_tools()}
+
+    assert "use_class_feature" not in narrative_tools
+    assert "use_class_feature" not in combat_tools
+    assert "use_class_feature" not in all_tools
 
 
 def test_level_1_fighter_lists_second_wind_only():

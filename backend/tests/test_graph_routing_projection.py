@@ -20,7 +20,8 @@ from app.graph.state import GraphState
 from app.memory.context_assembler import ContextAssembler, trim_model_messages
 from app.prompts import get_assistant_system_prompt
 from app.services.tools import get_tool_profile
-from app.services.tool_service import manage_space, modify_character_state
+from app.services.tools.character_tools import modify_character_state
+from app.services.tools.space_tools import manage_space
 
 
 def _context_assembler() -> ContextAssembler:
@@ -536,6 +537,68 @@ def test_tool_profiles_split_exploration_and_combat_visibility():
     assert "apply_condition" not in combat_tools
     assert "remove_condition" not in combat_tools
     assert ASSISTANT_NODE == "assistant"
+
+
+def test_tool_profiles_expose_only_current_recommended_entries_in_stable_order():
+    """模型可见工具必须保持当前推荐入口和稳定顺序，历史工具只给 ToolNode。"""
+    assert [tool.name for tool in get_tool_profile("narrative")] == [
+        "request_dice_roll",
+        "load_character_profile",
+        "modify_character_state",
+        "manage_scene_units",
+        "start_combat",
+        "cast_spell",
+        "use_item",
+        "buy_item",
+        "use_class_action",
+        "inspect_unit",
+        "consult_rules_handbook",
+        "take_rest",
+        "manage_space",
+        "claim_adventure_reward",
+    ]
+    assert [tool.name for tool in get_tool_profile("combat")] == [
+        "request_dice_roll",
+        "modify_character_state",
+        "use_class_action",
+        "use_item",
+        "attack_action",
+        "manage_scene_units",
+        "use_monster_action",
+        "next_turn",
+        "end_combat",
+        "cast_spell",
+        "inspect_unit",
+        "consult_rules_handbook",
+        "manage_space",
+    ]
+
+
+def test_compatibility_tools_are_toolnode_only_without_profile_duplicates():
+    """兼容工具只服务历史 ToolNode，不应重复登记正式 profile 工具。"""
+    from app.services.tools import _COMBAT_TOOLS, _COMPATIBILITY_TOOLS, _NARRATIVE_TOOLS, get_tools
+
+    profile_tool_names = {tool.name for tool in _NARRATIVE_TOOLS} | {tool.name for tool in _COMBAT_TOOLS}
+    compatibility_tool_names = {tool.name for tool in _COMPATIBILITY_TOOLS}
+    assert not (compatibility_tool_names & profile_tool_names)
+
+    all_tool_names = {tool.name for tool in get_tools()}
+    assert "use_class_feature" not in all_tool_names
+    assert "spawn_ally" not in all_tool_names
+    assert "spawn_monsters" not in all_tool_names
+    assert "clear_dead_units" not in all_tool_names
+    assert "load_skill" not in all_tool_names
+    assert "apply_condition" not in all_tool_names
+    assert "remove_condition" not in all_tool_names
+    assert "grant_xp" not in all_tool_names
+    assert "level_up" not in all_tool_names
+    assert "choose_arcane_tradition" not in all_tool_names
+    assert "choose_fighter_archetype" not in all_tool_names
+    assert "switch_plane_map" not in all_tool_names
+    assert "manage_adventure" in all_tool_names
+    assert "claim_adventure_reward" in all_tool_names
+    assert "buy_item" in all_tool_names
+    assert "use_class_action" in all_tool_names
 
 
 def test_modify_character_state_help_returns_skill_instructions():

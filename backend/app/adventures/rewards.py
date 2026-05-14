@@ -187,14 +187,6 @@ def claim_pending_reward(
     }
 
 
-def claim_pending_xp_reward(
-    state: dict[str, Any],
-    reward_id: str,
-) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
-    """兼容旧调用名；剧情奖励统一由 claim_pending_reward 处理。"""
-    return claim_pending_reward(state, reward_id)
-
-
 def _apply_reward_to_player(state: dict[str, Any], reward: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     """把节点奖励落到角色卡；财宝保留原文，避免误拆混合币种和可售物。"""
     player_raw = state.get("player")

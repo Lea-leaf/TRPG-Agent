@@ -17,7 +17,7 @@ from app.calculation.experience import CR_XP_TABLE, xp_from_cr
 from app.equipment.weapons import resolve_weapon_data
 from app.conditions import get_combat_effects, get_condition_module, tick_conditions
 from app.graph.state import AttackInfo
-from app.services.class_features.registry import get_critical_threshold
+from app.services.class_features import get_critical_threshold
 
 
 # ── 战斗覆盖字段 ────────────────────────────────────────────────

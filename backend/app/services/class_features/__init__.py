@@ -1,6 +1,6 @@
 """职业特性框架入口。"""
 
-from app.services.class_features.champion import CHAMPION_FEATURE_IDS, improved_critical_threshold
+from app.services.class_features.champion import CHAMPION_FEATURE_IDS, get_critical_threshold, improved_critical_threshold
 from app.services.class_features.eldritch_knight import (
     ELDRITCH_KNIGHT_DEFAULT_CANTRIPS,
     ELDRITCH_KNIGHT_DEFAULT_SPELLS,
@@ -15,14 +15,7 @@ from app.services.class_features.battle_master import (
     BATTLE_MASTER_SUPERIORITY_DIE,
     BATTLE_MASTER_SUPERIORITY_DICE,
 )
-from app.services.class_features.registry import (
-    available_features,
-    get_critical_threshold,
-    register_feature,
-    run_feature,
-)
-from app.services.class_features.spellcasting import grant_spellcasting
-from app.services.class_features.types import FeatureContext, FeatureResult, FeatureTrigger
+from app.services.class_features.spellcasting import grant_spellcasting, sync_spellcasting_fields
 
 __all__ = [
     "BATTLE_MASTER_FEATURE_IDS",
@@ -35,14 +28,9 @@ __all__ = [
     "ELDRITCH_KNIGHT_DEFAULT_SPELLS",
     "ELDRITCH_KNIGHT_FEATURE_IDS",
     "ELDRITCH_KNIGHT_SPELLCASTING_BY_LEVEL",
-    "FeatureContext",
-    "FeatureResult",
-    "FeatureTrigger",
-    "available_features",
     "get_critical_threshold",
     "grant_spellcasting",
     "improved_critical_threshold",
-    "register_feature",
-    "run_feature",
+    "sync_spellcasting_fields",
     "sync_eldritch_knight_spellcasting",
 ]

@@ -11,3 +11,8 @@ def improved_critical_threshold(actor: dict, base: int = 20) -> int:
     if "improved_critical" in actor.get("class_features", []):
         return min(base, 19)
     return base
+
+
+def get_critical_threshold(actor: dict, base: int = 20) -> int:
+    """统一暴露武器重击阈值，当前 5 级范围内只有勇士会改写它。"""
+    return improved_critical_threshold(actor, base)
