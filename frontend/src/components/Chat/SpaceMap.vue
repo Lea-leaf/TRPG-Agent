@@ -56,12 +56,12 @@
         panning: isPanning,
         'move-mode': isMoveModeActive,
       }"
-      @click="activateMap"
-      @wheel="handleMapWheel"
-      @mousedown="handlePanStart"
+      @click="activateMap($event, 'inline')"
+      @wheel="handleMapWheel($event, 'inline')"
+      @mousedown="handlePanStart($event, 'inline')"
     >
       <svg
-        ref="mapCanvasRef"
+        ref="inlineMapCanvasRef"
         class="map-canvas"
         :viewBox="`0 0 ${viewBoxWidth} ${viewBoxHeight}`"
         role="img"
@@ -144,6 +144,266 @@
         </span>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="isDetachedMapOpen && activeMap"
+        class="detached-map-overlay"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`${activeMap.name} 独立地图`"
+      >
+        <div class="detached-map-panel" :style="{ '--detached-map-side': `${detachedMapSide}px` }">
+            <div class="detached-map-header">
+              <div class="detached-map-heading">
+                <div class="section-title detached-map-title">战术地图</div>
+                <div class="map-subtitle">
+                  <span class="map-name">{{ activeMap.name }}</span>
+                  <span class="map-size">{{ formatNumber(activeMap.width) }}x{{ formatNumber(activeMap.height) }} 尺</span>
+                </div>
+            </div>
+            <div class="map-actions">
+              <button
+                class="move-toggle-btn"
+                type="button"
+                :disabled="!canEnterMoveMode || isSubmittingMove"
+                :title="moveActionTitle"
+                @click.stop="toggleMoveMode"
+              >
+                <Footprints :size="14" stroke-width="1.8" />
+              </button>
+              <button
+                class="focus-player-btn"
+                type="button"
+                :disabled="!playerVisibleUnit"
+                title="定位到主角位置"
+                @click="focusPlayer"
+              >
+                <LocateFixed :size="14" stroke-width="1.8" />
+              </button>
+              <button
+                class="detached-map-close-btn"
+                type="button"
+                title="关闭独立地图"
+                @click="closeDetachedMap"
+              >
+                退出
+              </button>
+            </div>
+          </div>
+
+          <div
+            class="map-shell detached-map-shell"
+            :class="{
+              interactive: isMapInteractive,
+              panning: isPanning,
+              'move-mode': isMoveModeActive,
+            }"
+            @click="activateMap($event, 'detached')"
+            @wheel="handleMapWheel($event, 'detached')"
+            @mousedown="handlePanStart($event, 'detached')"
+          >
+            <svg
+              ref="detachedMapCanvasRef"
+              class="map-canvas detached-map-canvas"
+              :viewBox="`0 0 ${viewBoxWidth} ${viewBoxHeight}`"
+              role="img"
+              :aria-label="`${activeMap.name} 平面地图`"
+            >
+              <g :transform="panTransform">
+                <g :transform="viewportTransform">
+                  <rect
+                    class="map-bg"
+                    :x="0"
+                    :y="0"
+                    :width="viewBoxWidth"
+                    :height="viewBoxHeight"
+                    rx="0"
+                  />
+                  <path
+                    v-for="line in gridLines"
+                    :key="`detached-${line.key}`"
+                    class="grid-line"
+                    :d="line.path"
+                  />
+                  <g v-if="movePreview" class="move-preview">
+                    <line
+                      class="move-preview-line"
+                      :x1="movePreview.fromScreenX"
+                      :y1="movePreview.fromScreenY"
+                      :x2="movePreview.toScreenX"
+                      :y2="movePreview.toScreenY"
+                    />
+                    <circle
+                      class="move-preview-target"
+                      :class="{ invalid: isMoveDistanceExceeded }"
+                      :cx="movePreview.toScreenX"
+                      :cy="movePreview.toScreenY"
+                      r="1.5"
+                    />
+                  </g>
+                  <g
+                    v-for="unit in visibleUnits"
+                    :key="`detached-${unit.id}`"
+                    class="unit-node"
+                    :class="[
+                      { selected: unit.id === selectedUnitId, 'is-dead': unit.isDead, movable: unit.id === playerUnitId && canEnterMoveMode },
+                      unit.sideClass,
+                    ]"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`${unit.name} 坐标 ${formatNumber(unit.x)}, ${formatNumber(unit.y)}`"
+                    @click.stop="handleUnitClick(unit.id)"
+                    @dblclick.stop="handleUnitDoubleClick(unit.id)"
+                    @keydown.enter.prevent="selectedUnitId = unit.id"
+                    @keydown.space.prevent="selectedUnitId = unit.id"
+                  >
+                    <circle class="unit-aura" :cx="unit.screenX" :cy="unit.screenY" :r="unit.selected ? 2.25 : 1.75" />
+                    <circle class="unit-dot" :cx="unit.screenX" :cy="unit.screenY" :r="1" />
+                    <text
+                      class="unit-label"
+                      :class="{ expanded: showFullLabels }"
+                      :x="unit.screenX + (showFullLabels ? 2.2 : 0)"
+                      :y="unit.screenY - (showFullLabels ? 2 : 3.25)"
+                      :text-anchor="showFullLabels ? 'start' : 'middle'"
+                    >
+                      {{ showFullLabels ? unit.name : unit.initial }}
+                    </text>
+                  </g>
+                </g>
+              </g>
+            </svg>
+            <div class="axis-row detached-axis-row">
+              <span class="zoom-indicator">
+                {{
+                  isPanning
+                    ? '拖动中'
+                    : isMoveModeActive
+                      ? '移动模式：点击网格设置目标点；按住 Ctrl + 鼠标拖动'
+                      : isMapInteractive
+                        ? `缩放 ${zoomScale.toFixed(1)}x；按住 Ctrl + 鼠标拖动`
+                        : '点击地图后可滚轮缩放；按住 Ctrl + 鼠标拖动'
+                }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="isDetachedMapOpen && (isMoveModeActive || selectedUnit)"
+        class="detached-stats-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="战术地图属性面板"
+      >
+        <div class="detached-stats-panel">
+          <div class="detached-stats-header">
+            <div class="section-title">属性</div>
+          </div>
+
+          <div v-if="isMoveModeActive" class="move-panel detached-map-info">
+            <template v-if="moveEligibility">
+              <div class="move-panel-head">
+                <span class="move-panel-title">战术移动</span>
+                <span class="move-panel-status" :class="{ active: isMoveModeActive }">
+                  {{ isMoveModeActive ? '已开启' : '未开启' }}
+                </span>
+              </div>
+              <div class="move-panel-grid detached-stats-grid">
+                <div>
+                  <span>当前行动者</span>
+                  <strong>{{ moveEligibility.actorName }}</strong>
+                </div>
+                <div>
+                  <span>剩余移动力</span>
+                  <strong>{{ formatNumber(moveEligibility.movementLeft) }} 尺</strong>
+                </div>
+                <div>
+                  <span>起点</span>
+                  <strong>({{ formatNumber(moveEligibility.fromX) }}, {{ formatNumber(moveEligibility.fromY) }})</strong>
+                </div>
+                <div>
+                  <span>终点</span>
+                  <strong>{{ moveTarget ? `(${formatNumber(moveTarget.x)}, ${formatNumber(moveTarget.y)})` : '待选择' }}</strong>
+                </div>
+                <div>
+                  <span>预计距离</span>
+                  <strong>{{ moveDistance === null ? '待选择' : `${formatNumber(moveDistance)} 尺` }}</strong>
+                </div>
+                <div>
+                  <span>校验结果</span>
+                  <strong :class="{ danger: isMoveDistanceExceeded }">
+                    {{ moveValidationText }}
+                  </strong>
+                </div>
+              </div>
+              <div class="move-panel-actions detached-stats-actions">
+                <button
+                  class="move-action-btn"
+                  type="button"
+                  :disabled="isSubmittingMove"
+                  @click="toggleMoveMode"
+                >
+                  {{ isMoveModeActive ? '取消移动' : '开始移动' }}
+                </button>
+                <button
+                  class="move-action-btn subtle"
+                  type="button"
+                  :disabled="!isMoveModeActive || !moveTarget || isSubmittingMove"
+                  @click="clearMovePreview"
+                >
+                  清除目标
+                </button>
+                <button
+                  class="move-action-btn primary"
+                  type="button"
+                  :disabled="!canConfirmMove"
+                  @click="submitMoveRequest"
+                >
+                  {{ isSubmittingMove ? '提交中...' : '确认移动' }}
+                </button>
+              </div>
+            </template>
+            <div v-else class="move-disabled-reason">
+              {{ moveDisabledReason }}
+            </div>
+          </div>
+
+          <div v-if="selectedUnit" class="unit-detail detached-map-info">
+            <div class="unit-detail-head">
+              <span class="unit-name">{{ selectedUnit.name }}</span>
+              <span class="unit-id">{{ selectedUnit.id }}</span>
+            </div>
+            <div class="detail-grid detached-stats-grid">
+              <div>
+                <span>坐标</span>
+                <strong>({{ formatNumber(selectedUnit.x) }}, {{ formatNumber(selectedUnit.y) }})</strong>
+              </div>
+              <div>
+                <span>阵营</span>
+                <strong>{{ sideLabel(selectedUnit.side) }}</strong>
+              </div>
+              <div v-if="selectedUnit.hp !== undefined">
+                <span>生命值</span>
+                <strong>{{ selectedUnit.hp }} / {{ selectedUnit.max_hp ?? '?' }}</strong>
+              </div>
+              <div v-if="selectedUnit.ac !== undefined">
+                <span>护甲</span>
+                <strong>{{ selectedUnit.ac }}</strong>
+              </div>
+            </div>
+            <div v-if="selectedUnit.conditions.length" class="condition-line">
+              <span v-for="condition in selectedUnit.conditions" :key="condition" class="mini-condition">
+                {{ condition }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <div v-if="!isMapCollapsed && isMoveModeActive" class="move-panel">
       <template v-if="moveEligibility">
@@ -306,19 +566,24 @@ const props = defineProps<{
 
 const selectedUnitId = ref<string | null>(null)
 const isMapCollapsed = ref(false)
+const isDetachedMapOpen = ref(false)
 const isMapInteractive = ref(false)
 const zoomScale = ref(1)
 const panX = ref(0)
 const panY = ref(0)
 const isPanning = ref(false)
-const mapCanvasRef = ref<SVGSVGElement | null>(null)
+const inlineMapCanvasRef = ref<SVGSVGElement | null>(null)
+const detachedMapCanvasRef = ref<SVGSVGElement | null>(null)
 const panStartState = ref<{ mouseX: number; mouseY: number; panX: number; panY: number } | null>(null)
 const isCtrlPressed = ref(false)
 const lastCtrlKeydownAt = ref(0)
+const lastMapClickAt = ref(0)
 const isMoveModeActive = ref(false)
 const moveTarget = ref<{ x: number; y: number } | null>(null)
 const isSubmittingMove = ref(false)
 const preservedViewport = ref<{ zoomScale: number; panX: number; panY: number } | null>(null)
+const detachedMapSide = ref(520)
+const MAP_DOUBLE_CLICK_THRESHOLD_MS = 500
 
 // 地图状态来自多路流式更新，先做宽松归一化，避免中间态直接打断整页渲染
 const isRecord = (value: unknown): value is LooseRecord => {
@@ -631,6 +896,7 @@ watch(activeMap, () => {
   preservedViewport.value = null
   isMapInteractive.value = false
   isMapCollapsed.value = false
+  isDetachedMapOpen.value = false
   clearMovePreview()
   isMoveModeActive.value = false
 })
@@ -668,6 +934,16 @@ const resetViewport = () => {
   panStartState.value = null
 }
 
+// 独立地图尺寸跟随聊天区宽度，维持接近聊天窗 0.7 的正方形观感
+const syncDetachedMapSize = () => {
+  if (typeof window === 'undefined') return
+  const chatMain = document.querySelector('.chat-main') as HTMLElement | null
+  const chatWidth = chatMain?.clientWidth ?? window.innerWidth
+  const fallbackBase = Math.min(window.innerWidth, window.innerHeight)
+  const side = Math.round((chatMain ? chatWidth : fallbackBase) * 0.7)
+  detachedMapSide.value = clamp(side, 320, Math.max(320, window.innerHeight - 96))
+}
+
 const preserveViewport = () => {
   preservedViewport.value = {
     zoomScale: zoomScale.value,
@@ -688,6 +964,23 @@ const clearMovePreview = () => {
   moveTarget.value = null
 }
 
+const openDetachedMap = () => {
+  if (!activeMap.value) return
+  isDetachedMapOpen.value = true
+  isMapInteractive.value = true
+  syncDetachedMapSize()
+  restorePreservedViewport()
+}
+
+const closeDetachedMap = () => {
+  preserveViewport()
+  isDetachedMapOpen.value = false
+  isMapInteractive.value = false
+  isPanning.value = false
+  isMoveModeActive.value = false
+  clearMovePreview()
+}
+
 const toggleMoveMode = () => {
   if (!canEnterMoveMode.value) return
   isMoveModeActive.value = !isMoveModeActive.value
@@ -702,13 +995,21 @@ const toggleMoveMode = () => {
   }
 }
 
-const activateMap = (event?: MouseEvent) => {
+const activateMap = (event?: MouseEvent, surface: 'inline' | 'detached' = 'inline') => {
   const now = Date.now()
   if (event?.ctrlKey || isCtrlPressed.value || now - lastCtrlKeydownAt.value <= 560 || isPanning.value) {
     return
   }
+  if (surface === 'inline') {
+    const interval = now - lastMapClickAt.value
+    lastMapClickAt.value = now
+    if (interval > 0 && interval < MAP_DOUBLE_CLICK_THRESHOLD_MS) {
+      openDetachedMap()
+      return
+    }
+  }
   if (isMoveModeActive.value && event) {
-    const point = getMapPointFromMouse(event)
+    const point = getMapPointFromMouse(event, surface)
     if (point) {
       moveTarget.value = point
     }
@@ -733,10 +1034,12 @@ const toggleMapVisibility = () => {
     isPanning.value = false
     isMoveModeActive.value = false
     clearMovePreview()
+    isDetachedMapOpen.value = false
   }
 }
 
-const handleMapWheel = (event: WheelEvent) => {
+const handleMapWheel = (event: WheelEvent, surface: 'inline' | 'detached' = 'inline') => {
+  if (surface === 'inline' && isDetachedMapOpen.value) return
   if (!isMapInteractive.value) return
   event.preventDefault()
   const nextScale = zoomScale.value + (event.deltaY < 0 ? 0.2 : -0.2)
@@ -744,8 +1047,10 @@ const handleMapWheel = (event: WheelEvent) => {
   clampPanIntoBounds()
 }
 
-const handlePanStart = (event: MouseEvent) => {
-  if (!isMapInteractive.value || !event.ctrlKey || !mapCanvasRef.value) return
+const handlePanStart = (event: MouseEvent, surface: 'inline' | 'detached' = 'inline') => {
+  const mapCanvasRef = surface === 'detached' ? detachedMapCanvasRef.value : inlineMapCanvasRef.value
+  if (surface === 'inline' && isDetachedMapOpen.value) return
+  if (!isMapInteractive.value || !event.ctrlKey || !mapCanvasRef) return
   if (zoomScale.value <= 1) return
   event.preventDefault()
   event.stopPropagation()
@@ -761,8 +1066,9 @@ const handlePanStart = (event: MouseEvent) => {
 }
 
 const handlePanMove = (event: MouseEvent) => {
-  if (!isPanning.value || !panStartState.value || !mapCanvasRef.value) return
-  const rect = mapCanvasRef.value.getBoundingClientRect()
+  const activeCanvas = detachedMapCanvasRef.value ?? inlineMapCanvasRef.value
+  if (!isPanning.value || !panStartState.value || !activeCanvas) return
+  const rect = activeCanvas.getBoundingClientRect()
   if (!rect.width || !rect.height) return
 
   const deltaX = (event.clientX - panStartState.value.mouseX) * (viewBoxWidth.value / rect.width) / zoomScale.value
@@ -792,14 +1098,17 @@ const handleKeyUp = (event: KeyboardEvent) => {
 }
 
 onMounted(() => {
+  syncDetachedMapSize()
   window.addEventListener('keydown', handleKeyDown)
   window.addEventListener('keyup', handleKeyUp)
+  window.addEventListener('resize', syncDetachedMapSize)
 })
 
 onBeforeUnmount(() => {
   handlePanEnd()
   window.removeEventListener('keydown', handleKeyDown)
   window.removeEventListener('keyup', handleKeyUp)
+  window.removeEventListener('resize', syncDetachedMapSize)
 })
 
 const handleUnitClick = (unitId: string) => {
@@ -812,8 +1121,8 @@ const handleUnitDoubleClick = (unitId: string) => {
   toggleMoveMode()
 }
 
-const getMapPointFromMouse = (event: MouseEvent) => {
-  const svg = mapCanvasRef.value
+const getMapPointFromMouse = (event: MouseEvent, surface: 'inline' | 'detached' = 'inline') => {
+  const svg = surface === 'detached' ? detachedMapCanvasRef.value : inlineMapCanvasRef.value
   const map = activeMap.value
   if (!svg || !map) return null
 
@@ -1012,15 +1321,129 @@ const sideClass = (side: string) => {
   cursor: pointer;
 }
 
+.detached-map-close-btn {
+  min-width: 54px;
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
 .map-toggle-btn:disabled,
 .focus-player-btn:disabled,
-.move-toggle-btn:disabled {
+.move-toggle-btn:disabled,
+.detached-map-close-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
 .map-shell {
   width: 100%;
+}
+
+.detached-map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 8, 14, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.detached-map-panel {
+  width: min(var(--detached-map-side), calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(28, 31, 39, 0.96) 0%, rgba(18, 21, 28, 0.98) 100%);
+  border: 1px solid rgba(250, 204, 21, 0.2);
+  box-shadow:
+    0 24px 72px rgba(0, 0, 0, 0.48),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.detached-map-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.detached-map-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detached-map-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detached-map-title {
+  font-size: 14px;
+}
+
+.detached-map-shell {
+  flex-shrink: 0;
+}
+
+.detached-stats-overlay {
+  position: fixed;
+  z-index: 1201;
+  top: 50%;
+  left: calc(50% + (min(var(--detached-map-side), calc(100vw - 48px)) / 2) + 20px);
+  transform: translateY(-50%);
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  pointer-events: none;
+}
+
+.detached-stats-panel {
+  width: min(300px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(28, 31, 39, 0.96) 0%, rgba(18, 21, 28, 0.98) 100%);
+  border: 1px solid rgba(250, 204, 21, 0.18);
+  box-shadow:
+    0 20px 56px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  pointer-events: auto;
+}
+
+.detached-stats-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.detached-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .map-shell.interactive {
@@ -1061,6 +1484,12 @@ const sideClass = (side: string) => {
   display: block;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: #17181d;
+}
+
+.detached-map-canvas {
+  max-height: none;
+  height: auto;
+  min-height: min(var(--detached-map-side), calc(100vh - 220px));
 }
 
 .map-bg {
@@ -1181,6 +1610,10 @@ const sideClass = (side: string) => {
   margin-top: 4px;
 }
 
+.detached-axis-row {
+  margin-top: 8px;
+}
+
 .zoom-indicator {
   flex: 1;
   text-align: center;
@@ -1199,6 +1632,47 @@ const sideClass = (side: string) => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   padding: 10px;
+}
+
+.detached-map-info {
+  flex-shrink: 0;
+}
+
+.detached-stats-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.detached-stats-actions {
+  flex-direction: column;
+}
+
+.detached-stats-actions .move-action-btn {
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .detached-stats-overlay {
+    top: auto;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .detached-stats-panel {
+    width: min(420px, calc(100vw - 48px));
+  }
+
+  .detached-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detached-stats-actions {
+    flex-direction: row;
+  }
+
+  .detached-stats-actions .move-action-btn {
+    width: auto;
+  }
 }
 
 .move-panel-head {
