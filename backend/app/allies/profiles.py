@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from app.calculation.abilities import ability_to_modifier
 from app.equipment.items import default_potion_inventory
+from app.services.class_features import sync_spellcasting_fields
 
 
 ALLY_PROFILES: dict[str, dict] = {
@@ -113,6 +114,7 @@ def get_ally_profile(profile_id: str) -> dict:
         ability: ability_to_modifier(score)
         for ability, score in profile.get("abilities", {}).items()
     }
+    sync_spellcasting_fields(profile)
     profile.setdefault("conditions", [])
     profile.setdefault("inventory", default_potion_inventory())
     profile.setdefault("side", "ally")

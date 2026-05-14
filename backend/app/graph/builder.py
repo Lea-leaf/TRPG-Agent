@@ -15,7 +15,7 @@ from app.graph.constants import (
     REACTION_RESOLUTION_NODE,
 )
 from app.graph.state import GraphState
-from app.services.tool_service import get_tools
+from app.services.tools import get_tools
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None):

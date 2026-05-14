@@ -10,7 +10,7 @@ if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 from app.graph.state import AttackInfo, CombatantState, CombatState
-from app.services.tool_service import (
+from app.services.tools.space_tools import (
     create_plane_map,
     manage_space,
     measure_distance,

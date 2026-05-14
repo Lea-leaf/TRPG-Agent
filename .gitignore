@@ -39,6 +39,13 @@ venv.bak/
 
 # 依赖目录 (所有包管理器通用)
 node_modules/
+.vite-cache/
+
+# 本地测试与 Codex 临时缓存，不属于运行状态或调试 trace。
+.codex_tmp/
+.pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
 
 # 各包管理器的锁文件
 package-lock.json
@@ -48,15 +55,17 @@ backend/data/context_memory.sqlite3-shm
 backend/data/context_memory.sqlite3-wal
 AGENTS.md
 data/context_memory.sqlite3
-logs/session_test_combat.json
-logs/session_test_basic.json
-logs/test_report.md
-logs/trpg_agent.log
-backend/logs/agent_2026-04-13.log
-
-# Ignore all files in the logs directory
-logs/
-backend/logs/
+# Local runtime logs. Keep trace directories available for explicit debug exports.
+/logs/
+!backend/logs/
+backend/logs/*.log
+backend/logs/agent_*.log
+backend/logs/uvicorn*.log
+backend/logs/uvicorn_monitor*.log
+backend/logs/agent_traces/*
+backend/logs/trace_exports/*
+!backend/logs/agent_traces/
+!backend/logs/trace_exports/
 debuff.md
 backend/data/rag_*/
 backend/data/rag_pdf_test_outputs.txt

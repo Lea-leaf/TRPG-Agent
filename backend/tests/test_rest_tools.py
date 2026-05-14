@@ -10,7 +10,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-from app.services.tool_service import take_rest
+from app.services.tools.rest_tools import take_rest
 
 
 def test_short_rest_restores_short_rest_resources_but_not_spell_slots():

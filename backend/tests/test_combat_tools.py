@@ -17,7 +17,7 @@ if str(backend_dir) not in sys.path:
 from app.graph.state import AttackInfo, CombatantState, CombatState, WeaponData
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
 from app.conditions._base import build_condition_extra, create_condition
-from app.services.tool_service import _build_player_combatant, prepare_player_for_combat
+from app.services.tools._helpers import prepare_player_for_combat
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
@@ -93,7 +93,7 @@ def _invoke_tool(tool_func, *, tool_input: dict) -> object:
 
 def test_load_character_profile_uses_custom_name_as_player_id():
     """加载角色时玩家名字就是稳定单位 ID，职业只保存在 role_class。"""
-    from app.services.tool_service import load_character_profile
+    from app.services.tools.character_tools import load_character_profile
 
     result = _invoke_tool(
         load_character_profile,
@@ -107,7 +107,7 @@ def test_load_character_profile_uses_custom_name_as_player_id():
     assert "预设" not in result.update["messages"][0].content
 
 
-# ── Phase 1: _build_player_combatant 测试 ──────────────────────
+    # ── Phase 1: prepare_player_for_combat 测试 ──────────────────────
 
 
 class TestBuildPlayerCombatant:
@@ -177,7 +177,7 @@ class TestBuildPlayerCombatant:
 
     def test_custom_chinese_name_is_stable_player_id(self):
         """玩家中文名直接作为单位 ID，职业仍保留为 role_class。"""
-        player = dict(PREDEFINED_CHARACTERS["法师"])
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["name"] = "温良"
         prepare_player_for_combat(player)
 
@@ -204,7 +204,7 @@ class TestFighterArchetype:
     )
     def test_choose_fighter_archetype_records_features(self, archetype, expected_features):
         """三种范型都应记录范型名，并授予 3 级立即获得的职业特性。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player["level"] = 3
@@ -224,7 +224,7 @@ class TestFighterArchetype:
 
     def test_battle_master_records_level_3_resources(self):
         """战斗大师 3 级只记录卓越骰、战技槽和工具熟练占位，不执行战技。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player["level"] = 3
@@ -249,7 +249,7 @@ class TestFighterArchetype:
 
     def test_eldritch_knight_records_level_3_spellcasting(self):
         """奥法骑士 3 级只记录施法字段、默认法术和武器联结占位。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player["level"] = 3
@@ -280,7 +280,7 @@ class TestFighterArchetype:
 
     def test_eldritch_knight_level_4_syncs_spellcasting_table(self):
         """奥法骑士升到 4 级后，应获得 4 个已知法术和 3 个 1 环法术位。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player.update({
@@ -319,7 +319,7 @@ class TestFighterArchetype:
 
     def test_eldritch_knight_level_5_keeps_level_5_spellcasting_table(self):
         """奥法骑士 5 级仍是 2 戏法、4 已知法术、3 个 1 环法术位。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player.update({
@@ -391,7 +391,7 @@ class TestStartCombatPlayerJoin:
     """验证 start_combat 自动将已加载的玩家角色纳入战斗（玩家在 player 字段，不在 participants）"""
 
     def _invoke_start_combat(self, state: dict, surprised_ids: list[str] | str | None = None):
-        from app.services.tool_service import start_combat
+        from app.services.tools.combat_tools import start_combat
         tool_input = {"combatant_ids": ["goblin_1"], "state": state}
         if surprised_ids is not None:
             tool_input["surprised_ids"] = surprised_ids
@@ -551,7 +551,7 @@ class TestAllySystem:
 
     def test_spawn_ally_adds_character_like_scene_unit(self):
         """友方法师生成后应带武器、法术资源和反应资源。"""
-        from app.services.tool_service import manage_scene_units
+        from app.services.tools.combat_tools import manage_scene_units
 
         result = _invoke_tool(
             manage_scene_units,
@@ -577,7 +577,7 @@ class TestAllySystem:
 
     def test_manage_scene_units_help_returns_skill_instructions(self):
         """场景单位聚合入口应能按需披露完整说明。"""
-        from app.services.tool_service import manage_scene_units
+        from app.services.tools.combat_tools import manage_scene_units
 
         result = _invoke_tool(
             manage_scene_units,
@@ -592,7 +592,7 @@ class TestAllySystem:
     def test_start_combat_prepares_ally_and_keeps_resources(self):
         """友方从场景入战后留在 participants，并保留角色资源。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import start_combat
+        from app.services.tools.combat_tools import start_combat
 
         ally = get_ally_profile("apprentice_wizard")
         goblin = _make_goblin()
@@ -616,7 +616,7 @@ class TestAllySystem:
     def test_ally_wizard_casts_spell_and_consumes_slot(self):
         """战斗中的友方可以作为 caster_id 施法并消耗自己的法术位。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
@@ -647,7 +647,7 @@ class TestAllySystem:
     def test_ally_healer_can_restore_player(self):
         """友方治疗者能治疗玩家目标，并写回双方状态。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
         from app.services.tools._helpers import prepare_character_for_combat
 
         player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "hp": 0, "death_save_failures": 2}
@@ -684,7 +684,7 @@ class TestAllySystem:
     def test_ally_auto_uses_shield_reaction_when_hit(self):
         """敌人命中非玩家友方时，友方反应由规则层自动执行。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
@@ -721,7 +721,7 @@ class TestAllySystem:
     def test_ally_enters_death_save_state_when_dropped_to_zero(self):
         """友方倒地后进入死亡豁免流程，不被当作普通怪物尸体。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("apprentice_wizard"), side="ally")
@@ -761,7 +761,7 @@ class TestAllySystem:
     def test_use_healing_potion_feeds_dying_ally(self):
         """喂治疗药水可把 0 HP 友方拉起，并消耗动作。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import use_item
+        from app.services.tools.item_tools import use_item
         from app.services.tools._helpers import prepare_character_for_combat
 
         actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -807,7 +807,7 @@ class TestAllySystem:
     def test_use_healing_potion_feed_requires_touch_distance(self):
         """喂药需要接触目标，不能隔空治疗。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import use_item
+        from app.services.tools.item_tools import use_item
         from app.services.tools._helpers import prepare_character_for_combat
 
         actor = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -837,7 +837,7 @@ class TestAllySystem:
     def test_end_combat_keeps_fallen_ally_revivable(self):
         """战斗结束时倒地友方回到场景单位池，不进入可清理尸体档案。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -866,7 +866,7 @@ class TestAttackActionValidation:
     """验证 attack_action 的前置校验（回合归属/目标存活/动作资源）"""
 
     def _invoke_attack(self, state: dict, attacker_id: str, target_id: str, **kwargs):
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
         params = {
             "attacker_id": attacker_id,
             "target_id": target_id,
@@ -1260,7 +1260,7 @@ class TestNextTurnReset:
     """验证 next_turn 正确重置下一个行动者的动作资源"""
 
     def test_next_actor_action_reset(self):
-        from app.services.tool_service import next_turn
+        from app.services.tools.combat_tools import next_turn
 
         player_c = _make_player_combatant("战士")
         player_c["action_available"] = False  # 上个回合已用
@@ -1290,7 +1290,7 @@ class TestPhaseLifecycle:
     """验证 phase 在战斗生命周期中正确变化"""
 
     def test_end_combat_resets_phase(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         goblin = _make_goblin()
         combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1")
@@ -1301,7 +1301,7 @@ class TestPhaseLifecycle:
         assert result.update.get("combat") is None
 
     def test_end_combat_keeps_full_battle_history_without_archive_metadata(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         goblin = _make_goblin()
         combat = _make_combat_state({"goblin_1": goblin}, current_actor_id="goblin_1")
@@ -1322,7 +1322,7 @@ class TestPhaseLifecycle:
         assert "共进行了" in result.update["messages"][0].content
 
     def test_end_combat_removes_dead_units_from_space(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         goblin = _make_goblin()
         goblin["hp"] = 0
@@ -1339,7 +1339,7 @@ class TestPhaseLifecycle:
         assert "goblin_1" in result.update["dead_units"]
 
     def test_end_combat_archives_departed_units_without_leaving_map_ghosts(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         goblin = _make_goblin()
         goblin["hp"] = 7
@@ -1360,7 +1360,7 @@ class TestPhaseLifecycle:
         assert "离场: Goblin" in result.update["messages"][0].content
 
     def test_end_combat_records_current_adventure_encounter_event(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         goblin = _make_goblin()
         goblin["hp"] = 0
@@ -1384,7 +1384,7 @@ class TestPhaseLifecycle:
         assert "节点收束与后续书签推进由后台导航器处理" in result.update["messages"][0].content
 
     def test_end_combat_awards_xp_for_fallen_enemies(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 0}
         goblin = _make_goblin()
@@ -1400,7 +1400,7 @@ class TestPhaseLifecycle:
         assert "战斗 XP: +50" in result.update["messages"][0].content
 
     def test_end_combat_awards_xp_for_captured_enemy_when_declared_defeated(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 10}
         goblin = _make_goblin()
@@ -1419,7 +1419,7 @@ class TestPhaseLifecycle:
         assert "战斗 XP: +50" in result.update["messages"][0].content
 
     def test_end_combat_does_not_award_xp_for_enemy_that_only_escaped(self):
-        from app.services.tool_service import end_combat
+        from app.services.tools.combat_tools import end_combat
 
         player = {**PREDEFINED_CHARACTERS["战士"], "name": "温良", "id": "温良", "xp": 10}
         goblin = _make_goblin()
@@ -1486,9 +1486,9 @@ class TestModifyCharacterStateResources:
     """验证战斗中恢复资源时，玩家数据保持一致（新模型中玩家就是单一数据源）"""
 
     def test_player_spell_slot_recovery_uses_actual_current_value_in_combat(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
-        player = dict(PREDEFINED_CHARACTERS["法师"])
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["resources"] = {"spell_slot_lv1": 1}
         prepare_player_for_combat(player)
         combat = _make_combat_state(
@@ -1513,9 +1513,9 @@ class TestModifyCharacterStateResources:
         assert result.update["player"]["resources"]["spell_slot_lv1"] == 2
 
     def test_player_spell_slot_set_resource_clamps_to_predefined_cap(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
-        player = dict(PREDEFINED_CHARACTERS["法师"])
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["resources"] = {"spell_slot_lv1": 0}
         state = {"player": player}
 
@@ -1533,7 +1533,7 @@ class TestModifyCharacterStateResources:
         assert result.update["player"]["resources"]["spell_slot_lv1"] == 2
 
     def test_unknown_state_change_keys_fail_fast_without_update(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["hp"] = 4
@@ -1558,7 +1558,7 @@ class TestModifyCharacterStateResources:
         assert "set_resource" in content
 
     def test_restore_hp_and_spell_slots_uses_explicit_state_change_keys(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["hp"] = 4
@@ -1580,7 +1580,7 @@ class TestModifyCharacterStateResources:
         assert result.update["player"]["resources"]["spell_slot_lv1"] == 2
 
     def test_record_death_save_uses_unified_state_tool(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["id"] = "温良"
@@ -1606,7 +1606,7 @@ class TestModifyCharacterStateResources:
         assert "死亡豁免 d20=13：成功" in result.update["messages"][0].content
 
     def test_death_save_natural_20_revives_player(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["id"] = "温良"
@@ -1633,7 +1633,7 @@ class TestModifyCharacterStateResources:
         assert result.update["hp_changes"][0]["new_hp"] == 1
 
     def test_revive_action_restores_hp_and_clears_death_saves(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["id"] = "温良"
@@ -1677,7 +1677,7 @@ class TestModifyCharacterStateResources:
         assert any("死亡豁免失败 +1" in line for line in lines)
 
     def test_stable_player_does_not_record_more_death_saves(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["id"] = "温良"
@@ -1706,7 +1706,7 @@ class TestModifyCharacterStateResources:
         assert "已经伤势稳定" in result.update["messages"][0].content
 
     def test_hp_delta_to_zero_marks_player_dying(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["id"] = "温良"
@@ -1734,7 +1734,7 @@ class TestModifyCharacterStateResources:
         assert "进入濒死" in result.update["messages"][0].content
 
     def test_next_turn_keeps_downed_unstable_player_in_order(self):
-        from app.services.tool_service import advance_turn
+        from app.services.tools._helpers import advance_turn
 
         player = _make_player_combatant("法师")
         player["hp"] = 0
@@ -1754,7 +1754,7 @@ class TestModifyCharacterStateResources:
         assert player["action_available"] is False
 
     def test_grant_xp_action_uses_unified_state_tool(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         state = {"player": player}
@@ -1774,7 +1774,7 @@ class TestModifyCharacterStateResources:
         assert 'action="level_up"' in result.update["messages"][0].content
 
     def test_grant_xp_action_is_blocked_when_adventure_runtime_is_active(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         state = {
@@ -1800,7 +1800,7 @@ class TestModifyCharacterStateResources:
 
     def test_grant_xp_action_can_target_scene_ally(self):
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -1825,7 +1825,7 @@ class TestModifyCharacterStateResources:
     def test_grant_xp_action_accepts_json_string_payload_for_scene_ally(self):
         """真实模型偶尔会把 payload 对象序列化成字符串，工具边界应兼容这种调用形态。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -1847,7 +1847,7 @@ class TestModifyCharacterStateResources:
 
     def test_update_action_accepts_json_string_changes(self):
         """changes 也在同一工具边界归一化，避免 update 动作因字符串对象失败。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         state = {"player": player}
@@ -1867,7 +1867,7 @@ class TestModifyCharacterStateResources:
     def test_grant_xp_action_can_target_combat_ally(self):
         """战斗中的友方获得经验时，应写回 combat.participants 而不是玩家状态。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -1894,7 +1894,7 @@ class TestModifyCharacterStateResources:
 
     def test_grant_xp_action_rejects_non_character_enemy(self):
         """普通怪物没有职业成长字段，不能通过经验工具升级。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         goblin = _make_goblin()
         state = {"scene_units": {"goblin_1": goblin}}
@@ -1914,7 +1914,7 @@ class TestModifyCharacterStateResources:
         assert "不是可升级的玩家或友方角色" in result.update["messages"][0].content
 
     def test_level_up_and_arcane_tradition_actions_use_unified_state_tool(self):
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["xp"] = 300
@@ -1948,7 +1948,7 @@ class TestModifyCharacterStateResources:
     def test_level_up_action_can_target_scene_ally(self):
         """友方角色升级应按 target_id 写回 scene_units，不污染玩家状态。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         ally = get_ally_profile("fighter_companion")
         ally["xp"] = 300
@@ -1973,7 +1973,7 @@ class TestModifyCharacterStateResources:
     def test_level_up_refreshes_combat_fields_without_resetting_action_economy(self):
         """战斗中成长会刷新攻击等派生字段，但不能返还本回合已消耗的动作资源。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -2006,7 +2006,7 @@ class TestModifyCharacterStateResources:
     def test_choose_fighter_archetype_can_target_combat_ally(self):
         """战斗中的战士友方达到 3 级后，可以选择武术范型并写回 combat。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("sildar"), side="ally")
@@ -2034,7 +2034,7 @@ class TestModifyCharacterStateResources:
     def test_choose_arcane_tradition_can_target_scene_ally(self):
         """法师友方可以通过 target_id 选择奥术传统并写回 scene_units。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         ally = get_ally_profile("apprentice_wizard")
         state = {"scene_units": {"apprentice_wizard": ally}}
@@ -2056,7 +2056,7 @@ class TestModifyCharacterStateResources:
 
     def test_choose_feat_action_records_tough_on_player(self):
         """专长第一版通过注册表写入字段，并复用成长回写刷新派生状态。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player["level"] = 4
@@ -2082,7 +2082,7 @@ class TestModifyCharacterStateResources:
     def test_choose_feat_action_can_target_combat_ally_without_resetting_action_economy(self):
         """战斗中友方可选择专长，但不能因此返还已消耗的动作经济。"""
         from app.allies.profiles import get_ally_profile
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
         from app.services.tools._helpers import prepare_character_for_combat
 
         ally = prepare_character_for_combat(get_ally_profile("fighter_companion"), side="ally")
@@ -2115,7 +2115,7 @@ class TestModifyCharacterStateResources:
 
     def test_choose_feat_action_rejects_duplicate_feat(self):
         """重复选择同一专长应直接拒绝，避免重复叠加字段效果。"""
-        from app.services.tool_service import modify_character_state
+        from app.services.tools.character_tools import modify_character_state
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
         player["feats"] = ["tough"]
@@ -2154,10 +2154,10 @@ class TestMageArmorSpell:
         assert condition_def.name_cn == "法师护甲"
 
     def test_cast_mage_armor_sets_ac_and_condition(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
         from app.services.tools._helpers import compute_ac
 
-        player = dict(PREDEFINED_CHARACTERS["法师"])
+        player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["known_spells"] = list(player["known_spells"]) + ["mage_armor"]
         state = {"player": player}
 
@@ -2181,7 +2181,7 @@ class TestMageArmorSpell:
 
     def test_extra_action_allows_action_spell_after_normal_action_is_spent(self):
         """动作如潮的额外动作应能支付施法时间为 action 的法术。"""
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         prepare_player_for_combat(player)
@@ -2214,7 +2214,7 @@ class TestSpellRangeValidation:
     """验证法术在空间系统启用后遵守施法距离。"""
 
     def test_ranged_cantrip_rejected_when_target_is_out_of_range(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         goblin = _make_goblin()
@@ -2243,7 +2243,7 @@ class TestSpellRangeValidation:
         assert "距离不足" in result.update["messages"][0].content
 
     def test_touch_spell_uses_five_feet_range(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["牧师"])
         ally = _make_goblin("ally_1")
@@ -2275,7 +2275,7 @@ class TestSpellRangeValidation:
         assert "距离不足" in result.update["messages"][0].content
 
     def test_cure_wounds_clears_death_saves_on_healed_target(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["牧师"])
         ally = _make_goblin("ally_1")
@@ -2313,7 +2313,7 @@ class TestSpellRangeValidation:
         assert healed_ally["is_dead"] is False
 
     def test_self_spell_does_not_require_placement_distance(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["known_spells"] = list(player["known_spells"]) + ["mirror_image"]
@@ -2341,7 +2341,7 @@ class TestSpellRangeValidation:
         assert any(c.get("id") == "mirror_image" for c in result.update["player"]["conditions"])
 
     def test_fireball_target_point_auto_selects_units_inside_area(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["level"] = 5
@@ -2382,7 +2382,7 @@ class TestSpellRangeValidation:
         assert result.update["player"]["resources"]["spell_slot_lv3"] == 0
 
     def test_fireball_area_can_include_caster(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["level"] = 5
@@ -2413,7 +2413,7 @@ class TestSpellRangeValidation:
         assert result.update["player"]["hp"] < player["hp"]
 
     def test_fireball_target_point_rejected_outside_cast_range(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["level"] = 5
@@ -2444,7 +2444,7 @@ class TestSpellRangeValidation:
         assert "目标点距离 180.0 尺" in result.update["messages"][0].content
 
     def test_thunderwave_uses_facing_square_area(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["known_spells"] = list(player["known_spells"]) + ["thunderwave"]
@@ -2478,7 +2478,7 @@ class TestSpellRangeValidation:
         assert result.update["scene_units"]["side_goblin"]["hp"] == side["hp"]
 
     def test_burning_hands_uses_facing_cone_area(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["术士"])
         center = _make_goblin("center_goblin")
@@ -2511,7 +2511,7 @@ class TestSpellRangeValidation:
         assert result.update["scene_units"]["outside_goblin"]["hp"] == outside["hp"]
 
     def test_ice_knife_expands_area_around_primary_target_only(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["吟游诗人"])
         player["known_spells"] = list(player["known_spells"]) + ["ice_knife"]
@@ -2568,7 +2568,7 @@ class TestLostMineSpellCoverage:
             assert get_spell_def(spell_id) is not None
 
     def test_end_concentration_clears_conditions_on_targets(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["known_spells"] = list(player["known_spells"]) + ["hold_person"]
@@ -2592,7 +2592,7 @@ class TestLostMineSpellCoverage:
         assert result.update["scene_units"]["goblin_1"]["conditions"] == []
 
     def test_misty_step_updates_space_without_using_movement(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
 
         player = copy.deepcopy(PREDEFINED_CHARACTERS["法师"])
         player["known_spells"] = list(player["known_spells"]) + ["misty_step"]
@@ -2656,7 +2656,7 @@ class TestReactionFlow:
         return {"combat": combat, "player": player}
 
     def test_monster_hit_creates_pending_reaction(self):
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
 
         state = self._build_reaction_state()
         with patch("app.services.tools._helpers.d20.roll", side_effect=self._fixed_roll), patch(
@@ -2682,7 +2682,7 @@ class TestReactionFlow:
 
     def test_shield_reaction_uses_saved_attack_snapshot_and_prevents_damage(self):
         from app.graph import nodes
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
 
         state = self._build_reaction_state()
         with patch("app.services.tools._helpers.d20.roll", side_effect=self._fixed_roll), patch(
@@ -2720,7 +2720,7 @@ class TestReactionFlow:
 
     def test_shield_reaction_refreshes_arcane_ward(self):
         from app.graph import nodes
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
 
         state = self._build_reaction_state()
         state["player"]["level"] = 2
@@ -2752,7 +2752,7 @@ class TestReactionFlow:
         assert "奥术结界" in resolved["messages"][0].content
 
     def test_player_spell_can_be_counterspelled_by_monster_reaction(self):
-        from app.services.tool_service import cast_spell
+        from app.services.tools.spell_tools import cast_spell
         from app.monsters.models import MonsterAction
 
         state = self._build_reaction_state()
@@ -2829,7 +2829,7 @@ class TestReactionFlow:
 
     def test_skip_reaction_keeps_original_damage_roll(self):
         from app.graph import nodes
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
 
         state = self._build_reaction_state()
         with patch("app.services.tools._helpers.d20.roll", side_effect=self._fixed_roll), patch(
@@ -2873,7 +2873,7 @@ class TestConditionLifecycleHooks:
         return TestConditionLifecycleHooks._real_roll(mapping.get(normalized, expr))
 
     def test_paralyzed_monster_turn_does_not_attach_attack_roll_payload(self):
-        from app.services.tool_service import attack_action
+        from app.services.tools.combat_tools import attack_action
 
         player = _make_player_combatant("战士")
         goblin = _make_goblin()

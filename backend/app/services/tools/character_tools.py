@@ -20,6 +20,8 @@ from app.services.class_features import (
     BATTLE_MASTER_SUPERIORITY_DICE,
     BATTLE_MASTER_SUPERIORITY_DIE,
     ELDRITCH_KNIGHT_FEATURE_IDS,
+    grant_spellcasting,
+    sync_spellcasting_fields,
     sync_eldritch_knight_spellcasting,
 )
 from app.conditions import remove_condition_by_id, upsert_condition
@@ -146,6 +148,7 @@ def load_character_profile(
     profile["id"] = profile["name"]
     profile["side"] = "player"
     _sync_hit_dice_after_level_change(profile)
+    sync_spellcasting_fields(profile)
 
     return Command(
         update={
@@ -619,11 +622,16 @@ def _apply_wizard_level_up(player_dict: dict, new_level: int) -> list[str]:
         if count > old:
             lines.append(f"  {resource_key}: {old} → {count}")
 
-    # 新增法术
-    known = player_dict.setdefault("known_spells", [])
-    for spell_id in table.get("new_spells", []):
-        if spell_id not in known:
-            known.append(spell_id)
+    new_spells = table.get("new_spells", [])
+    known_before = set(player_dict.get("known_spells", []))
+    grant_spellcasting(
+        player_dict,
+        ability=str(player_dict.get("spellcasting_ability") or "int"),
+        spells=new_spells,
+        spell_slots=table.get("spell_slots"),
+    )
+    for spell_id in new_spells:
+        if spell_id not in known_before:
             lines.append(f"  学会新法术: {spell_id}")
 
     # 职业特性

@@ -83,7 +83,7 @@ def _flat_rolls(values: list[str]):
 
 
 def test_goblin_actions_keep_existing_attack_behavior():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     goblin = _unit("goblin_1", "Goblin", actions_slug="goblin")
     target = _unit("target_1", "Target", hp=20, ac=10)
@@ -116,7 +116,7 @@ def test_lost_mine_wandering_monster_weapon_actions_are_structured():
 
 
 def test_structured_simple_attack_keeps_player_reaction_window():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     goblin = _unit("goblin_1", "Goblin", actions_slug="goblin")
     player = _unit("player_hero", "Hero", hp=20, ac=10)
@@ -146,7 +146,7 @@ def test_structured_simple_attack_keeps_player_reaction_window():
 
 def test_wolf_bite_pauses_for_player_shield_before_prone_save():
     """狼咬击带命中后效果，也必须先给玩家护盾术反应窗口。"""
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     wolf = _unit("wolf_1", "Wolf", actions_slug="wolf")
     player = _unit("player_hero", "Hero", hp=20, ac=10)
@@ -177,7 +177,7 @@ def test_wolf_bite_pauses_for_player_shield_before_prone_save():
 def test_wolf_bite_resume_after_declining_reaction_applies_damage_and_prone():
     """放弃护盾术后，应继续结算同一个狼咬击的伤害和倒地豁免。"""
     from app.graph import nodes
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     wolf = _unit("wolf_1", "Wolf", actions_slug="wolf")
     player = _unit("player_hero", "Hero", hp=20, ac=10)
@@ -213,7 +213,7 @@ def test_wolf_bite_resume_after_declining_reaction_applies_damage_and_prone():
 
 
 def test_monster_spell_creates_counterspell_reaction_window():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     player = _unit("player_hero", "Hero", hp=30, ac=10)
@@ -242,7 +242,7 @@ def test_monster_spell_creates_counterspell_reaction_window():
 
 def test_counterspell_prompt_blocks_monster_spell_after_player_choice():
     from app.graph import nodes
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     player = _unit("player_hero", "Hero", hp=30, ac=10)
@@ -278,7 +278,8 @@ def test_counterspell_prompt_blocks_monster_spell_after_player_choice():
 
 
 def test_unknown_action_id_fails_fast():
-    from app.services.tool_service import attack_action, use_monster_action
+    from app.services.tools.combat_tools import attack_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     goblin = _unit("goblin_1", "Goblin", actions_slug="goblin")
     target = _unit("target_1", "Target")
@@ -300,7 +301,7 @@ def test_unknown_action_id_fails_fast():
 
 
 def test_wolf_bite_can_apply_prone_on_failed_save():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     wolf = _unit("wolf_1", "Wolf", actions_slug="wolf")
     target = _unit("target_1", "Target", hp=20, ac=10)
@@ -317,7 +318,7 @@ def test_wolf_bite_can_apply_prone_on_failed_save():
 
 
 def test_ghoul_claws_apply_paralyzed_and_end_turn_save_can_remove():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     ghoul = _unit("ghoul_1", "Ghoul", actions_slug="ghoul")
     target = _unit("target_1", "Target", hp=20, ac=10)
@@ -341,7 +342,7 @@ def test_ghoul_claws_apply_paralyzed_and_end_turn_save_can_remove():
 
 
 def test_giant_spider_bite_applies_poison_damage_save_half():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     spider = _unit("spider_1", "Giant Spider", actions_slug="giant-spider")
     target = _unit("target_1", "Target", hp=40, ac=10)
@@ -358,7 +359,7 @@ def test_giant_spider_bite_applies_poison_damage_save_half():
 
 
 def test_giant_spider_web_recharge_and_restrained():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     spider = _unit("spider_1", "Giant Spider", actions_slug="giant-spider")
     target = _unit("target_1", "Target", hp=20, ac=10)
@@ -383,7 +384,7 @@ def test_giant_spider_web_recharge_and_restrained():
 
 
 def test_redbrand_multiattack_consumes_one_action_and_hits_twice():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     redbrand = _unit("redbrand_1", "Redbrand Ruffian", actions_slug="redbrand-ruffian")
     target = _unit(
@@ -407,7 +408,7 @@ def test_redbrand_multiattack_consumes_one_action_and_hits_twice():
 
 
 def test_owlbear_multiattack_uses_beak_and_claws():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     owlbear = _unit("owlbear_1", "Owlbear", actions_slug="owlbear")
     target = _unit("target_1", "Target", hp=40, ac=10)
@@ -425,7 +426,7 @@ def test_owlbear_multiattack_uses_beak_and_claws():
 
 
 def test_zombie_undead_fortitude_sets_hp_to_one_on_success():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     attacker = _unit(
         "attacker_1",
@@ -446,7 +447,7 @@ def test_zombie_undead_fortitude_sets_hp_to_one_on_success():
 
 
 def test_green_dragon_poison_breath_hits_cone_targets_and_recharges():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     dragon = _unit("dragon_1", "Young Green Dragon", actions_slug="young-green-dragon")
     center = _unit("center_1", "Center", hp=80)
@@ -480,7 +481,7 @@ def test_green_dragon_poison_breath_hits_cone_targets_and_recharges():
 
 
 def test_bugbear_brute_and_surprise_attack_add_bonus_damage_once():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     bugbear = _unit("bugbear_1", "Bugbear", actions_slug="bugbear")
     target = _unit("target_1", "Target", hp=50, ac=10)
@@ -497,7 +498,7 @@ def test_bugbear_brute_and_surprise_attack_add_bonus_damage_once():
 
 
 def test_hobgoblin_martial_advantage_requires_ally_near_target():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     hobgoblin = _unit("hobgoblin_1", "Hobgoblin", actions_slug="hobgoblin")
     ally = _unit("ally_1", "Ally")
@@ -524,7 +525,7 @@ def test_hobgoblin_martial_advantage_requires_ally_near_target():
 
 
 def test_grick_multiattack_only_uses_beak_after_tentacles_hit():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     grick = _unit("grick_1", "Grick", actions_slug="grick")
     target = _unit("target_1", "Target", hp=40, ac=10)
@@ -552,7 +553,7 @@ def test_grick_multiattack_only_uses_beak_after_tentacles_hit():
 
 
 def test_nothic_rotting_gaze_deals_necrotic_damage_on_failed_save():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     nothic = _unit("nothic_1", "Nothic", actions_slug="nothic")
     target = _unit(
@@ -575,7 +576,7 @@ def test_nothic_rotting_gaze_deals_necrotic_damage_on_failed_save():
 
 
 def test_stirge_attaches_and_drains_at_turn_start_then_can_detach():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     stirge = _unit("stirge_1", "Stirge", actions_slug="stirge")
     target = _unit("target_1", "Target", hp=30, ac=10)
@@ -606,7 +607,7 @@ def test_stirge_attaches_and_drains_at_turn_start_then_can_detach():
 
 
 def test_wraith_life_drain_can_reduce_max_hp_on_failed_save():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     wraith = _unit("wraith_1", "Wraith", actions_slug="wraith")
     target = _unit("target_1", "Target", hp=50, ac=10)
@@ -624,7 +625,7 @@ def test_wraith_life_drain_can_reduce_max_hp_on_failed_save():
 
 
 def test_evil_mage_spell_action_reuses_spell_registry():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     mage = _unit("mage_1", "Evil Mage", actions_slug="evil-mage")
     target = _unit("target_1", "Target", hp=30, ac=10)
@@ -642,7 +643,7 @@ def test_evil_mage_spell_action_reuses_spell_registry():
 
 
 def test_monster_self_spell_does_not_require_explicit_target():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     state = _state(skull, [])
@@ -658,7 +659,7 @@ def test_monster_self_spell_does_not_require_explicit_target():
 
 
 def test_monster_point_area_spell_expands_targets_from_space():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     near = _unit("near_1", "Near", hp=40)
@@ -725,7 +726,7 @@ def test_flaming_sphere_damages_creature_ending_turn_nearby():
 
 
 def test_monster_misty_step_updates_space():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     mage = _unit("mage_1", "Evil Mage", actions_slug="evil-mage")
     space = {
@@ -754,7 +755,7 @@ def test_monster_misty_step_updates_space():
 
 def test_counterspell_prompt_resume_preserves_monster_spell_space_context():
     from app.graph import nodes
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     player = _unit("player_hero", "Hero", hp=40, ac=10)
@@ -805,7 +806,7 @@ def test_counterspell_prompt_resume_preserves_monster_spell_space_context():
 
 
 def test_flameskull_fire_ray_multiattack_hits_twice():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     skull = _unit("skull_1", "Flameskull", actions_slug="flameskull")
     target = _unit("target_1", "Target", hp=40, ac=10)
@@ -822,7 +823,7 @@ def test_flameskull_fire_ray_multiattack_hits_twice():
 
 
 def test_spectator_paralyzing_ray_applies_save_ends_condition():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     spectator = _unit("spectator_1", "Spectator", actions_slug="spectator")
     target = _unit("target_1", "Target", hp=30, ac=10)
@@ -840,7 +841,7 @@ def test_spectator_paralyzing_ray_applies_save_ends_condition():
 
 
 def test_spectator_eye_rays_can_apply_status_and_damage():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     spectator = _unit("spectator_1", "Spectator", actions_slug="spectator")
     first = _unit("first_1", "First", hp=30, ac=10)
@@ -863,7 +864,7 @@ def test_spectator_eye_rays_can_apply_status_and_damage():
 
 
 def test_confused_roll_can_block_action_on_turn_start():
-    from app.services.tool_service import use_monster_action
+    from app.services.tools.monster_action_tools import use_monster_action
 
     spectator = _unit("spectator_1", "Spectator", actions_slug="spectator")
     target = _unit(

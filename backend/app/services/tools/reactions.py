@@ -35,7 +35,7 @@ def get_available_reactions(
 ) -> list[dict]:
     """收集 actor 对指定触发类型可用的所有反应法术。
     返回 [{spell_id, name_cn, min_slot, description}] 列表。"""
-    from app.spells import SPELL_REGISTRY
+    from app.spells import get_spell_module
     from app.spells._base import get_spell_range_feet
     from app.services.tools._helpers import get_condition_action_block_reason
     from app.space.geometry import validate_unit_distance
@@ -49,7 +49,7 @@ def get_available_reactions(
     result: list[dict] = []
 
     for spell_id in actor.get("known_spells", []):
-        mod = SPELL_REGISTRY.get(spell_id)
+        mod = get_spell_module(spell_id)
         if not mod:
             continue
         spell_def = mod.SPELL_DEF
@@ -80,7 +80,7 @@ def get_available_reactions(
         if action.get("kind") != "spell" or action.get("action_type") != "reaction":
             continue
         spell_id = action.get("spell_id")
-        mod = SPELL_REGISTRY.get(spell_id)
+        mod = get_spell_module(spell_id)
         if not mod:
             continue
         spell_def = mod.SPELL_DEF

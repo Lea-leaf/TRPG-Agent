@@ -13,7 +13,9 @@ if str(backend_dir) not in sys.path:
 
 from app.allies.profiles import get_ally_profile
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
-from app.services.tool_service import buy_item, get_tool_profile, load_character_profile, use_item
+from app.services.tools import get_tool_profile
+from app.services.tools.character_tools import load_character_profile
+from app.services.tools.item_tools import buy_item, use_item
 from app.services.tools.rest_tools import take_rest
 from app.services.tools._helpers import prepare_player_for_combat
 
