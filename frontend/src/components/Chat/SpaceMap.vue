@@ -1,9 +1,9 @@
 <template>
-  <section class="space-map">
+  <section v-if="activeMap" class="space-map">
     <div class="map-header" :class="{ collapsed: isMapCollapsed && !!activeMap }">
-      <div v-if="!isMapCollapsed || !activeMap" class="map-heading">
+      <div v-if="!isMapCollapsed" class="map-heading">
         <div class="section-title">战术地图</div>
-        <div v-if="activeMap" class="map-subtitle">
+        <div class="map-subtitle">
           <span class="map-name">{{ activeMap.name }}</span>
           <span class="map-size">{{ formatNumber(activeMap.width) }}x{{ formatNumber(activeMap.height) }} 尺</span>
         </div>
@@ -22,7 +22,6 @@
         <button
           class="map-toggle-btn"
           type="button"
-          :disabled="!activeMap"
           :title="isMapCollapsed ? '显示地图' : '隐藏地图'"
           @click="toggleMapVisibility"
         >
@@ -40,16 +39,8 @@
       </div>
     </div>
 
-    <div v-if="!activeMap" class="empty-map">
-      暂无地图数据
-    </div>
-
-    <div v-else-if="isMapCollapsed" class="empty-map">
-      点击右上角按钮重新显示地图
-    </div>
-
     <div
-      v-else
+      v-if="!isMapCollapsed"
       class="map-shell"
       :class="{
         interactive: isMapInteractive,
@@ -136,7 +127,7 @@
             isPanning
               ? '拖动中'
               : isMoveModeActive
-                ? '移动模式：点击网格设置目标点；按住 Ctrl + 鼠标拖动'
+                ? moveHintText
                 : isMapInteractive
                   ? `缩放 ${zoomScale.toFixed(1)}x；按住 Ctrl + 鼠标拖动`
                   : '点击地图后可滚轮缩放；按住 Ctrl + 鼠标拖动'
@@ -162,7 +153,7 @@
                   <span class="map-size">{{ formatNumber(activeMap.width) }}x{{ formatNumber(activeMap.height) }} 尺</span>
                 </div>
             </div>
-            <div class="map-actions">
+            <div class="map-actions detached-map-actions">
               <button
                 class="move-toggle-btn"
                 type="button"
@@ -279,7 +270,7 @@
                   isPanning
                     ? '拖动中'
                     : isMoveModeActive
-                      ? '移动模式：点击网格设置目标点；按住 Ctrl + 鼠标拖动'
+                      ? moveHintText
                       : isMapInteractive
                         ? `缩放 ${zoomScale.toFixed(1)}x；按住 Ctrl + 鼠标拖动`
                         : '点击地图后可滚轮缩放；按住 Ctrl + 鼠标拖动'
@@ -300,26 +291,26 @@
         aria-label="战术地图属性面板"
       >
         <div class="detached-stats-panel">
-          <div class="detached-stats-header">
-            <div class="section-title">属性</div>
+        <div class="detached-stats-header">
+            <div class="section-title">状态面板</div>
           </div>
 
           <div v-if="isMoveModeActive" class="move-panel detached-map-info">
             <template v-if="moveEligibility">
               <div class="move-panel-head">
-                <span class="move-panel-title">战术移动</span>
+                <span class="move-panel-title">{{ movePanelTitle }}</span>
                 <span class="move-panel-status" :class="{ active: isMoveModeActive }">
                   {{ isMoveModeActive ? '已开启' : '未开启' }}
                 </span>
               </div>
               <div class="move-panel-grid detached-stats-grid">
                 <div>
-                  <span>当前行动者</span>
+                  <span>{{ moveActorLabel }}</span>
                   <strong>{{ moveEligibility.actorName }}</strong>
                 </div>
                 <div>
-                  <span>剩余移动力</span>
-                  <strong>{{ formatNumber(moveEligibility.movementLeft) }} 尺</strong>
+                  <span>{{ moveResourceLabel }}</span>
+                  <strong>{{ moveResourceText }}</strong>
                 </div>
                 <div>
                   <span>起点</span>
@@ -334,8 +325,7 @@
                   <strong>{{ moveDistance === null ? '待选择' : `${formatNumber(moveDistance)} 尺` }}</strong>
                 </div>
                 <div>
-                  <span>校验结果</span>
-                  <strong :class="{ danger: isMoveDistanceExceeded }">
+                  <strong :class="{ danger: !isMoveAvailable, 'movable-glow': isMoveAvailable }">
                     {{ moveValidationText }}
                   </strong>
                 </div>
@@ -347,7 +337,7 @@
                   :disabled="isSubmittingMove"
                   @click="toggleMoveMode"
                 >
-                  {{ isMoveModeActive ? '取消移动' : '开始移动' }}
+                  {{ isMoveModeActive ? '取消移动' : `开始${movePanelTitle}` }}
                 </button>
                 <button
                   class="move-action-btn subtle"
@@ -363,7 +353,7 @@
                   :disabled="!canConfirmMove"
                   @click="submitMoveRequest"
                 >
-                  {{ isSubmittingMove ? '提交中...' : '确认移动' }}
+                  {{ isSubmittingMove ? '移动中...' : '确认移动' }}
                 </button>
               </div>
             </template>
@@ -408,19 +398,19 @@
     <div v-if="!isMapCollapsed && isMoveModeActive" class="move-panel">
       <template v-if="moveEligibility">
         <div class="move-panel-head">
-          <span class="move-panel-title">战术移动</span>
+          <span class="move-panel-title">{{ movePanelTitle }}</span>
           <span class="move-panel-status" :class="{ active: isMoveModeActive }">
             {{ isMoveModeActive ? '已开启' : '未开启' }}
           </span>
         </div>
         <div class="move-panel-grid">
           <div>
-            <span>当前行动者</span>
+            <span>{{ moveActorLabel }}</span>
             <strong>{{ moveEligibility.actorName }}</strong>
           </div>
           <div>
-            <span>剩余移动力</span>
-            <strong>{{ formatNumber(moveEligibility.movementLeft) }} 尺</strong>
+            <span>{{ moveResourceLabel }}</span>
+            <strong>{{ moveResourceText }}</strong>
           </div>
           <div>
             <span>起点</span>
@@ -435,8 +425,7 @@
             <strong>{{ moveDistance === null ? '待选择' : `${formatNumber(moveDistance)} 尺` }}</strong>
           </div>
           <div>
-            <span>校验结果</span>
-            <strong :class="{ danger: isMoveDistanceExceeded }">
+            <strong :class="{ danger: !isMoveAvailable }">
               {{ moveValidationText }}
             </strong>
           </div>
@@ -448,7 +437,7 @@
             :disabled="isSubmittingMove"
             @click="toggleMoveMode"
           >
-            {{ isMoveModeActive ? '取消移动' : '开始移动' }}
+            {{ isMoveModeActive ? '取消移动' : `开始${movePanelTitle}` }}
           </button>
           <button
             class="move-action-btn subtle"
@@ -464,7 +453,7 @@
             :disabled="!canConfirmMove"
             @click="submitMoveRequest"
           >
-            {{ isSubmittingMove ? '提交中...' : '确认移动' }}
+            {{ isSubmittingMove ? '移动中...' : '确认移动' }}
           </button>
         </div>
       </template>
@@ -546,11 +535,12 @@ type VisibleUnit = {
 }
 
 type MoveEligibility = {
+  mode: 'combat' | 'explore'
   actorId: string
   actorName: string
-  movementLeft: number
   fromX: number
   fromY: number
+  movementLeft?: number
 }
 
 type LooseRecord = Record<string, any>
@@ -781,8 +771,16 @@ const currentCombatActorId = computed(() => {
   return toLabelText(props.combat.current_actor_id, '')
 })
 
+// 复活、切图或收尾后前端可能暂时残留空 combat 对象；只有存在当前回合或参战单位时才视为真正战斗中
+const isCombatActive = computed(() => {
+  if (!isRecord(props.combat)) return false
+  const hasCurrentActor = !!currentCombatActorId.value
+  const hasParticipants = isRecord(props.combat.participants) && Object.keys(props.combat.participants).length > 0
+  return hasCurrentActor || hasParticipants
+})
+
 const currentMapActor = computed(() => {
-  if (!currentCombatActorId.value) return null
+  if (!isCombatActive.value || !currentCombatActorId.value) return null
   if (currentCombatActorId.value === playerUnitId.value && isRecord(props.player)) {
     return {
       id: currentCombatActorId.value,
@@ -804,24 +802,37 @@ const currentMapActor = computed(() => {
 
 const moveDisabledReason = computed(() => {
   if (!activeMap.value) return '当前没有可用地图。'
-  if (!isRecord(props.combat)) return '当前不在战斗中，不能发起战术移动。'
   if (!playerVisibleUnit.value || !playerUnitId.value) return '地图上没有玩家落点，不能发起移动。'
-  if (!currentCombatActorId.value) return '当前没有行动中的单位。'
-  if (currentCombatActorId.value !== playerUnitId.value) return '只有主角自己的回合才能尝试移动。'
-  if (!currentMapActor.value) return '当前行动者数据缺失，无法校验移动力。'
-  const movementLeft = toNumber(currentMapActor.value.movement_left, toNumber(currentMapActor.value.speed, 0))
-  if (movementLeft <= 0) return '当前剩余移动力为 0，不能移动。'
   if (!props.sendTacticalMoveRequest) return '当前聊天发送器不可用，暂时无法提交移动请求。'
+  if (!isCombatActive.value) return ''
+  if (!currentCombatActorId.value) return '当前没有行动中的单位。'
+  if (currentCombatActorId.value !== playerUnitId.value) return '战斗状态下只有你的回合才能移动。'
+  if (!currentMapActor.value) return '当前行动角色数据缺失，无法校验移动。'
+  const movementLeft = toNumber(currentMapActor.value.movement_left, toNumber(currentMapActor.value.speed, 0))
+  if (movementLeft <= 0) return '当前剩余移动为 0，不能移动。'
   return ''
 })
 
 const moveEligibility = computed<MoveEligibility | null>(() => {
   if (moveDisabledReason.value) return null
   const playerUnit = playerVisibleUnit.value
+  if (!playerUnit || !playerUnitId.value) return null
+
+  if (!isCombatActive.value) {
+    return {
+      mode: 'explore',
+      actorId: playerUnitId.value,
+      actorName: playerUnit.name,
+      fromX: playerUnit.x,
+      fromY: playerUnit.y,
+    }
+  }
+
   const actor = currentMapActor.value
-  if (!playerUnit || !actor || !playerUnitId.value) return null
+  if (!actor) return null
 
   return {
+    mode: 'combat',
     actorId: playerUnitId.value,
     actorName: actor.name,
     movementLeft: actor.movement_left,
@@ -833,7 +844,10 @@ const moveEligibility = computed<MoveEligibility | null>(() => {
 const canEnterMoveMode = computed(() => !!moveEligibility.value)
 const moveActionTitle = computed(() => {
   if (canEnterMoveMode.value) {
-    return isMoveModeActive.value ? '关闭移动模式' : '开启移动模式'
+    if (moveEligibility.value?.mode === 'explore') {
+      return isMoveModeActive.value ? '关闭探索状态' : '开启探索状态'
+    }
+    return isMoveModeActive.value ? '关闭战斗状态' : '开启战斗状态'
   }
   return moveDisabledReason.value || '当前不能移动'
 })
@@ -847,7 +861,8 @@ const moveDistance = computed(() => {
 
 const isMoveDistanceExceeded = computed(() => {
   if (moveDistance.value === null || !moveEligibility.value) return false
-  return moveDistance.value > moveEligibility.value.movementLeft
+  if (moveEligibility.value.mode !== 'combat') return false
+  return moveDistance.value > (moveEligibility.value.movementLeft ?? 0)
 })
 
 const canConfirmMove = computed(() => {
@@ -860,11 +875,7 @@ const canConfirmMove = computed(() => {
 })
 
 const moveValidationText = computed(() => {
-  if (!moveEligibility.value) return '不可移动'
-  if (!moveTarget.value || moveDistance.value === null) return '待选择目标点'
-  if (moveDistance.value <= 0) return '目标点与当前位置重合'
-  if (isMoveDistanceExceeded.value) return '移动力不足'
-  return '可提交'
+  return isMoveAvailable.value ? '可移动' : '不可移动'
 })
 
 const movePreview = computed(() => {
@@ -875,6 +886,36 @@ const movePreview = computed(() => {
     toScreenX: clamp(moveTarget.value.x, 0, activeMap.value.width),
     toScreenY: clamp(activeMap.value.height - moveTarget.value.y, 0, activeMap.value.height),
   }
+})
+
+const movePanelTitle = computed(() => {
+  return moveEligibility.value?.mode === 'explore' ? '探索状态' : '战斗状态'
+})
+
+const moveHintText = computed(() => {
+  return moveEligibility.value?.mode === 'explore'
+    ? '探索状态：点击网格调整位置；按住 Ctrl + 鼠标拖动'
+    : '战斗状态：点击网格设置移动目标；按住 Ctrl + 鼠标拖动'
+})
+
+const moveActorLabel = computed(() => {
+  return moveEligibility.value?.mode === 'explore' ? '当前角色' : '当前行动角色'
+})
+
+const moveResourceLabel = computed(() => {
+  return moveEligibility.value?.mode === 'explore' ? '状态类型' : '剩余移动'
+})
+
+const moveResourceText = computed(() => {
+  if (!moveEligibility.value) return '?'
+  if (moveEligibility.value.mode === 'explore') return '自由探索'
+  return `${formatNumber(moveEligibility.value.movementLeft)} 尺`
+})
+
+const isMoveAvailable = computed(() => {
+  if (!moveEligibility.value || !moveTarget.value || moveDistance.value === null) return false
+  if (moveDistance.value <= 0) return false
+  return !isMoveDistanceExceeded.value
 })
 
 const gridLines = computed(() => {
@@ -1202,17 +1243,29 @@ const submitMoveRequest = async () => {
   if (!moveEligibility.value || !moveTarget.value || moveDistance.value === null || !props.sendTacticalMoveRequest) return
   if (moveDistance.value <= 0 || isMoveDistanceExceeded.value) return
 
-  const message = [
-    '【战术移动请求】',
-    `行动者：${moveEligibility.value.actorName}（${moveEligibility.value.actorId}）`,
-    `当前回合行动者：${currentCombatActorId.value}`,
-    `地图：${activeMap.value?.name ?? '?'}（${activeMap.value?.id ?? '?'}）`,
-    `起点：(${formatNumber(moveEligibility.value.fromX)}, ${formatNumber(moveEligibility.value.fromY)})`,
-    `终点：(${formatNumber(moveTarget.value.x)}, ${formatNumber(moveTarget.value.y)})`,
-    `预计移动距离：${formatNumber(moveDistance.value)} 尺`,
-    `当前剩余移动力：${formatNumber(moveEligibility.value.movementLeft)} 尺`,
-    '玩家意图：尝试将自己的节点从起点移动到终点。',
-  ].join('\n')
+  const message = moveEligibility.value.mode === 'explore'
+    ? [
+        '【探索状态移动请求】',
+        `角色：${moveEligibility.value.actorName}（${moveEligibility.value.actorId}）`,
+        `地图：${activeMap.value?.name ?? '?'}（${activeMap.value?.id ?? '?'}）`,
+        `起点：(${formatNumber(moveEligibility.value.fromX)}, ${formatNumber(moveEligibility.value.fromY)})`,
+        `终点：(${formatNumber(moveTarget.value.x)}, ${formatNumber(moveTarget.value.y)})`,
+        `直线距离：${formatNumber(moveDistance.value)} 尺`,
+        '玩家意图：在非战斗探索中调整自己在当前地图上的位置。',
+        '请按探索状态移动处理；这是非战斗移动，不要扣减战斗中的剩余移动，不要要求当前回合。',
+        '若当前位置需要直接更新到新落点，请优先使用 manage_space 的 place_unit。',
+      ].join('\n')
+    : [
+        '【战斗状态移动请求】',
+        `行动角色：${moveEligibility.value.actorName}（${moveEligibility.value.actorId}）`,
+        `当前回合角色：${currentCombatActorId.value}`,
+        `地图：${activeMap.value?.name ?? '?'}（${activeMap.value?.id ?? '?'}）`,
+        `起点：(${formatNumber(moveEligibility.value.fromX)}, ${formatNumber(moveEligibility.value.fromY)})`,
+        `终点：(${formatNumber(moveTarget.value.x)}, ${formatNumber(moveTarget.value.y)})`,
+        `预计移动距离：${formatNumber(moveDistance.value)} 尺`,
+        `当前剩余移动：${formatNumber(moveEligibility.value.movementLeft)} 尺`,
+        '玩家意图：尝试将自己的节点从起点移动到终点。',
+      ].join('\n')
 
   isSubmittingMove.value = true
   try {
@@ -1258,11 +1311,18 @@ const sideClass = (side: string) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 2px 0 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(20, 20, 25, 0.58);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(255, 255, 255, 0.02) inset;
 }
 
 .map-header.collapsed {
-  padding-bottom: 0;
+  padding-bottom: 10px;
 }
 
 .map-heading {
@@ -1277,40 +1337,55 @@ const sideClass = (side: string) => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.detached-map-actions {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
 }
 
 .move-toggle-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0.5px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: all 0.18s ease;
 }
 
 .section-title {
-  color: #c9a87b;
+  color: #d8bc8f;
   font-size: 14px;
   font-weight: 600;
   line-height: 1;
+  font-family: 'Cinzel', 'UnifrakturMaguntia', 'Georgia', serif;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .map-subtitle {
-  color: #a1a1aa;
-  font-size: 12px;
+  color: #b6b7bf;
+  font-size: 11px;
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
 .map-name {
-  color: #d4d4d8;
+  color: #ece7dc;
   font-weight: 500;
   min-width: 0;
   overflow: hidden;
@@ -1319,7 +1394,7 @@ const sideClass = (side: string) => {
 }
 
 .map-size {
-  color: #8e8e93;
+  color: #9496a3;
   white-space: nowrap;
 }
 
@@ -1330,43 +1405,57 @@ const sideClass = (side: string) => {
 }
 
 .focus-player-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0.5px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: all 0.18s ease;
 }
 
 .map-toggle-btn {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0.5px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: all 0.18s ease;
 }
 
 .detached-map-close-btn {
   min-width: 54px;
-  height: 28px;
-  padding: 0 10px;
+  height: 30px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0.5px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: #e5e7eb;
-  border-radius: 6px;
+  border-radius: 999px;
   cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.move-toggle-btn:hover:not(:disabled),
+.focus-player-btn:hover:not(:disabled),
+.map-toggle-btn:hover:not(:disabled),
+.detached-map-close-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(210, 180, 140, 0.34);
+  color: #f1e3c4;
+  box-shadow: 0 0 12px rgba(210, 180, 140, 0.12);
+  transform: translateY(-1px);
 }
 
 .map-toggle-btn:disabled,
@@ -1422,6 +1511,8 @@ const sideClass = (side: string) => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  padding: 2px 2px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .detached-map-heading {
@@ -1433,6 +1524,7 @@ const sideClass = (side: string) => {
 
 .detached-map-title {
   font-size: 14px;
+  letter-spacing: 1px;
 }
 
 .detached-map-shell {
@@ -1478,6 +1570,8 @@ const sideClass = (side: string) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .map-shell.interactive {
@@ -1760,6 +1854,11 @@ const sideClass = (side: string) => {
   color: #fda4af;
 }
 
+.move-panel-grid strong.movable-glow {
+  color: #f3deb4;
+  animation: move-available-breathe 2s ease-in-out infinite;
+}
+
 .move-panel-actions {
   display: flex;
   gap: 8px;
@@ -1767,13 +1866,15 @@ const sideClass = (side: string) => {
 }
 
 .move-action-btn {
-  min-height: 30px;
-  padding: 0 10px;
-  border-radius: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: #e5e7eb;
   cursor: pointer;
+  font-size: 13px;
+  transition: all 0.18s ease;
 }
 
 .move-action-btn.subtle {
@@ -1782,8 +1883,17 @@ const sideClass = (side: string) => {
 
 .move-action-btn.primary {
   color: #111827;
-  background: #facc15;
-  border-color: rgba(250, 204, 21, 0.45);
+  background: rgba(210, 180, 140, 0.9);
+  border-color: rgba(210, 180, 140, 0.45);
+}
+
+.move-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(210, 180, 140, 0.32);
+}
+
+.move-action-btn.primary:hover:not(:disabled) {
+  background: #e6d5b8;
 }
 
 .move-action-btn:disabled {
@@ -1883,5 +1993,22 @@ const sideClass = (side: string) => {
   font-size: 13px;
   text-align: center;
   padding: 12px 0 16px;
+}
+
+@keyframes move-available-breathe {
+  0% {
+    color: #d9c6a0;
+    text-shadow: 0 0 0 rgba(250, 204, 21, 0);
+  }
+  50% {
+    color: #f5dfae;
+    text-shadow:
+      0 0 8px rgba(250, 204, 21, 0.22),
+      0 0 16px rgba(250, 204, 21, 0.1);
+  }
+  100% {
+    color: #d9c6a0;
+    text-shadow: 0 0 0 rgba(250, 204, 21, 0);
+  }
 }
 </style>
