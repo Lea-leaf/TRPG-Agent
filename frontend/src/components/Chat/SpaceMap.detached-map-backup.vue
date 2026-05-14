@@ -68,7 +68,7 @@
         :aria-label="`${activeMap.name} 平面地图`"
       >
         <g :transform="panTransform">
-          <g ref="inlineViewportGroupRef" :transform="viewportTransform">
+          <g :transform="viewportTransform">
             <rect
               class="map-bg"
               :x="0"
@@ -211,7 +211,7 @@
               :aria-label="`${activeMap.name} 平面地图`"
             >
               <g :transform="panTransform">
-                <g ref="detachedViewportGroupRef" :transform="viewportTransform">
+                <g :transform="viewportTransform">
                   <rect
                     class="map-bg"
                     :x="0"
@@ -574,15 +574,7 @@ const panY = ref(0)
 const isPanning = ref(false)
 const inlineMapCanvasRef = ref<SVGSVGElement | null>(null)
 const detachedMapCanvasRef = ref<SVGSVGElement | null>(null)
-const inlineViewportGroupRef = ref<SVGGElement | null>(null)
-const detachedViewportGroupRef = ref<SVGGElement | null>(null)
-const panStartState = ref<{
-  mouseX: number
-  mouseY: number
-  panX: number
-  panY: number
-  surface: 'inline' | 'detached'
-} | null>(null)
+const panStartState = ref<{ mouseX: number; mouseY: number; panX: number; panY: number } | null>(null)
 const isCtrlPressed = ref(false)
 const lastCtrlKeydownAt = ref(0)
 const lastMapClickAt = ref(0)
@@ -929,34 +921,6 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const maxPanX = computed(() => Math.max(0, (viewBoxWidth.value * (zoomScale.value - 1)) / 2))
 const maxPanY = computed(() => Math.max(0, (viewBoxHeight.value * (zoomScale.value - 1)) / 2))
 
-const getSurfaceElements = (surface: 'inline' | 'detached') => {
-  return surface === 'detached'
-    ? {
-        svg: detachedMapCanvasRef.value,
-        viewportGroup: detachedViewportGroupRef.value,
-      }
-    : {
-        svg: inlineMapCanvasRef.value,
-        viewportGroup: inlineViewportGroupRef.value,
-      }
-}
-
-// 用 SVG 实际变换矩阵做坐标反解，避免 CSS 尺寸、留白和 viewBox 比例不一致时出现边缘偏移
-const getWorldPointFromMouse = (event: MouseEvent, surface: 'inline' | 'detached') => {
-  const { svg, viewportGroup } = getSurfaceElements(surface)
-  if (!svg || !viewportGroup) return null
-
-  const ctm = viewportGroup.getScreenCTM()
-  if (!ctm) return null
-
-  const inverseMatrix = ctm.inverse()
-  const point = svg.createSVGPoint()
-  point.x = event.clientX
-  point.y = event.clientY
-
-  return point.matrixTransform(inverseMatrix)
-}
-
 const clampPanIntoBounds = () => {
   panX.value = clamp(Number(panX.value.toFixed(2)), -maxPanX.value, maxPanX.value)
   panY.value = clamp(Number(panY.value.toFixed(2)), -maxPanY.value, maxPanY.value)
@@ -1096,25 +1060,19 @@ const handlePanStart = (event: MouseEvent, surface: 'inline' | 'detached' = 'inl
     mouseY: event.clientY,
     panX: panX.value,
     panY: panY.value,
-    surface,
   }
   window.addEventListener('mousemove', handlePanMove)
   window.addEventListener('mouseup', handlePanEnd)
 }
 
 const handlePanMove = (event: MouseEvent) => {
-  if (!isPanning.value || !panStartState.value) return
+  const activeCanvas = detachedMapCanvasRef.value ?? inlineMapCanvasRef.value
+  if (!isPanning.value || !panStartState.value || !activeCanvas) return
+  const rect = activeCanvas.getBoundingClientRect()
+  if (!rect.width || !rect.height) return
 
-  const startWorldPoint = getWorldPointFromMouse({
-    ...event,
-    clientX: panStartState.value.mouseX,
-    clientY: panStartState.value.mouseY,
-  } as MouseEvent, panStartState.value.surface)
-  const currentWorldPoint = getWorldPointFromMouse(event, panStartState.value.surface)
-  if (!startWorldPoint || !currentWorldPoint) return
-
-  const deltaX = currentWorldPoint.x - startWorldPoint.x
-  const deltaY = currentWorldPoint.y - startWorldPoint.y
+  const deltaX = (event.clientX - panStartState.value.mouseX) * (viewBoxWidth.value / rect.width) / zoomScale.value
+  const deltaY = (event.clientY - panStartState.value.mouseY) * (viewBoxHeight.value / rect.height) / zoomScale.value
 
   panX.value = Number((panStartState.value.panX + deltaX).toFixed(2))
   panY.value = Number((panStartState.value.panY + deltaY).toFixed(2))
@@ -1164,15 +1122,23 @@ const handleUnitDoubleClick = (unitId: string) => {
 }
 
 const getMapPointFromMouse = (event: MouseEvent, surface: 'inline' | 'detached' = 'inline') => {
+  const svg = surface === 'detached' ? detachedMapCanvasRef.value : inlineMapCanvasRef.value
   const map = activeMap.value
-  if (!map) return null
+  if (!svg || !map) return null
 
-  const worldPoint = getWorldPointFromMouse(event, surface)
-  if (!worldPoint) return null
+  const rect = svg.getBoundingClientRect()
+  if (!rect.width || !rect.height) return null
+
+  const baseX = ((event.clientX - rect.left) / rect.width) * viewBoxWidth.value
+  const baseY = ((event.clientY - rect.top) / rect.height) * viewBoxHeight.value
+  const centerX = viewBoxWidth.value / 2
+  const centerY = viewBoxHeight.value / 2
+  const worldX = ((baseX - panX.value - centerX) / zoomScale.value) + centerX
+  const worldY = ((baseY - panY.value - centerY) / zoomScale.value) + centerY
 
   return {
-    x: Number(clamp(worldPoint.x, 0, map.width).toFixed(1)),
-    y: Number(clamp(map.height - worldPoint.y, 0, map.height).toFixed(1)),
+    x: Number(clamp(worldX, 0, map.width).toFixed(1)),
+    y: Number(clamp(map.height - worldY, 0, map.height).toFixed(1)),
   }
 }
 
