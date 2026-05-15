@@ -11,7 +11,7 @@ from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from app.calculation.predefined_characters import PREDEFINED_CHARACTERS
-from app.services.tools._helpers import get_player_identity, is_player_reference, reset_death_save_state
+from app.services.tools._helpers import is_player_reference, reset_death_save_state, resolve_player_reference_id
 
 RestType = Literal["short", "long"]
 ResourceRecovery = Literal["short_rest", "long_rest"]
@@ -199,8 +199,7 @@ def _target_units(target_ids: list[str], state: dict) -> tuple[list[tuple[str, d
     for raw_id in target_ids:
         target_id = str(raw_id).strip()
         if player and is_player_reference(player, target_id):
-            actor_id, _ = get_player_identity(player)
-            player["id"] = actor_id
+            resolve_player_reference_id(player, target_id)
             targets.append(("player", player, "player"))
         elif target_id in scene_units:
             targets.append((target_id, scene_units[target_id], "scene_units"))

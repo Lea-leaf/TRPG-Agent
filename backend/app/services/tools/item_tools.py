@@ -15,10 +15,10 @@ from app.equipment.items import CONSUMABLE_ITEMS, create_inventory_item, get_con
 from app.services.tools._helpers import (
     consume_action_resource,
     get_combatant,
-    get_player_identity,
     has_action_resource,
     is_player_reference,
     reset_death_save_state,
+    resolve_player_reference_id,
 )
 from app.space.geometry import validate_unit_distance
 
@@ -63,8 +63,7 @@ def _locate_unit(ctx: dict, unit_id: str) -> tuple[dict | None, str, str]:
     scene_units = ctx["scene_units"]
 
     if player and is_player_reference(player, unit_id):
-        player_id, _ = get_player_identity(player)
-        player["id"] = player_id
+        player_id = resolve_player_reference_id(player, unit_id)
         return player, player_id, "player"
 
     if combat:

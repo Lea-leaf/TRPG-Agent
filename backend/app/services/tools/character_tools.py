@@ -32,12 +32,12 @@ from app.services.tools._helpers import (
     apply_hp_change,
     compute_ac,
     get_combatant,
-    get_player_identity,
     is_player_reference,
     mark_unit_dying,
     prepare_character_for_combat,
     record_death_save_roll,
     reset_death_save_state,
+    resolve_player_reference_id,
     sync_ac_state,
     sync_movement_state,
 )
@@ -292,8 +292,7 @@ def modify_character_state(
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if is_player_reference(player_dict, target_id):
-        target_id, _ = get_player_identity(player_dict)
+    target_id = resolve_player_reference_id(player_dict, target_id)
 
     # 在战斗参与者 / 场景单位 / 玩家中查找目标
     combat_raw = state.get("combat")
@@ -485,12 +484,7 @@ def inspect_unit(
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if is_player_reference(player_dict, target_id):
-        if not player_dict:
-            return Command(update={"messages": [
-                ToolMessage(content="玩家尚未加载角色卡。", tool_call_id=tool_call_id)
-            ]})
-        target_id, _ = get_player_identity(player_dict)
+    target_id = resolve_player_reference_id(player_dict, target_id)
 
     # 按优先级搜索：战斗参战者（含玩家）→ 场景单位 → 死亡单位 → 玩家本体
     result = None
@@ -720,6 +714,7 @@ def _resolve_growth_target(state: dict, target_id: str) -> tuple[dict | None, st
     """成长系统只处理玩家和角色型友方，避免把普通怪物误当角色卡升级。"""
     player_dict = _get_player_dict(state)
     update: dict = {}
+    target_id = resolve_player_reference_id(player_dict, target_id)
 
     if is_player_reference(player_dict, target_id):
         return player_dict, "player", update

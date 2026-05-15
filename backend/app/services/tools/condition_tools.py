@@ -11,7 +11,13 @@ from langgraph.types import Command
 
 from app.conditions import get_condition_def, has_condition, list_condition_defs, remove_condition_by_id, upsert_condition
 from app.conditions._base import create_condition
-from app.services.tools._helpers import get_combatant, get_player_identity, is_player_reference, sync_ac_state, sync_movement_state
+from app.services.tools._helpers import (
+    get_combatant,
+    is_player_reference,
+    resolve_player_reference_id,
+    sync_ac_state,
+    sync_movement_state,
+)
 
 
 def _locate_target(state: dict, target_id: str) -> tuple[dict | None, dict, str]:
@@ -20,8 +26,7 @@ def _locate_target(state: dict, target_id: str) -> tuple[dict | None, dict, str]
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
-    if is_player_reference(player_dict, target_id):
-        target_id, _ = get_player_identity(player_dict)
+    target_id = resolve_player_reference_id(player_dict, target_id)
 
     # 战斗中：通过统一接口查找（玩家从 player_dict，NPC 从 participants）
     combat_raw = state.get("combat")

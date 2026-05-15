@@ -73,6 +73,36 @@ def test_drinking_healing_potion_uses_bonus_action_in_combat():
     assert updated["inventory"][0]["quantity"] == 1
 
 
+def test_use_item_player_alias_resolves_to_real_player_id_for_range():
+    """喂药距离校验应使用真实玩家 ID，而不是字面 player。"""
+    player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
+    player.update({"name": "温良", "id": "温良"})
+    prepare_player_for_combat(player)
+    ally = get_ally_profile("fighter_companion")
+    ally["hp"] = 5
+    combat = {
+        "round": 1,
+        "participants": {"fighter_companion": ally},
+        "initiative_order": ["温良", "fighter_companion"],
+        "current_actor_id": "温良",
+    }
+    state = {
+        "player": player,
+        "combat": combat,
+        "space": _space_state({"温良": (0, 0), "fighter_companion": (5, 0)}),
+    }
+
+    with patch("app.services.tools.item_tools.d20.roll", return_value=d20.roll("5")):
+        result = _invoke_tool(
+            use_item,
+            tool_input={"item_id": "potion_of_healing", "actor_id": "player", "target_id": "fighter_companion", "mode": "feed", "state": state},
+        ).update
+
+    assert result["player"]["id"] == "温良"
+    assert result["player"]["action_available"] is False
+    assert result["combat"]["participants"]["fighter_companion"]["hp"] == 10
+
+
 def test_greater_healing_potion_restores_4d4_plus_4_hp():
     """强效治疗药水使用 5e 对应的 4d4+4 治疗公式。"""
     player = copy.deepcopy(PREDEFINED_CHARACTERS["战士"])
