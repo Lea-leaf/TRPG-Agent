@@ -144,6 +144,35 @@ def test_structured_simple_attack_keeps_player_reaction_window():
     assert result["player"]["hp"] == 20
 
 
+def test_structured_action_accepts_player_alias_for_target():
+    """模型把目标写成 player 时，工具入口应重定向到真实玩家 ID。"""
+    from app.services.tools.monster_action_tools import use_monster_action
+
+    goblin = _unit("goblin_1", "Goblin", actions_slug="goblin")
+    player = _unit("温良", "温良", hp=20, ac=10)
+    player["side"] = "player"
+    player["known_spells"] = ["shield"]
+    player["resources"] = {"spell_slot_lv1": 1}
+    player["reaction_available"] = True
+    combat = CombatState(
+        round=1,
+        participants={"goblin_1": CombatantState(**goblin)},
+        initiative_order=["goblin_1", "温良"],
+        current_actor_id="goblin_1",
+    )
+    state = {"combat": combat, "player": player}
+
+    with patch("app.services.tools._helpers.d20.roll", side_effect=_flat_rolls(["15"])):
+        result = _invoke_tool(
+            use_monster_action,
+            tool_input={"actor_id": "goblin_1", "target_ids": ["player"], "action_id": "scimitar", "state": state},
+        ).update
+
+    assert result["pending_reaction"]["target_id"] == "温良"
+    assert result["player"]["id"] == "温良"
+    assert "player" not in result["combat"]["participants"]
+
+
 def test_wolf_bite_pauses_for_player_shield_before_prone_save():
     """狼咬击带命中后效果，也必须先给玩家护盾术反应窗口。"""
     from app.services.tools.monster_action_tools import use_monster_action

@@ -15,7 +15,12 @@ from app.services.class_actions import (
     has_class_action,
     run_class_action,
 )
-from app.services.tools._helpers import get_combatant, get_player_identity, is_player_reference
+from app.services.tools._helpers import (
+    get_combatant,
+    get_player_identity,
+    is_player_reference,
+    resolve_player_reference_id,
+)
 
 TARGETED_ACTION_IDS = {"trip_attack", "rally"}
 
@@ -39,6 +44,7 @@ def _mapping_state_to_dict(value) -> dict:
 def _resolve_action_actor(state: dict, player_dict: dict, target_id: str) -> tuple[dict | None, str, dict]:
     """职业动作默认由玩家使用，也允许显式指定战斗或场景友方。"""
     update: dict = {}
+    target_id = resolve_player_reference_id(player_dict, target_id)
     if not target_id or is_player_reference(player_dict, target_id):
         return player_dict, "player", update
 
@@ -70,12 +76,13 @@ def _write_actor_update(update: dict, actor: dict, actor_source: str, actor_id: 
 
 def _resolve_action_target(state: dict, player_dict: dict, target_id: str, update: dict) -> tuple[dict | None, str]:
     """职业动作的目标只从战斗参与者或场景单位中解析，不覆盖动作使用者。"""
+    target_id = resolve_player_reference_id(player_dict, target_id)
     combat_dict = update.get("combat") or _state_value_to_dict(state.get("combat"))
     if combat_dict:
         target = get_combatant(combat_dict, player_dict, target_id)
         if target:
             update["combat"] = combat_dict
-            return target, "combat"
+            return target, "player" if target is player_dict else "combat"
 
     scene_units = update.get("scene_units") or _mapping_state_to_dict(state.get("scene_units"))
     if target_id in scene_units:
@@ -87,7 +94,9 @@ def _resolve_action_target(state: dict, player_dict: dict, target_id: str, updat
 
 def _write_target_update(update: dict, target: dict, target_source: str, target_id: str) -> dict:
     """命中后战技可能修改敌方 HP，需要把目标写回其来源容器。"""
-    if target_source == "combat" and "combat" in update:
+    if target_source == "player":
+        update["player"] = target
+    elif target_source == "combat" and "combat" in update:
         update["combat"]["participants"][target_id] = target
     elif target_source == "scene" and "scene_units" in update:
         update["scene_units"][target_id] = target

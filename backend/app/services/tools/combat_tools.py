@@ -35,6 +35,7 @@ from app.services.tools._helpers import (
     has_action_resource,
     prepare_player_for_combat,
     prepare_character_for_combat,
+    resolve_player_reference_id,
     roll_attack_hit,
     tracks_death_saves,
     validate_attack_distance,
@@ -107,9 +108,7 @@ def _resolve_surprised_ids(raw_ids: list[str], all_units: dict[str, dict], playe
     surprised: set[str] = set()
     missing: list[str] = []
     for raw_id in raw_ids:
-        unit_id = str(raw_id).strip()
-        if player_dict and unit_id in {"player", "玩家", "当前玩家"}:
-            unit_id = player_dict["id"]
+        unit_id = resolve_player_reference_id(player_dict, str(raw_id))
         if unit_id in all_units:
             surprised.add(unit_id)
         else:

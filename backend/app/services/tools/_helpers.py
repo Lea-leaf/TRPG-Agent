@@ -74,6 +74,15 @@ def is_player_reference(player_dict: dict | None, value: str | None) -> bool:
     return text in player_reference_aliases(player_dict)
 
 
+def resolve_player_reference_id(player_dict: dict | None, value: str | None) -> str:
+    """工具入口把玩家别名收束为真实 id，避免把 player 写进业务状态。"""
+    if is_player_reference(player_dict, value):
+        player_id, _ = get_player_identity(player_dict)
+        player_dict["id"] = player_id
+        return player_id
+    return str(value or "").strip()
+
+
 def canonicalize_player_space(raw_space: dict | None, player_dict: dict | None) -> dict | None:
     """把旧玩家落点别名迁移到稳定玩家 id，避免空间/战斗 ID 漂移。"""
     if not raw_space or not player_dict:

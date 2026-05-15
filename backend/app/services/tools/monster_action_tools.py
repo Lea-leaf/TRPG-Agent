@@ -9,7 +9,13 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from app.services.tools._helpers import get_all_combatants, get_combatant, get_condition_action_block_reason, tracks_death_saves
+from app.services.tools._helpers import (
+    get_all_combatants,
+    get_combatant,
+    get_condition_action_block_reason,
+    resolve_player_reference_id,
+    tracks_death_saves,
+)
 from app.services.tools._helpers import build_pending_reaction_state
 from app.services.tools.reactions import get_available_reactions
 from app.services.tools.monster_action_resolvers import (
@@ -60,6 +66,7 @@ def use_monster_action(
     player_raw = state.get("player")
     player_dict = player_raw.model_dump() if hasattr(player_raw, "model_dump") else dict(player_raw) if player_raw else None
 
+    actor_id = resolve_player_reference_id(player_dict, actor_id)
     actor = get_combatant(combat_dict, player_dict, actor_id)
     if not actor:
         return _reject(f"找不到行动者 '{actor_id}'。")
@@ -82,7 +89,7 @@ def use_monster_action(
         return _reject(resource_error)
 
     all_combatants = get_all_combatants(combat_dict, player_dict)
-    target_ids = list(target_ids or [])
+    target_ids = [resolve_player_reference_id(player_dict, target_id) for target_id in list(target_ids or [])]
     if action.kind == "spell":
         from app.spells import get_spell_def
 
@@ -156,7 +163,7 @@ def use_monster_action(
                 }
             )
 
-    if player_dict and target_ids and actor.get("side") != "player" and targets_by_id[target_ids[0]] is player_dict:
+    if player_dict and target_ids and actor.get("side") != "player" and targets_by_id.get(target_ids[0]) is player_dict:
         # 对玩家命中的怪物攻击先暂停，确保护盾术能在伤害和命中后效果前改判。
         if can_use_legacy_reaction_pause(action):
             roll_info = roll_reaction_pause_attack(actor, player_dict, action, state, advantage)

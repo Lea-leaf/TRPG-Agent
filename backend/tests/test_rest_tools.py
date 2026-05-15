@@ -55,6 +55,30 @@ def test_short_rest_restores_short_rest_resources_but_not_spell_slots():
     assert resources["spell_slot_lv1"] == 0
 
 
+def test_rest_player_alias_resolves_to_real_player_id():
+    """休息目标写 player 时应回写真实玩家 ID。"""
+    player = {
+        "id": "温良",
+        "name": "温良",
+        "role_class": "战士",
+        "level": 1,
+        "hp": 8,
+        "max_hp": 12,
+        "resources": {"second_wind_uses": 0},
+        "resource_caps": {"second_wind_uses": 1},
+    }
+
+    result = take_rest.func(
+        rest_type="short",
+        target_ids=["player"],
+        state={"player": player},
+        tool_call_id="call-test",
+    )
+
+    assert result.update["player"]["id"] == "温良"
+    assert result.update["player"]["resources"]["second_wind_uses"] == 1
+
+
 def test_short_rest_spends_hit_dice_to_heal_target():
     """短休可消耗生命骰治疗，治疗量包含 CON 调整值。"""
     player = {
