@@ -17,6 +17,18 @@ const createMessage = (
 
 const createWelcomeMessage = () => createMessage('assistant', '你好，我是 TRPG 助手。你可以直接开始提问。')
 
+const normalizeCombatState = (state: any) => {
+  if (!state || typeof state !== 'object') return null
+
+  const currentActorId = typeof state.current_actor_id === 'string' ? state.current_actor_id.trim() : ''
+  const participants = state.participants
+  const hasParticipants = !!participants && typeof participants === 'object' && Object.keys(participants).length > 0
+
+  // 这里不推断业务胜负，只把后端已经表现为空壳的 combat 快照归一化为 null，保证前后端状态口径一致
+  if (!currentActorId && !hasParticipants) return null
+  return state
+}
+
 export function useChatMessages(initialDebugMode: boolean = false) {
   const messages = ref<ChatMessage[]>([
     createWelcomeMessage()
@@ -154,7 +166,7 @@ export function useChatMessages(initialDebugMode: boolean = false) {
   }
 
   const setCombatState = (state: any) => {
-    combatState.value = state
+    combatState.value = normalizeCombatState(state)
   }
 
   const setSpaceState = (state: any) => {
