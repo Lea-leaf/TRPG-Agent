@@ -3,6 +3,7 @@
   <div class="app-layout">
     <!-- 收缩按钮 -->
     <button
+      v-if="showCollapseButton"
       class="collapse-btn"
       :class="{ visible: isHovering }"
       @click="toggleCollapse"
@@ -14,9 +15,20 @@
 
     <!-- 左侧导航栏 -->
     <Sidebar
+      v-if="leftRailMode === 'navigation'"
       :is-collapsed="isCollapsed"
       :current-tab="currentTab"
       @select="handleSelect"
+    />
+    <CombatTimelinePanel
+      v-else
+      :player="leftRailState.combat?.player ?? null"
+      :combat="leftRailState.combat?.combat ?? null"
+      :space="leftRailState.combat?.space ?? null"
+      :selected-unit="leftRailState.combat?.selectedUnit ?? null"
+      :send-combat-action-request="leftRailState.combat?.sendCombatActionRequest ?? null"
+      :is-collapsed="isCollapsed"
+      @action-notice="forwardActionNotice"
     />
 
     <!-- 右侧内容区 -->
@@ -46,8 +58,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import Sidebar from './Sidebar.vue'
+import CombatTimelinePanel from '../Chat/Combat/CombatTimelinePanel.vue'
 import WelcomePage from '../../Pages_/WelcomePage.vue'
 import ChatPage from '../../Pages_/Chatpages.vue'
 import SettingsPage from '../../Pages_/SettingsPage.vue'
@@ -56,6 +69,13 @@ import DiceAnimationPage from '../../Pages_/DiceAnimationPage.vue'
 import HistoryPage from '../../Pages_/HistoryPage.vue'
 import RulePage from '../../Pages_/RulePage.vue'
 import ProfilePage from '../../Pages_/ProfilePage.vue'
+import {
+  defaultLeftRailState,
+  LEFT_RAIL_OVERRIDE_EVENT,
+  LEFT_RAIL_UPDATED_EVENT,
+  notifyLeftRailMode,
+} from '../../Services_/leftRailService'
+import type { LeftRailState } from './leftRailTypes'
 
 // 在 script 中添加
 const handleNavigate = (tabId: string, params?: Record<string, any>) => {
@@ -79,6 +99,8 @@ const componentMap: Record<string, any> = {
 
 const currentTab = ref('welcome')
 const currentComponent = computed(() => componentMap[currentTab.value] || WelcomePage)
+const leftRailState = ref<LeftRailState>(defaultLeftRailState())
+const forceNavigationRail = ref(false)
 
 const isCollapsed = ref(false)
 const isHovering = ref(false)
@@ -94,6 +116,54 @@ const toggleCollapse = () => {
 const handleSelect = (tabId: string) => {
   currentTab.value = tabId
 }
+
+const handleLeftRailUpdated = (event: Event) => {
+  const detail = (event as CustomEvent<LeftRailState>).detail
+  leftRailState.value = detail ?? defaultLeftRailState()
+  if (!leftRailState.value.combatVisible) {
+    forceNavigationRail.value = false
+  }
+}
+
+const forwardActionNotice = (text: string) => {
+  leftRailState.value.combat?.onActionNotice?.(text)
+}
+
+const handleLeftRailOverride = (event: Event) => {
+  const mode = (event as CustomEvent<'navigation' | 'combat' | null>).detail
+  if (mode === 'navigation') {
+    forceNavigationRail.value = true
+    return
+  }
+  if (mode === 'combat') {
+    forceNavigationRail.value = false
+    return
+  }
+  forceNavigationRail.value = false
+}
+
+const leftRailMode = computed<'navigation' | 'combat'>(() => {
+  if (leftRailState.value.combatVisible && !forceNavigationRail.value) {
+    return 'combat'
+  }
+  return 'navigation'
+})
+
+const showCollapseButton = computed(() => currentTab.value === 'chat')
+
+onMounted(() => {
+  window.addEventListener(LEFT_RAIL_UPDATED_EVENT, handleLeftRailUpdated as EventListener)
+  window.addEventListener(LEFT_RAIL_OVERRIDE_EVENT, handleLeftRailOverride as EventListener)
+})
+
+onUnmounted(() => {
+  window.removeEventListener(LEFT_RAIL_UPDATED_EVENT, handleLeftRailUpdated as EventListener)
+  window.removeEventListener(LEFT_RAIL_OVERRIDE_EVENT, handleLeftRailOverride as EventListener)
+})
+
+watch(leftRailMode, (mode) => {
+  notifyLeftRailMode(mode)
+}, { immediate: true })
 
 </script>
 

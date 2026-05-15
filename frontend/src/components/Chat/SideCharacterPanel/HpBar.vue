@@ -1,6 +1,6 @@
 <template>
-  <div class="hpbar-container">
-    <div class="hpbar-header">
+  <div class="hpbar-container" :class="{ compact }">
+    <div v-if="!compact" class="hpbar-header">
       <span class="hpbar-name">{{ name }}</span>
       <span class="hpbar-value">{{ displayedHp }} / {{ maxHp }}</span>
     </div>
@@ -27,6 +27,7 @@ const props = defineProps<{
   oldHp: number
   newHp: number
   maxHp: number
+  compact?: boolean
 }>()
 
 const displayedHp = ref(props.oldHp)
@@ -59,6 +60,10 @@ watch(
 .hpbar-container {
   width: 100%;
   margin-bottom: 12px;
+}
+
+.hpbar-container.compact {
+  margin-bottom: 0;
 }
 
 .hpbar-header {

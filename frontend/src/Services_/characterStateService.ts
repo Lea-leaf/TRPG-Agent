@@ -31,6 +31,7 @@ export interface InventoryItemData {
 
 export interface PlayerState {
   // 基础信息
+  id?: string
   name: string
   role_class: string
   level: number
@@ -63,8 +64,16 @@ export interface PlayerState {
 
   // 经验与职业特性
   xp?: number                         // 经验值
-  class_features?: Record<string, any> // 职业特性（字典，具体结构取决于职业）
+  class_features?: string[] | Record<string, any> // 职业特性可能是列表或映射，前端只做轻量读取
   arcane_tradition?: string           // 奥术传统（法师学派等）
+
+  // 战斗中的临时动作经济字段由后端直接挂到玩家对象上，前端只消费，不在本地重算。
+  speed?: number
+  movement_left?: number
+  action_available?: boolean
+  extra_action_available?: boolean
+  bonus_action_available?: boolean
+  reaction_available?: boolean
 }
 
 // 六维属性列表
