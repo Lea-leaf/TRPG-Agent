@@ -543,6 +543,16 @@ type MoveEligibility = {
   movementLeft?: number
 }
 
+type SelectedUnitPayload = {
+  id: string
+  name: string
+  side: string
+  x: number
+  y: number
+  hp?: number
+  isDead?: boolean
+}
+
 type LooseRecord = Record<string, any>
 
 const props = defineProps<{
@@ -552,6 +562,10 @@ const props = defineProps<{
   sceneUnits?: Record<string, any> | null
   deadUnits?: Record<string, any> | null
   sendTacticalMoveRequest?: ((message: string) => Promise<void>) | null
+}>()
+
+const emit = defineEmits<{
+  selectedUnitChange: [unit: SelectedUnitPayload | null]
 }>()
 
 const selectedUnitId = ref<string | null>(null)
@@ -753,6 +767,28 @@ const visibleUnits = computed<VisibleUnit[]>(() => {
 const selectedUnit = computed(() => {
   return visibleUnits.value.find((unit) => unit.id === selectedUnitId.value) ?? visibleUnits.value[0] ?? null
 })
+
+// 地图内部状态只在这里转换成稳定的页面级语义事件，外层无需感知 SpaceMap 的实现细节。
+watch(
+  selectedUnit,
+  (unit) => {
+    if (!unit) {
+      emit('selectedUnitChange', null)
+      return
+    }
+
+    emit('selectedUnitChange', {
+      id: unit.id,
+      name: unit.name,
+      side: unit.side,
+      x: unit.x,
+      y: unit.y,
+      hp: unit.hp,
+      isDead: unit.isDead,
+    })
+  },
+  { immediate: true },
+)
 
 const playerUnitId = computed(() => {
   if (!isRecord(props.player)) return null

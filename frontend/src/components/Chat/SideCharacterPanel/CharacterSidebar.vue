@@ -2,7 +2,18 @@
 <template>
   <div class="character-sidebar">
     <div class="panel-header">
-      <h3>{{ activePanelTitle }}</h3>
+      <div class="header-title-row">
+        <h3>{{ activePanelTitle }}</h3>
+        <button
+          v-if="showLeftRailToggleButton"
+          class="left-rail-toggle-btn"
+          type="button"
+          :title="leftRailToggleTitle"
+          @click="toggleLeftRailMode"
+        >
+          {{ leftRailToggleLabel }}
+        </button>
+      </div>
 
       <div ref="switcherRef" class="panel-switcher">
         <button
@@ -40,16 +51,12 @@
         :scene-units="sceneUnits"
         :dead-units="deadUnits"
         :send-tactical-move-request="sendTacticalMoveRequest"
+        @selected-unit-change="handleSelectedUnitChange"
       />
 
       <CharacterPanel
         v-if="activePanel === 'character'"
         :external-player="externalPlayer"
-      />
-      <HpOverviewPanel
-        v-else-if="activePanel === 'hp'"
-        :external-player="externalPlayer"
-        :combat="combat"
       />
       <InventoryPanel
         v-else
@@ -64,13 +71,14 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ArrowLeftRight } from 'lucide-vue-next'
 import SpaceMap from '../SpaceMap.vue'
 import CharacterPanel from './CharacterPanel.vue'
-import HpOverviewPanel from './HpOverviewPanel.vue'
 import InventoryPanel from './InventoryPanel.vue'
+import { LEFT_RAIL_MODE_EVENT, overrideLeftRailMode } from '../../../Services_/leftRailService'
 import type { PlayerState } from '../../../Services_/characterStateService'
+import type { AvailabilitySelectionUnit } from '../../../Services_/actionAvailabilityService'
 
-type SidebarPanelMode = 'character' | 'hp' | 'inventory'
+type SidebarPanelMode = 'character' | 'inventory'
 
-defineProps<{
+const props = defineProps<{
   externalPlayer: PlayerState | null
   combat?: any | null
   space?: any | null
@@ -79,10 +87,13 @@ defineProps<{
   sendTacticalMoveRequest?: ((message: string) => Promise<void>) | null
 }>()
 
-const panelOrder: SidebarPanelMode[] = ['character', 'hp', 'inventory']
+const emit = defineEmits<{
+  selectedUnitChange: [unit: AvailabilitySelectionUnit | null]
+}>()
+
+const panelOrder: SidebarPanelMode[] = ['character', 'inventory']
 const panelTitles: Record<SidebarPanelMode, string> = {
   character: '角色状态',
-  hp: '生命值概览',
   inventory: '背包',
 }
 
@@ -90,8 +101,13 @@ const panelTitles: Record<SidebarPanelMode, string> = {
 const activePanel = ref<SidebarPanelMode>('character')
 const isMenuOpen = ref(false)
 const switcherRef = ref<HTMLElement | null>(null)
+const selectedUnit = ref<AvailabilitySelectionUnit | null>(null)
+const leftRailMode = ref<'navigation' | 'combat'>('navigation')
 
 const activePanelTitle = computed(() => panelTitles[activePanel.value])
+const showLeftRailToggleButton = computed(() => isCombatActive(props.combat))
+const leftRailToggleLabel = computed(() => leftRailMode.value === 'combat' ? '返回导航' : '显示时间轴')
+const leftRailToggleTitle = computed(() => leftRailMode.value === 'combat' ? '切回默认导航栏' : '切回战斗时间轴')
 
 // 切换菜单改成显式选择，避免轮播式切换误触
 const toggleMenu = () => {
@@ -107,6 +123,21 @@ const selectPanel = (mode: SidebarPanelMode) => {
   setViewMode(mode)
 }
 
+// 侧栏继续做轻量转发层，避免聊天页直接依赖地图组件。
+const handleSelectedUnitChange = (unit: AvailabilitySelectionUnit | null) => {
+  selectedUnit.value = unit
+  emit('selectedUnitChange', unit)
+}
+
+const toggleLeftRailMode = () => {
+  overrideLeftRailMode(leftRailMode.value === 'combat' ? 'navigation' : 'combat')
+}
+
+const handleLeftRailMode = (event: Event) => {
+  const mode = (event as CustomEvent<'navigation' | 'combat'>).detail
+  leftRailMode.value = mode
+}
+
 // 点击外部区域时关闭浮层，保持轻量原生感
 const handleDocumentClick = (event: MouseEvent) => {
   if (!switcherRef.value) return
@@ -116,16 +147,24 @@ const handleDocumentClick = (event: MouseEvent) => {
 
 onMounted(() => {
   document.addEventListener('click', handleDocumentClick)
+  window.addEventListener(LEFT_RAIL_MODE_EVENT, handleLeftRailMode as EventListener)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleDocumentClick)
+  window.removeEventListener(LEFT_RAIL_MODE_EVENT, handleLeftRailMode as EventListener)
 })
 
 defineExpose({
   setViewMode,
   selectPanel,
 })
+
+function isCombatActive(combat: unknown): boolean {
+  if (!combat || typeof combat !== 'object') return false
+  const participants = (combat as Record<string, any>).participants
+  return !!(participants && typeof participants === 'object' && Object.keys(participants).length > 0)
+}
 </script>
 
 <style scoped>
@@ -151,10 +190,34 @@ defineExpose({
   position: relative;
 }
 
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .panel-header h3 {
   margin: 0;
   font-size: 18px;
   padding-top: 6px;
+}
+
+.left-rail-toggle-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(201, 168, 123, 0.22);
+  border-radius: 999px;
+  background: rgba(201, 168, 123, 0.08);
+  color: #dcc092;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.left-rail-toggle-btn:hover {
+  background: rgba(201, 168, 123, 0.14);
+  border-color: rgba(201, 168, 123, 0.34);
 }
 
 .panel-switcher {

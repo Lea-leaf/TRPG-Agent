@@ -53,7 +53,7 @@ import { computed, inject, watch, onUnmounted, reactive, ref, type ComputedRef }
 import { marked } from 'marked'
 import type { ChatMessage } from '../../Services_/chatService'
 import HpBar from './SideCharacterPanel/HpBar.vue'
-import DiceRollCard from './DiceRollCard.vue'
+import DiceRollCard from '../Dice3D/DiceRollCard.vue'
 import { adaptLLMOutput } from '../../composables/markdownAdapter'
 import { useTypewriter } from '../../composables/useTypewriter'
 
