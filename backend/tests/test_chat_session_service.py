@@ -6,6 +6,7 @@ from uuid import UUID
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.adventures.runtime import AdventurePreTurnDecision, AdventureProgressDecision, AdventureRuntimeUpdate
+from app.memory.context_assembler import ADVENTURE_NODE_FRAME_MESSAGE_PREFIX
 from app.services.chat_session_service import ChatSessionService
 
 
@@ -31,6 +32,12 @@ class FakeGraph:
         self.last_config = config
         self.values = {**self.values, **self.result}
         return self.result
+
+    async def astream(self, graph_input, config, stream_mode):
+        self.last_input = graph_input
+        self.last_config = config
+        self.values = {**self.values, **self.result}
+        yield {"assistant": self.result}
 
     async def aget_state(self, config):
         self.last_config = config
@@ -141,6 +148,17 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("episodic-demo", graph.state_updates[0]["session_id"])
         self.assertEqual([], graph.state_updates[0]["episodic_context"])
 
+    async def test_runtime_context_appends_initial_adventure_node_frame(self):
+        graph = FakeGraph({"messages": [AIMessage(content="继续推进。", tool_calls=[])]})
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
+
+        await service.process_turn(message="继续", session_id="initial-node-frame-demo")
+
+        first_update = graph.state_updates[0]
+        self.assertEqual("adventure_hook_meet_me_in_phandalin", first_update["adventure"]["active_node_id"])
+        self.assertTrue(first_update["messages"][0].content.startswith(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX))
+        self.assertIn('"node_id":"adventure_hook_meet_me_in_phandalin"', first_update["messages"][0].content)
+
     async def test_process_turn_generates_session_id_when_missing(self):
         graph = FakeGraph({"messages": [AIMessage(content="ok", tool_calls=[])]})
         service = ChatSessionService(graph=graph, adventure_director=_noop_director())
@@ -163,6 +181,26 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         mock_trace_result.assert_called_once()
         self.assertEqual("trace-demo", mock_trace_request.call_args.args[0])
         self.assertEqual("trace-demo", mock_trace_result.call_args.args[0])
+
+    async def test_process_turn_stream_skips_blank_assistant_messages(self):
+        graph = FakeGraph({
+            "messages": [
+                AIMessage(content="\n\n", tool_calls=[]),
+                AIMessage(content="格林拔剑。", tool_calls=[]),
+            ],
+            "phase": "combat",
+        })
+        service = ChatSessionService(graph=graph, adventure_director=_noop_director())
+
+        events = [
+            event
+            async for event in service.process_turn_stream(message="继续", session_id="stream-blank-demo")
+        ]
+
+        assistant_events = [event for event in events if event.startswith("event: assistant_message")]
+        self.assertEqual(1, len(assistant_events))
+        self.assertIn("格林拔剑。", assistant_events[0])
+        self.assertNotIn("\\n\\n", assistant_events[0])
 
     async def test_process_turn_appends_reward_announcement_after_model_reply(self):
         graph = FakeGraph({
@@ -230,6 +268,45 @@ class ChatSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("goblin_trail_to_cragmaw_hideout", result["adventure"]["active_node_id"])
         self.assertEqual(1, len(director.calls))
         self.assertEqual("adventure-runtime-demo", director.calls[0]["session_id"])
+
+    async def test_adventure_runtime_appends_node_frame_only_when_active_node_changes(self):
+        graph = FakeGraph({
+            "messages": [AIMessage(content="地精倒下。", tool_calls=[])],
+            "phase": "exploration",
+            "adventure": {
+                "module_id": "lost_mine",
+                "active_node_id": "goblin_ambush",
+                "unlocked_node_ids": ["adventure_hook_meet_me_in_phandalin", "goblin_ambush"],
+                "completed_node_ids": [],
+                "known_clue_ids": [],
+                "completed_event_ids": [],
+                "pending_exit_option_ids": [],
+            },
+        })
+        director = FakeAdventureDirector(
+            AdventureProgressDecision(
+                exit_option_id="investigate_goblin_trail",
+                transition_kind="advance",
+                confidence=0.9,
+            )
+        )
+        service = ChatSessionService(graph=graph, adventure_director=director)
+
+        await service.process_turn(message="追踪地精", session_id="node-frame-demo")
+
+        frame_updates = [
+            update
+            for update in graph.state_updates
+            if update.get("messages")
+            and str(update["messages"][0].content).startswith(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX)
+        ]
+        self.assertEqual(2, len(frame_updates))
+        self.assertIn('"node_id":"adventure_hook_meet_me_in_phandalin"', frame_updates[0]["messages"][0].content)
+        self.assertIn('"node_id":"goblin_trail_to_cragmaw_hideout"', frame_updates[1]["messages"][0].content)
+
+        duplicate = service._adventure_node_frame_update(SimpleNamespace(values=graph.values), graph.values["adventure"])
+
+        self.assertEqual({}, duplicate)
 
     async def test_process_turn_passes_full_message_history_to_adventure_director(self):
         graph = FakeGraph({

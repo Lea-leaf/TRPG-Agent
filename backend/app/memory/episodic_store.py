@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
+from app.utils.storage_paths import resolve_memory_db_path
 
 
 class EpisodicStore:
@@ -27,10 +28,7 @@ class EpisodicStore:
             if self._conn is not None:
                 return
 
-            db_file = Path(self._db_path)
-            if not db_file.is_absolute():
-                db_file = Path.cwd() / db_file
-            db_file.parent.mkdir(parents=True, exist_ok=True)
+            db_file = resolve_memory_db_path(self._db_path)
 
             conn = await aiosqlite.connect(str(db_file))
             await conn.execute("PRAGMA journal_mode = WAL")

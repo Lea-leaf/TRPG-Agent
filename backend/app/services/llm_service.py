@@ -34,6 +34,7 @@ class LLMService:
             temperature=settings.llm_temperature,
             timeout=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
+            thinking_mode=settings.llm_thinking_mode,
         )
         self._summary_client: ChatOpenAI | None = None
 
@@ -45,6 +46,7 @@ class LLMService:
         temperature: float,
         timeout: float,
         max_retries: int,
+        thinking_mode: Literal["enabled", "disabled"] | None,
     ) -> ChatOpenAI:
         build_kwargs: dict[str, Any] = {
             **client_kwargs,
@@ -53,7 +55,7 @@ class LLMService:
             "timeout": timeout,
             "max_retries": max_retries,
         }
-        thinking_extra_body = self._thinking_extra_body_for_model(model)
+        thinking_extra_body = self._thinking_extra_body(thinking_mode)
         if thinking_extra_body:
             build_kwargs["extra_body"] = thinking_extra_body
 
@@ -62,8 +64,8 @@ class LLMService:
         )
 
     # 中文注释：项目更看重工具链路效率与稳定性，默认关闭各家 OpenAI 兼容模型的 thinking。
-    def _thinking_extra_body_for_model(self, model: str) -> dict[str, dict[str, str]] | None:
-        if settings.llm_thinking_mode == "enabled":
+    def _thinking_extra_body(self, thinking_mode: Literal["enabled", "disabled"] | None) -> dict[str, dict[str, str]] | None:
+        if thinking_mode == "enabled":
             return None
         return {"thinking": {"type": "disabled"}}
 
@@ -152,12 +154,22 @@ class LLMService:
     def _get_summary_client(self) -> ChatOpenAI:
         if self._summary_client is None:
             summary_model = (settings.memory_summary_model or "").strip() or settings.llm_model
+            summary_client_kwargs = dict(self._client_kwargs)
+            summary_api_key = settings.memory_summary_api_key.strip()
+            if summary_api_key:
+                summary_client_kwargs["api_key"] = summary_api_key
+            summary_base_url = settings.memory_summary_base_url
+            if summary_base_url and summary_base_url.strip():
+                summary_client_kwargs["base_url"] = summary_base_url.strip()
+            else:
+                summary_client_kwargs.pop("base_url", None)
             self._summary_client = self._build_client(
-                self._client_kwargs,
+                summary_client_kwargs,
                 model=summary_model,
                 temperature=settings.memory_summary_temperature,
                 timeout=settings.memory_summary_timeout_seconds,
                 max_retries=settings.memory_summary_max_retries,
+                thinking_mode=settings.memory_summary_thinking_mode or settings.llm_thinking_mode,
             )
         return self._summary_client
 

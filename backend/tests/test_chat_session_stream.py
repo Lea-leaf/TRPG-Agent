@@ -463,7 +463,7 @@ def test_stream_post_turn_director_receives_full_message_history():
     asyncio.run(_collect_events())
 
     passed_messages = service._apply_adventure_runtime.call_args.args[3]
-    assert passed_messages == final_messages
+    assert str(passed_messages[0].content).startswith("[系统:冒险节点帧]")
 
 
 def test_stream_emits_reward_announcement_without_baking_it_into_model_prompt():

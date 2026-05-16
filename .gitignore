@@ -53,6 +53,7 @@ yarn.lock
 backend/data/context_memory.sqlite3
 backend/data/context_memory.sqlite3-shm
 backend/data/context_memory.sqlite3-wal
+backend/data/model_profiles.json
 AGENTS.md
 data/context_memory.sqlite3
 # Local runtime logs. Keep trace directories available for explicit debug exports.

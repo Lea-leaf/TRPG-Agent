@@ -62,3 +62,97 @@ export function resetAppSettings(): AppSettings {
   saveAppSettings(resetValue)
   return resetValue
 }
+
+export type ThinkingMode = 'enabled' | 'disabled'
+
+export interface ModelEndpointConfig {
+  model: string
+  api_key: string
+  base_url: string
+  temperature: number
+  timeout_seconds: number
+  max_retries: number
+  thinking_mode: ThinkingMode
+}
+
+export interface ModelProfile {
+  id: string
+  name: string
+  llm: ModelEndpointConfig
+  summary: ModelEndpointConfig
+  embedding: ModelEndpointConfig
+  rerank: ModelEndpointConfig
+  memory_summary_enabled: boolean
+}
+
+export interface ModelConfigState {
+  active_profile_id: string
+  profiles: ModelProfile[]
+}
+
+export const DEFAULT_ENDPOINT_CONFIG: ModelEndpointConfig = {
+  model: '',
+  api_key: '',
+  base_url: '',
+  temperature: 0.7,
+  timeout_seconds: 60,
+  max_retries: 1,
+  thinking_mode: 'disabled',
+}
+
+const requestModelConfig = async <T>(url: string, options?: RequestInit): Promise<T> => {
+  const response = await fetch(url, options)
+  if (!response.ok) {
+    throw new Error(`模型配置请求失败（HTTP ${response.status}）`)
+  }
+  return await response.json()
+}
+
+// 后端保存后会立即刷新运行时 settings，前端无需额外触发重启或重连。
+export const modelConfigService = {
+  async load(): Promise<ModelConfigState> {
+    return await requestModelConfig<ModelConfigState>('/api/model-config')
+  },
+
+  async save(state: ModelConfigState): Promise<ModelConfigState> {
+    return await requestModelConfig<ModelConfigState>('/api/model-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    })
+  },
+
+  async activate(activeProfileId: string): Promise<ModelConfigState> {
+    return await requestModelConfig<ModelConfigState>('/api/model-config/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active_profile_id: activeProfileId }),
+    })
+  },
+}
+
+export const cloneEndpointConfig = (endpoint: ModelEndpointConfig = DEFAULT_ENDPOINT_CONFIG): ModelEndpointConfig => ({
+  ...endpoint,
+})
+
+export const createModelProfile = (base?: ModelProfile): ModelProfile => {
+  const source = base ?? {
+    id: '',
+    name: '新方案',
+    llm: DEFAULT_ENDPOINT_CONFIG,
+    summary: DEFAULT_ENDPOINT_CONFIG,
+    embedding: { ...DEFAULT_ENDPOINT_CONFIG, temperature: 0 },
+    rerank: { ...DEFAULT_ENDPOINT_CONFIG, temperature: 0, timeout_seconds: 30 },
+    memory_summary_enabled: true,
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    name: `${source.name} 副本`,
+    llm: cloneEndpointConfig(source.llm),
+    summary: cloneEndpointConfig(source.summary),
+    embedding: cloneEndpointConfig(source.embedding),
+    rerank: cloneEndpointConfig(source.rerank),
+    memory_summary_enabled: source.memory_summary_enabled,
+  }
+}

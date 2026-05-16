@@ -1,12 +1,13 @@
 import logging
+import re
 from typing import List, Optional
 import pickle
 from pathlib import Path
+from dataclasses import dataclass
 import jieba
 import requests
 
 from langchain_core.documents import Document
-from langchain.retrievers.ensemble import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
@@ -15,35 +16,68 @@ from langchain_chroma import Chroma
 from app.config.settings import settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
-DB_PATH = Path(settings.rag_db_dir)
+DB_PATH = Path(settings.rag_core_cn_db_dir)
 if not DB_PATH.is_absolute():
     DB_PATH = BACKEND_DIR / DB_PATH
 BM25_PATH = DB_PATH / "bm25_index.pkl"
 
 logger = logging.getLogger(__name__)
 
+QUERY_SYNONYMS = {
+    "准备动作": ["预备"],
+    "准备": ["预备"],
+    "反制法术": ["法术反制"],
+    "邪术师": ["术士"],
+    "术士": ["邪术师"],
+    "奥法恢复": ["奥术回想"],
+}
+
+
+@dataclass(slots=True)
+class RankedDocument:
+    document: Document
+    score: float
+
+
 class TRPGHybridRetriever:
-    def __init__(self):
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        bm25_path: Optional[Path] = None,
+        bm25_documents: Optional[List[Document]] = None,
+        candidate_k: int = 30,
+    ):
+        self.db_path = Path(db_path) if db_path else DB_PATH
+        if not self.db_path.is_absolute():
+            self.db_path = BACKEND_DIR / self.db_path
+        self.bm25_path = Path(bm25_path) if bm25_path else self.db_path / "bm25_index.pkl"
+        self.candidate_k = candidate_k
+
         # 反序列化底层文本并快速重建BM25；若索引缺失则降级到向量检索。
         self.bm25_retriever = None
-        if BM25_PATH.exists():
+        if bm25_documents is not None:
+            self.bm25_retriever = BM25Retriever.from_documents(
+                bm25_documents,
+                preprocess_func=jieba.lcut,
+            )
+            self.bm25_retriever.k = self.candidate_k
+        elif self.bm25_path.exists():
             try:
-                with open(BM25_PATH, "rb") as f:
+                with open(self.bm25_path, "rb") as f:
                     bm25_chunks = pickle.load(f)
 
                 self.bm25_retriever = BM25Retriever.from_documents(
                     bm25_chunks,
                     preprocess_func=jieba.lcut
                 )
-                # 将基础检索召回数量扩大
-                self.bm25_retriever.k = 10
+                self.bm25_retriever.k = self.candidate_k
             except Exception as exc:
                 logger.warning(
                     "BM25 retriever unavailable; continue without BM25. reason=%s",
                     exc,
                 )
         else:
-            logger.warning("BM25 index missing; continue without BM25. path=%s", BM25_PATH)
+            logger.warning("BM25 index missing; continue without BM25. path=%s", self.bm25_path)
 
         # 尝试初始化向量检索，如果嵌入模型或接口不兼容，则自动降级到BM25-only
         self.embeddings = None
@@ -53,10 +87,12 @@ class TRPGHybridRetriever:
                 model=settings.embedding_model,
                 api_key=settings.embedding_api_key,
                 base_url=settings.embedding_base_url,
+                timeout=settings.embedding_timeout_seconds,
+                max_retries=settings.embedding_max_retries,
                 check_embedding_ctx_length=False,
             )
             self.vectorstore = Chroma(
-                persist_directory=str(DB_PATH),
+                persist_directory=str(self.db_path),
                 embedding_function=self.embeddings,
             )
         except Exception as exc:
@@ -69,8 +105,9 @@ class TRPGHybridRetriever:
         self.rerank_url = self._build_rerank_url(settings.rerank_base_url)
         self.rerank_api_key = settings.rerank_api_key
         self.rerank_model = settings.rerank_model
+        self.rerank_timeout_seconds = settings.rerank_timeout_seconds
 
-    def _build_vector_retriever(self, filter_category: Optional[str], top_k: int = 10):
+    def _build_vector_retriever(self, filter_category: Optional[str], top_k: int = 30):
         if self.vectorstore is None:
             return None
 
@@ -78,24 +115,6 @@ class TRPGHybridRetriever:
         if filter_category:
             search_kwargs["filter"] = {"category": filter_category}
         return self.vectorstore.as_retriever(search_kwargs=search_kwargs)
-
-    def get_ensemble_retriever(self, filter_category: Optional[str] = None):
-        bm25_retriever = self.bm25_retriever
-        chroma_retriever = self._build_vector_retriever(filter_category, top_k=10)
-
-        if bm25_retriever is not None and chroma_retriever is not None:
-            base_retriever = EnsembleRetriever(
-                retrievers=[bm25_retriever, chroma_retriever],
-                weights=[0.5, 0.5],
-            )
-        elif bm25_retriever is not None:
-            base_retriever = bm25_retriever
-        elif chroma_retriever is not None:
-            base_retriever = chroma_retriever
-        else:
-            raise RuntimeError("No available retriever backend (BM25 and vector are both unavailable).")
-
-        return base_retriever
 
     @staticmethod
     def _build_rerank_url(base_url: Optional[str]) -> Optional[str]:
@@ -109,50 +128,171 @@ class TRPGHybridRetriever:
             return results
         return [doc for doc in results if doc.metadata.get("category") == filter_category]
 
+    @staticmethod
+    def _document_key(doc: Document) -> tuple[str, str, str, str]:
+        metadata = doc.metadata
+        stable_id = str(
+            metadata.get("parent_anchor_id")
+            or metadata.get("anchor_id")
+            or metadata.get("section_path")
+            or metadata.get("section")
+            or ""
+        )
+        chunk_index = str(metadata.get("chunk_index", ""))
+        page_start = str(metadata.get("page_start", ""))
+        content = re.sub(r"\s+", "", doc.page_content or "")[:120]
+        return stable_id, chunk_index, page_start, content
+
+    @staticmethod
+    def _query_terms(query: str) -> list[str]:
+        text = query or ""
+        terms: list[str] = []
+        terms.extend(re.findall(r"[a-zA-Z][a-zA-Z ]{2,}", text.lower()))
+        terms.extend(
+            token
+            for token in jieba.lcut(text)
+            if len(token) >= 2 and re.search(r"[\u4e00-\u9fff]", token)
+        )
+        blocked = {"什么", "怎么", "多少", "分别", "时候", "可以", "如何", "是否", "一个", "进行"}
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            normalized = term.lower().strip()
+            if normalized in blocked or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(term)
+        return deduped
+
+    @staticmethod
+    def _expanded_query_text(query: str) -> str:
+        """补齐常见玩家译名，解决用户用语和书内译名不一致的问题。"""
+        additions: list[str] = []
+        for source, targets in QUERY_SYNONYMS.items():
+            if source in query:
+                additions.extend(targets)
+        return " ".join([query, *additions]).strip()
+
+    @staticmethod
+    def _leading_query_term(query: str) -> str:
+        match = re.match(r"([\u4e00-\u9fff]{2,10})(?:的|是|会|能|在|面对|给|把|触发|什么时候)", query or "")
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _leading_query_relation(query: str) -> str:
+        match = re.match(r"[\u4e00-\u9fff]{2,10}(的|是|会|能|在|面对|给|把|触发|什么时候)", query or "")
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _title_zh(title: str) -> str:
+        match = re.match(r"([\u4e00-\u9fff·（）]+)", (title or "").strip())
+        return match.group(1) if match else ""
+
+    def _metadata_boost(
+        self,
+        query: str,
+        doc: Document,
+        filter_category: Optional[str],
+    ) -> int:
+        title = str(doc.metadata.get("title") or doc.metadata.get("section") or "").lower()
+        section_path = str(doc.metadata.get("section_path") or "").lower()
+        content = (doc.page_content or "").lower()
+        expanded_query = self._expanded_query_text(query)
+        title_zh = self._title_zh(str(doc.metadata.get("title") or doc.metadata.get("section") or ""))
+        leading_term = self._leading_query_term(expanded_query)
+        score = 0
+        if filter_category and doc.metadata.get("category") == filter_category:
+            score += 20
+        # 查询开头的书名/位面/怪物名常是上下文，后续出现的完整标题短语更接近用户真正要查的小节。
+        leading_relation = self._leading_query_relation(expanded_query)
+        leading_is_context = leading_relation == "的"
+        if title_zh and title_zh in expanded_query:
+            if len(title_zh) >= 3 and title_zh != leading_term and leading_is_context:
+                score += 110
+            else:
+                score += 40 if len(title_zh) >= 3 else 12
+        if leading_term and leading_term == title_zh and not leading_is_context:
+            score += 30
+        if leading_term and leading_term in title_zh and not leading_is_context:
+            score += 25
+        for term in self._query_terms(expanded_query):
+            lowered = term.lower()
+            if lowered in title:
+                score += 12
+            elif lowered in section_path:
+                score += 4
+            if lowered in content:
+                score += 3
+        return score
+
+    def _dedupe_documents(self, docs: List[Document]) -> List[Document]:
+        deduped: list[Document] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for doc in docs:
+            key = self._document_key(doc)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(doc)
+        return deduped
+
+    def _candidate_documents(self, query: str, filter_category: Optional[str]) -> List[Document]:
+        candidates: list[Document] = []
+        expanded_query = self._expanded_query_text(query)
+
+        if self.bm25_retriever is not None:
+            self.bm25_retriever.k = self.candidate_k
+            try:
+                candidates.extend(self.bm25_retriever.invoke(expanded_query))
+            except Exception as exc:
+                logger.warning("BM25 retrieval failed. reason=%s", exc)
+
+        vector_retriever = self._build_vector_retriever(filter_category, top_k=self.candidate_k)
+        if vector_retriever is not None:
+            try:
+                candidates.extend(vector_retriever.invoke(query))
+            except Exception as exc:
+                logger.warning("Vector retrieval failed. reason=%s", exc)
+
+        if not candidates:
+            raise RuntimeError("No available retriever backend (BM25 and vector are both unavailable or returned no candidates).")
+
+        filtered = self._apply_category_filter(candidates, filter_category)
+        return self._dedupe_documents(filtered or candidates)
+
     def search(self, query: str, filter_category: Optional[str] = None, top_k: int = 3) -> List[Document]:
-        # 动态赋值期望的返回结果数
         try:
-            retriever = self.get_ensemble_retriever(filter_category)
+            candidates = self._candidate_documents(query, filter_category)
         except Exception as exc:
             logger.warning(
-                "No retriever backend available at initialization stage. reason=%s",
+                "Hybrid retrieval failed. reason=%s",
                 exc,
             )
             return []
 
-        try:
-            results = retriever.invoke(query)
-        except Exception as exc:
-            logger.warning(
-                "Hybrid retrieval failed at query time; fallback to single backend. reason=%s",
-                exc,
-            )
-            if self.bm25_retriever is not None:
-                try:
-                    self.bm25_retriever.k = top_k
-                    fallback_results = self.bm25_retriever.invoke(query)
-                    filtered_fallback = self._apply_category_filter(fallback_results, filter_category)
-                    return filtered_fallback[:top_k]
-                except Exception as bm25_exc:
-                    logger.warning("BM25 fallback failed. reason=%s", bm25_exc)
-
-            vector_fallback = self._build_vector_retriever(filter_category, top_k=top_k)
-            if vector_fallback is not None:
-                try:
-                    fallback_results = vector_fallback.invoke(query)
-                    filtered_fallback = self._apply_category_filter(fallback_results, filter_category)
-                    return filtered_fallback[:top_k]
-                except Exception as vector_exc:
-                    logger.warning("Vector fallback failed. reason=%s", vector_exc)
-
-            return []
-
-        filtered_results = self._apply_category_filter(results, filter_category)
-        return self._rerank(query, filtered_results, top_k)
+        rerank_top_n = min(max(top_k * 3, top_k), len(candidates))
+        reranked = self._rerank(query, candidates, rerank_top_n)
+        metadata_hits = sorted(
+            candidates,
+            key=lambda doc: self._metadata_boost(query, doc, filter_category),
+            reverse=True,
+        )[: max(top_k * 2, top_k)]
+        ranked_pool = self._dedupe_documents([*reranked, *metadata_hits])
+        return sorted(
+            ranked_pool,
+            key=lambda doc: self._metadata_boost(query, doc, filter_category),
+            reverse=True,
+        )[:top_k]
 
     def _rerank(self, query: str, docs: List[Document], top_k: int) -> List[Document]:
+        ranked = self._rerank_with_scores(query, docs, top_k)
+        if ranked:
+            return [item.document for item in ranked[:top_k]]
+        return docs[:top_k]
+
+    def _rerank_with_scores(self, query: str, docs: List[Document], top_k: int) -> list[RankedDocument]:
         if not docs or not self.rerank_url or not self.rerank_api_key:
-            return docs[:top_k]
+            return []
 
         try:
             response = requests.post(
@@ -168,19 +308,21 @@ class TRPGHybridRetriever:
                     "top_n": min(top_k, len(docs)),
                     "return_documents": False,
                 },
-                timeout=30,
+                timeout=self.rerank_timeout_seconds,
             )
             response.raise_for_status()
             payload = response.json()
-            ranked_docs = [
-                docs[item["index"]]
-                for item in payload.get("results", [])
-                if 0 <= item.get("index", -1) < len(docs)
-            ]
-            return ranked_docs[:top_k] or docs[:top_k]
+            ranked_docs: list[RankedDocument] = []
+            for item in payload.get("results", []):
+                index = item.get("index", -1)
+                if not 0 <= index < len(docs):
+                    continue
+                score = item.get("relevance_score", item.get("score", 0.0))
+                ranked_docs.append(RankedDocument(document=docs[index], score=float(score)))
+            return ranked_docs[:top_k]
         except Exception as exc:
-            logger.warning("Cloud rerank unavailable; return ensemble results. reason=%s", exc)
-            return docs[:top_k]
+            logger.warning("Cloud rerank unavailable; skip scored rerank. reason=%s", exc)
+            return []
 
 if __name__ == "__main__":
     print("Initializing retriever")
