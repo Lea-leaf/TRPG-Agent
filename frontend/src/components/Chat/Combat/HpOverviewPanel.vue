@@ -293,7 +293,7 @@ function toNumber(value: unknown): number {
 .hp-overview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .overview-banner {
@@ -302,10 +302,13 @@ function toNumber(value: unknown): number {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 0;
   background:
-    linear-gradient(135deg, rgba(49, 35, 21, 0.92) 0%, rgba(27, 26, 23, 0.94) 100%);
-  border: 1px solid rgba(201, 168, 123, 0.18);
+    linear-gradient(180deg, rgba(35, 29, 24, 0.96) 0%, rgba(20, 18, 17, 0.94) 100%);
+  border: none;
+  box-shadow:
+    inset 0 12px 18px -16px rgba(255, 248, 235, 0.12),
+    inset 0 -18px 24px -20px rgba(255, 248, 235, 0.08);
 }
 
 .banner-copy {
@@ -331,7 +334,16 @@ function toNumber(value: unknown): number {
 .hp-unit-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
+  padding-right: 6px;
+  margin-top: -1px;
+  border-radius: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(20, 18, 17, 0.94) 0%, rgba(16, 15, 15, 0.94) 100%);
+  border: none;
+  box-shadow:
+    inset 0 20px 24px -22px rgba(0, 0, 0, 0.2);
 }
 
 .hp-overview-item {
@@ -340,16 +352,35 @@ function toNumber(value: unknown): number {
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+  border: none;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(24, 21, 19, 0.95) 0%, rgba(18, 16, 15, 0.95) 100%);
   color: inherit;
   text-align: left;
   transition:
     transform 0.26s ease,
-    border-color 0.26s ease,
     background 0.26s ease,
     box-shadow 0.26s ease;
+  box-shadow:
+    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+}
+
+.hp-overview-item + .hp-overview-item {
+  margin-top: 0;
+}
+
+.hp-overview-item:first-child {
+  box-shadow:
+    inset 0 1px 0 rgba(0, 0, 0, 0.2),
+    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+}
+
+.hp-overview-item:last-child {
+  box-shadow:
+    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
 }
 
 .hp-overview-item:disabled {
@@ -361,27 +392,36 @@ function toNumber(value: unknown): number {
 }
 
 .hp-overview-item.is-clickable:hover {
-  transform: translateY(-1px);
-  border-color: rgba(209, 178, 110, 0.28);
+  transform: translateX(2px);
+  background:
+    linear-gradient(180deg, rgba(24, 21, 19, 0.96) 0%, rgba(18, 16, 15, 0.96) 100%);
+  box-shadow:
+    inset 0 12px 18px -16px rgba(0, 0, 0, 0.28),
+    inset 0 -14px 18px -18px rgba(0, 0, 0, 0.2),
+    0 0 18px rgba(209, 178, 110, 0.08);
 }
 
 .hp-overview-item.is-active {
-  background: rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(24, 21, 19, 0.96) 0%, rgba(18, 16, 15, 0.96) 100%);
+  box-shadow:
+    inset 0 12px 18px -16px rgba(0, 0, 0, 0.3),
+    inset 0 -14px 18px -18px rgba(0, 0, 0, 0.22);
 }
 
 .hp-overview-item.is-enemy-turn {
-  border-color: rgba(217, 74, 74, 0.34);
   box-shadow:
-    0 0 0 1px rgba(217, 74, 74, 0.14) inset,
-    0 0 16px rgba(217, 74, 74, 0.18);
+    inset 18px 0 30px -18px rgba(239, 68, 68, 0.5),
+    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   animation: hostilePulse 1.8s ease-in-out infinite;
 }
 
 .hp-overview-item.is-player-turn {
-  border-color: rgba(214, 177, 97, 0.34);
   box-shadow:
-    0 0 0 1px rgba(214, 177, 97, 0.14) inset,
-    0 0 16px rgba(214, 177, 97, 0.18);
+    inset 18px 0 30px -18px rgba(245, 199, 103, 0.5),
+    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   animation: allyPulse 1.8s ease-in-out infinite;
 }
 
@@ -481,26 +521,30 @@ function toNumber(value: unknown): number {
 @keyframes hostilePulse {
   0%, 100% {
     box-shadow:
-      0 0 0 1px rgba(217, 74, 74, 0.12) inset,
-      0 0 12px rgba(217, 74, 74, 0.12);
+      inset 18px 0 26px -18px rgba(239, 68, 68, 0.42),
+      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(239, 68, 68, 0.3) inset,
-      0 0 24px rgba(239, 68, 68, 0.32);
+      inset 22px 0 34px -18px rgba(239, 68, 68, 0.58),
+      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   }
 }
 
 @keyframes allyPulse {
   0%, 100% {
     box-shadow:
-      0 0 0 1px rgba(214, 177, 97, 0.12) inset,
-      0 0 12px rgba(214, 177, 97, 0.12);
+      inset 18px 0 26px -18px rgba(245, 199, 103, 0.42),
+      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(245, 199, 103, 0.28) inset,
-      0 0 24px rgba(245, 199, 103, 0.28);
+      inset 22px 0 34px -18px rgba(245, 199, 103, 0.58),
+      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
+      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
   }
 }
 

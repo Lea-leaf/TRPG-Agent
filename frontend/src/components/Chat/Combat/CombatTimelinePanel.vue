@@ -44,10 +44,11 @@ const handleActionNotice = (text: string) => {
   position: sticky;
   top: 0;
   left: 0;
-  padding: 16px 14px;
-  background: rgba(18, 18, 24, 0.86);
-  backdrop-filter: blur(16px);
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0;
+  background:
+    linear-gradient(180deg, rgba(10, 10, 13, 0.96) 0%, rgba(16, 14, 16, 0.94) 100%);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(255, 244, 214, 0.07);
   color: #f3eee4;
   overflow-y: auto;
   -ms-overflow-style: none;
@@ -63,8 +64,6 @@ const handleActionNotice = (text: string) => {
 
 .combat-timeline-panel.collapsed {
   width: 72px;
-  padding-left: 8px;
-  padding-right: 8px;
 }
 
 </style>
