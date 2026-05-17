@@ -59,8 +59,10 @@
       :actor-name="playerDisplayName"
       :groups="actionGroups"
       :selected-target-name="selectedTargetName"
+      :target-options="targetOptions"
       @close="actionSheetOpen = false"
       @submit="handleActionSubmit"
+      @submit-with-target="handleTargetedActionSubmit"
       @blocked="handleActionBlocked"
       @end-turn="handleEndTurn"
     />
@@ -73,6 +75,7 @@ import CombatActionSheet from './CombatActionSheet.vue'
 import HpBar from '../SideCharacterPanel/HpBar.vue'
 import {
   buildCombatActionMenu,
+  buildCombatActionCommand,
   type CombatActionMenuGroup,
   type CombatActionMenuItem,
 } from '../../../Services_/combatActionCatalog'
@@ -91,6 +94,14 @@ type HpOverviewUnit = {
   initiativeLabel: string
   isCurrentActor: boolean
   isPlayerUnit: boolean
+}
+
+type CombatTargetOption = {
+  id: string
+  name: string
+  side: string
+  hp: number
+  maxHp: number
 }
 
 const props = defineProps<{
@@ -205,6 +216,18 @@ const actionGroups = computed<CombatActionMenuGroup[]>(() => {
   })
 })
 
+const targetOptions = computed<CombatTargetOption[]>(() => {
+  return hpUnits.value
+    .filter((unit) => unit.side === 'enemy' && unit.hp > 0)
+    .map((unit) => ({
+      id: unit.id,
+      name: unit.name,
+      side: unit.side,
+      hp: unit.hp,
+      maxHp: unit.maxHp,
+    }))
+})
+
 watch(
   currentActorId,
   (actorId) => {
@@ -231,6 +254,23 @@ const handleActionSubmit = async (item: CombatActionMenuItem) => {
 
   actionSheetOpen.value = false
   await props.sendCombatActionRequest(item.command)
+}
+
+/**
+ * 中文注释：武器等定向动作在面板层只补足目标，不重写后端动作协议。
+ */
+const handleTargetedActionSubmit = async (
+  payload: { item: CombatActionMenuItem; target: CombatTargetOption },
+) => {
+  if (!props.sendCombatActionRequest) {
+    emitActionNotice('当前聊天发送器不可用，暂时无法提交战斗动作。')
+    return
+  }
+
+  actionSheetOpen.value = false
+  await props.sendCombatActionRequest(
+    buildCombatActionCommand(payload.item.commandPrefix, payload.item.targetMode, payload.target),
+  )
 }
 
 const handleActionBlocked = (reason: string) => {

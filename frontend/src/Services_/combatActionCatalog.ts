@@ -19,6 +19,8 @@ export interface CombatActionMenuItem {
   label: string
   detail: string
   accent: 'weapon' | 'spell' | 'item' | 'class' | 'combat'
+  targetMode: TargetMode
+  commandPrefix: string
   command: string
   disabledReason?: string
 }
@@ -31,7 +33,9 @@ export interface CombatActionMenuGroup {
 }
 
 type ActionUsage = 'action' | 'bonus_action' | 'free'
-type TargetMode = 'enemy' | 'ally' | 'none'
+export type TargetMode = 'enemy' | 'ally' | 'none'
+
+type ActionCommandTarget = Pick<AvailabilitySelectionUnit, 'name' | 'side'>
 
 type ClassActionDefinition = {
   id: string
@@ -161,13 +165,15 @@ function buildWeaponItems(
   const weapons = context.player.weapons?.length ? context.player.weapons : [buildFallbackWeapon()]
 
   return weapons.map((weapon, index) => {
-    const targetClause = buildTargetClause(context.selectedUnit, 'enemy')
+    const commandPrefix = `我在本回合使用武器攻击，使用${translateWeaponName(weapon.name)}`
     return {
       id: `weapon-${weapon.name}-${index}`,
       label: translateWeaponName(weapon.name),
       detail: [weapon.damage_dice, weapon.damage_type].filter(Boolean).join(' · ') || '近战攻击',
       accent: 'weapon',
-      command: `我在本回合使用武器攻击，使用${translateWeaponName(weapon.name)}${targetClause}。`,
+      targetMode: 'enemy',
+      commandPrefix,
+      command: buildCombatActionCommand(commandPrefix, 'enemy', context.selectedUnit ?? null),
       disabledReason: resolveBlockingReason({
         reasonMap,
         usage: 'action',
@@ -193,6 +199,7 @@ function buildSpellItems(
       const translated = translateSpellName(spellId)
       const usage: ActionUsage = BONUS_ACTION_SPELL_IDS.has(spellId) ? 'bonus_action' : 'action'
       const slotBlocked = !isCantrip ? reasonMap.get('spell_slots_empty') : undefined
+      const commandPrefix = `我在本回合施放法术“${translated}”`
       return {
         id: `spell-${spellId}`,
         label: translated,
@@ -202,7 +209,9 @@ function buildSpellItems(
             ? '附赠动作法术。'
             : '标准施法。',
         accent: 'spell',
-        command: `我在本回合施放法术“${translated}”${buildTargetClause(context.selectedUnit, 'enemy')}。`,
+        targetMode: 'enemy',
+        commandPrefix,
+        command: buildCombatActionCommand(commandPrefix, 'enemy', context.selectedUnit ?? null),
         disabledReason: slotBlocked || resolveBlockingReason({
           reasonMap,
           usage,
@@ -222,6 +231,7 @@ function buildItemItems(
   return inventory.map((item, index) => {
     const label = resolveInventoryItemLabel(item)
     const quantity = Math.max(1, item.quantity ?? 1)
+    const commandPrefix = `我在本回合使用道具“${label}”`
     const detailParts = [
       resolveInventoryItemKind(item),
       quantity > 1 ? `数量 x${quantity}` : '单件',
@@ -233,7 +243,9 @@ function buildItemItems(
       label,
       detail: detailParts.join(' · '),
       accent: 'item',
-      command: `我在本回合使用道具“${label}”。`,
+      targetMode: 'none',
+      commandPrefix,
+      command: buildCombatActionCommand(commandPrefix, 'none'),
       disabledReason: resolveBlockingReason({
         reasonMap,
         usage: 'action',
@@ -260,15 +272,18 @@ function buildClassActionItems(
         ? '你已经拥有额外动作，不需要再次发动动作如潮。'
         : undefined
       const selectedTarget = action.targetMode === 'ally'
-        ? buildTargetClause(context.selectedUnit, 'ally')
-        : buildTargetClause(context.selectedUnit, 'enemy')
+        ? context.selectedUnit
+        : context.selectedUnit
+      const commandPrefix = `我在本回合使用职业动作“${action.label}”`
 
       return {
         id: `class-${action.id}`,
         label: action.label,
         detail: action.detail,
         accent: 'class',
-        command: `我在本回合使用职业动作“${action.label}”${selectedTarget}。`,
+        targetMode: action.targetMode,
+        commandPrefix,
+        command: buildCombatActionCommand(commandPrefix, action.targetMode, selectedTarget),
         disabledReason: resourceBlocked || extraActionBlocked || resolveBlockingReason({
           reasonMap,
           usage: action.usage,
@@ -287,13 +302,15 @@ function buildCombatActionItems(
   enemyCount: number,
 ): CombatActionMenuItem[] {
   return COMBAT_ACTIONS.map((action) => {
-    const targetClause = buildTargetClause(context.selectedUnit, action.targetMode)
+    const commandPrefix = `我在本回合选择战斗动作“${action.label}”`
     return {
       id: `combat-${action.id}`,
       label: action.label,
       detail: action.detail,
       accent: 'combat',
-      command: `我在本回合选择战斗动作“${action.label}”${targetClause}。`,
+      targetMode: action.targetMode,
+      commandPrefix,
+      command: buildCombatActionCommand(commandPrefix, action.targetMode, context.selectedUnit ?? null),
       disabledReason: resolveBlockingReason({
         reasonMap,
         usage: action.usage,
@@ -371,7 +388,18 @@ function countLivingEnemies(combat: Record<string, any> | null, playerUnitId: st
   }).length
 }
 
-function buildTargetClause(selectedUnit: AvailabilitySelectionUnit | null | undefined, targetMode: TargetMode): string {
+/**
+ * 中文注释：命令文案统一在这里拼接目标，避免面板二次手写不同句式。
+ */
+export function buildCombatActionCommand(
+  commandPrefix: string,
+  targetMode: TargetMode,
+  selectedUnit?: ActionCommandTarget | null,
+): string {
+  return `${commandPrefix}${buildTargetClause(selectedUnit, targetMode)}。`
+}
+
+function buildTargetClause(selectedUnit: ActionCommandTarget | null | undefined, targetMode: TargetMode): string {
   if (!selectedUnit || targetMode === 'none') return ''
   if (targetMode === 'enemy' && selectedUnit.side !== 'enemy') return ''
   if (targetMode === 'ally' && !isFriendlyUnit(selectedUnit.side)) return ''
