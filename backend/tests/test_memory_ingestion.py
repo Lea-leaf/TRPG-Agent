@@ -1,11 +1,16 @@
 import unittest
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+import psycopg
 
 from app.memory.episodic_store import EpisodicStore
 from app.memory.ingestion import MemoryIngestionPipeline
+from app.services.session_store import purge_chat_session_data
 
 
 class _FakeStore:
@@ -270,6 +275,66 @@ class MemoryIngestionPipelineTests(unittest.IsolatedAsyncioTestCase):
 
         turn_summary = store.records[1]["payload"]["summary"]
         self.assertEqual("主持人回应：石门背后传来锁链拖动声。", turn_summary)
+
+
+@unittest.skipUnless(os.getenv("TRPG_TEST_POSTGRES_URL"), "TRPG_TEST_POSTGRES_URL is not set")
+class PostgresEpisodicStoreIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.database_url = os.environ["TRPG_TEST_POSTGRES_URL"]
+        self.session_id = f"pg-memory-{uuid4()}"
+        self.other_session_id = f"pg-memory-other-{uuid4()}"
+        self.store = EpisodicStore(database_backend="postgres", database_url=self.database_url)
+
+    async def asyncTearDown(self):
+        await self.store.close()
+        async with await psycopg.AsyncConnection.connect(self.database_url) as conn:
+            await conn.execute("DELETE FROM episodic_memory WHERE session_id = %s", (self.session_id,))
+            await conn.execute("DELETE FROM episodic_memory WHERE session_id = %s", (self.other_session_id,))
+
+    async def test_postgres_store_writes_and_reads_session_memory(self):
+        await self.store.append_record(
+            session_id=self.session_id,
+            turn_id="turn-1",
+            record_kind="turn_summary",
+            payload={"summary": "你们在洞口发现了新鲜脚印。"},
+        )
+        await self.store.append_record(
+            session_id=self.session_id,
+            turn_id="turn-2",
+            record_kind="turn_summary",
+            payload={"summary": "哥布林的短弓声从林中传来。"},
+        )
+        await self.store.append_record(
+            session_id=self.other_session_id,
+            turn_id="turn-1",
+            record_kind="turn_summary",
+            payload={"summary": "不应被读取。"},
+        )
+
+        summaries = await self.store.fetch_recent_summaries(self.session_id)
+        records = await self.store.fetch_recent_records(self.session_id)
+
+        self.assertEqual(["你们在洞口发现了新鲜脚印。", "哥布林的短弓声从林中传来。"], summaries)
+        self.assertEqual(2, len(records))
+        self.assertTrue(all(record["payload"]["summary"] != "不应被读取。" for record in records))
+
+    async def test_purge_session_removes_postgres_episodic_memory(self):
+        await self.store.append_record(
+            session_id=self.session_id,
+            turn_id="turn-1",
+            record_kind="turn_summary",
+            payload={"summary": "即将删除。"},
+        )
+
+        with (
+            patch("app.services.session_store.settings.database_backend", "postgres"),
+            patch("app.services.session_store.settings.database_url", self.database_url),
+        ):
+            result = await purge_chat_session_data(self.session_id)
+
+        records = await self.store.fetch_recent_records(self.session_id)
+        self.assertEqual([], records)
+        self.assertGreaterEqual(result["deletedRows"], 1)
 
 
 if __name__ == "__main__":

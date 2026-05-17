@@ -760,7 +760,7 @@ async def get_chat_session_service() -> ChatSessionService:
         if _CHAT_SESSION_SERVICE is not None:
             return _CHAT_SESSION_SERVICE
 
-        graph = build_graph(checkpointer=await get_checkpointer(settings.memory_db_path))
+        graph = build_graph(checkpointer=await get_checkpointer(settings))
         _CHAT_SESSION_SERVICE = ChatSessionService(
             graph=graph,
         )

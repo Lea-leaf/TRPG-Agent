@@ -147,6 +147,42 @@ $env:TRPG_LLM_BASE_URL="你的模型服务地址"
 $env:TRPG_LLM_MODEL="你的模型名"
 ```
 
+### 数据库模式
+
+默认不设置数据库环境变量时，后端使用本地 PostgreSQL：
+
+```powershell
+docker compose -f docker-compose.postgres.yml up -d
+pnpm dev
+```
+
+默认连接地址与 `docker-compose.postgres.yml` 保持一致：
+
+```env
+TRPG_DATABASE_BACKEND=postgres
+TRPG_DATABASE_URL=postgresql://trpg:trpg@localhost:5432/trpg_agent
+```
+
+需要连接其他 PostgreSQL 实例时，再显式覆盖：
+
+```powershell
+$env:TRPG_DATABASE_BACKEND="postgres"
+$env:TRPG_DATABASE_URL="postgresql://trpg:trpg@localhost:5432/trpg_agent"
+pnpm dev
+```
+
+SQLite fallback 暂不删除，但不再作为本地开发默认路径。只有读取旧 SQLite 归档或应急回滚时才显式启用：
+
+```powershell
+$env:TRPG_DATABASE_BACKEND="sqlite"
+$env:TRPG_MEMORY_DB_PATH="data/context_memory.sqlite3"
+pnpm dev
+```
+
+`backend/logs/agent_traces` 和 `backend/logs/trace_exports` 继续走文件系统，不迁入数据库。
+
+Windows 下后端通过 `backend/run_server.py` 启动 FastAPI，避免 PostgreSQL async 驱动在默认事件循环下失败；通常仍然只需要执行 `pnpm dev`。
+
 ## 技术关键词
 
-Vue 3、TypeScript、Vite、FastAPI、LangGraph、LangChain、Pydantic、Three.js、SQLite、Chroma、BM25、Open5e。
+Vue 3、TypeScript、Vite、FastAPI、LangGraph、LangChain、Pydantic、Three.js、PostgreSQL、SQLite、Chroma、BM25、Open5e。

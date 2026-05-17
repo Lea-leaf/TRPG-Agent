@@ -105,7 +105,7 @@ class SessionStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(target_trace.exists())
             self.assertTrue(other_trace.exists())
 
-    async def test_list_sessions_prunes_orphan_metadata_and_trace_files(self):
+    async def test_list_sessions_prunes_orphan_metadata_without_deleting_trace_files(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "memory.sqlite3"
             trace_dir = Path(temp_dir) / "agent_traces"
@@ -136,9 +136,9 @@ class SessionStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(["live"], [session["id"] for session in sessions])
             self.assertEqual(["live"], remaining_ids)
             self.assertTrue(live_trace.exists())
-            self.assertFalse(orphan_trace.exists())
+            self.assertTrue(orphan_trace.exists())
 
-    async def test_list_sessions_prunes_trace_files_without_live_sessions(self):
+    async def test_list_sessions_preserves_trace_files_without_live_sessions(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "memory.sqlite3"
             trace_dir = Path(temp_dir) / "agent_traces"
@@ -155,7 +155,7 @@ class SessionStoreTests(unittest.IsolatedAsyncioTestCase):
                 sessions = await list_chat_sessions(db_path=db_path)
 
             self.assertEqual([], sessions)
-            self.assertFalse(stale_trace.exists())
+            self.assertTrue(stale_trace.exists())
 
     async def test_list_sessions_prunes_orphan_sqlite_storage(self):
         with TemporaryDirectory() as temp_dir:

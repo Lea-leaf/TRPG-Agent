@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "pnpm dev:stop && concurrently --kill-others-on-fail --kill-signal SIGINT --names frontend,backend --prefix-colors cyan,magenta \"pnpm dev:frontend\" \"pnpm dev:backend\"",
+    "dev:db": "docker compose -f docker-compose.postgres.yml up -d",
     "dev:frontend": "set CI=true&& pnpm --dir frontend dev -- --clearScreen false --strictPort",
-    "dev:backend": "cd backend && set PYTHONUTF8=1&& set PYTHONIOENCODING=utf-8&& .venv\\Scripts\\python.exe -X utf8 -m uvicorn app.main:app",
+    "dev:backend": "cd backend && set PYTHONUTF8=1&& set PYTHONIOENCODING=utf-8&& ..\\.venv\\Scripts\\python.exe -X utf8 run_server.py",
     "dev:stop": "node scripts\\stop-dev.mjs"
   },
   "devDependencies": {
