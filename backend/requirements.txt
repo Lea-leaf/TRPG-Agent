@@ -67,6 +67,7 @@ langchain-openai==0.3.35
 langchain-text-splitters==0.3.11
 langgraph==0.6.11
 langgraph-checkpoint==2.1.2
+langgraph-checkpoint-postgres==2.0.23
 langgraph-checkpoint-sqlite==2.0.11
 langgraph-prebuilt==0.6.5
 langgraph-sdk==0.2.9
@@ -106,6 +107,7 @@ pluggy==1.6.0
 posthog==7.13.2
 propcache==0.4.1
 protobuf==6.33.6
+psycopg[binary,pool]==3.2.13
 pybase64==1.4.3
 pycparser==2.23
 pydantic==2.12.5

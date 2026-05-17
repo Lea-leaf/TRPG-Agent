@@ -6,6 +6,7 @@ import sqlite3
 from typing import Optional
 from uuid import uuid4
 
+import psycopg
 from fastapi import HTTPException, Query
 from fastapi import APIRouter
 from fastapi import status
@@ -62,7 +63,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             space=result.get("space"),
             adventure=result.get("adventure"),
         )
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, psycopg.Error) as exc:
         _raise_chat_http_error(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="memory_unavailable",
