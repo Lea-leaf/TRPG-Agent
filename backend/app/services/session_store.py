@@ -8,20 +8,11 @@ from uuid import uuid4
 
 import aiosqlite
 
-from app.config.settings import settings
 from app.utils.agent_trace import resolve_trace_file
+from app.utils.storage_paths import resolve_memory_db_path
 
 
 SESSION_TABLE = "app_chat_sessions"
-
-
-def resolve_memory_db_path(db_path: str | Path | None = None) -> Path:
-    """统一解析记忆数据库路径，保证 API 与 checkpointer 写入同一个 SQLite。"""
-    resolved = Path(db_path or settings.memory_db_path)
-    if not resolved.is_absolute():
-        resolved = Path.cwd() / resolved
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    return resolved
 
 
 def _now_ms() -> int:

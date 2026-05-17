@@ -8,6 +8,7 @@ from app.adventures.runtime import (
     LLMAdventureDirector,
     adjudicate_and_apply_adventure_progress,
     adjudicate_and_apply_pre_turn_adventure_progress,
+    build_adventure_node_frame_message,
 )
 from app.adventures.navigation import returnable_node_ids
 from app.adventures.store import get_adventure_store
@@ -1022,11 +1023,12 @@ def test_director_payload_keeps_full_history_and_structured_runtime_context():
     history = payload["message_history"]
 
     assert fake_llm.calls[0]["summary_input"].index('"director_contract"') < fake_llm.calls[0]["summary_input"].index('"message_history"')
-    assert fake_llm.calls[0]["summary_input"].index('"message_history"') < fake_llm.calls[0]["summary_input"].index('"current_node"')
-    assert fake_llm.calls[0]["summary_input"].index('"current_node"') < fake_llm.calls[0]["summary_input"].index('"adventure_state"')
+    assert fake_llm.calls[0]["summary_input"].index('"message_history"') < fake_llm.calls[0]["summary_input"].index('"active_node_pointer"')
+    assert fake_llm.calls[0]["summary_input"].index('"active_node_pointer"') < fake_llm.calls[0]["summary_input"].index('"adventure_state"')
     assert fake_llm.calls[0]["summary_input"].index('"adventure_state"') < fake_llm.calls[0]["summary_input"].index('"runtime_context"')
     assert fake_llm.calls[0]["summary_input"].index('"runtime_context"') < fake_llm.calls[0]["summary_input"].index('"turn_context"')
-    assert len(history) == 4
+    assert len(history) == 5
+    assert "current_node" not in payload
     assert history[0]["content"] == "我去检查伏击地点。"
     assert "system_authorized_facts" not in payload["director_contract"]
     assert history[1]["tool_calls"][0]["name"] == "manage_adventure"
@@ -1034,7 +1036,9 @@ def test_director_payload_keeps_full_history_and_structured_runtime_context():
     assert "id" not in history[1]["tool_calls"][0]
     assert "tool_call_id" not in history[2]
     assert history[2]["role"] == "tool:manage_adventure"
-    assert history[-1]["content"] == "继续往前走。"
+    assert history[-2]["content"] == "继续往前走。"
+    assert history[-1]["role"] == "system:adventure_node_frame"
+    assert history[-1]["node_id"] == "goblin_ambush"
     assert payload["known_clue_window"] == ["goblin_trail"]
     assert payload["runtime_context"]["adventure_runtime_directive"]["node_id"] == "cragmaw_hideout_entrance"
     assert "adventure_reward_notice" not in payload["runtime_context"]
@@ -1042,6 +1046,54 @@ def test_director_payload_keeps_full_history_and_structured_runtime_context():
     assert payload["runtime_context"]["system_authorized_facts"]
     assert payload["turn_context"]["stage"] == "post_turn"
     assert payload["turn_context"]["player_message"] == "继续往前走。"
+
+
+def test_director_keeps_adventure_node_frame_as_ledger_entry():
+    fake_llm = FakeSummaryLLMService()
+    director = LLMAdventureDirector(llm_service=fake_llm)
+    state = _ambush_state()
+    messages = [
+        HumanMessage(content="我去检查伏击地点。"),
+        build_adventure_node_frame_message("goblin_ambush"),
+        HumanMessage(content="继续往前走。"),
+    ]
+
+    director.adjudicate(state=state, recent_messages=messages, session_id="director-node-frame-demo")
+
+    payload = json.loads(fake_llm.calls[0]["summary_input"])
+    history = payload["message_history"]
+    node_frame = history[1]
+    assert node_frame["role"] == "system:adventure_node_frame"
+    assert node_frame["frame_type"] == "adventure_node"
+    assert node_frame["node_id"] == "goblin_ambush"
+    assert node_frame["current_node"]["id"] == "goblin_ambush"
+    assert payload["active_node_pointer"]["active_node_id"] == "goblin_ambush"
+    assert "只有最后一个" in payload["active_node_pointer"]["rule"]
+
+
+def test_pre_turn_director_keeps_dict_adventure_node_frame_as_ledger_entry():
+    fake_llm = FakeSummaryLLMService()
+    director = LLMAdventureDirector(llm_service=fake_llm)
+    node_frame = build_adventure_node_frame_message("goblin_ambush")
+    state = {
+        **_ambush_state(),
+        "messages": [
+            {"role": "human", "content": "我去检查伏击地点。"},
+            {"role": "human", "content": node_frame.content},
+        ],
+    }
+
+    director.adjudicate_pre_turn(state=state, player_message="继续观察", session_id="director-node-frame-pre")
+
+    payload = json.loads(fake_llm.calls[0]["summary_input"])
+    node_frames = [
+        item
+        for item in payload["message_history"]
+        if item["role"] == "system:adventure_node_frame"
+    ]
+    assert len(node_frames) == 1
+    assert node_frames[0]["node_id"] == "goblin_ambush"
+    assert node_frames[0]["current_node"]["id"] == "goblin_ambush"
 
 
 def test_director_candidate_and_returnable_nodes_use_index_views():
@@ -1141,7 +1193,7 @@ def test_director_history_uses_same_roles_for_state_dicts_and_messages():
     ]
 
 
-def test_director_current_node_view_keeps_ids_but_compacts_repeated_facts():
+def test_director_node_frame_current_node_view_keeps_ids_but_compacts_repeated_facts():
     fake_llm = FakeSummaryLLMService()
     director = LLMAdventureDirector(llm_service=fake_llm)
     state = {
@@ -1166,12 +1218,22 @@ def test_director_current_node_view_keeps_ids_but_compacts_repeated_facts():
         },
     }
 
-    director.adjudicate(state=state, recent_messages=[HumanMessage(content="我搜索伏击现场。")], session_id="compact-node-view")
+    director.adjudicate(
+        state=state,
+        recent_messages=[
+            build_adventure_node_frame_message("goblin_ambush"),
+            HumanMessage(content="我搜索伏击现场。"),
+        ],
+        session_id="compact-node-view",
+    )
 
     payload = json.loads(fake_llm.calls[0]["summary_input"])
-    current_node = payload["current_node"]
+    node_frame = payload["message_history"][0]
+    current_node = node_frame["current_node"]
     source_node = get_adventure_store().get_node("goblin_ambush")
 
+    assert "current_node" not in payload
+    assert node_frame["role"] == "system:adventure_node_frame"
     clue_ids = {item["id"] for item in current_node["clues"]}
     exit_ids = {item["id"] for item in current_node["exits"]}
     reward_ids = {item["id"] for item in current_node["rewards"]}

@@ -21,6 +21,7 @@ from app.services.tools._helpers import compute_ac
 
 CONTEXT_COMPACTION_MESSAGE_PREFIX = "[系统:上下文预算归档]"
 RUNTIME_STATE_MESSAGE_PREFIX = "[系统:运行状态帧]"
+ADVENTURE_NODE_FRAME_MESSAGE_PREFIX = "[系统:冒险节点帧]"
 MODEL_CONTEXT_TOKEN_LIMIT = 1_000_000
 # 中文注释：前缀保持稳定时，宁可更早压缩，也不要让长历史把有效前缀拖得太贵。
 CONTEXT_SOFT_COMPACT_TOKEN_BUDGET = 450_000
@@ -425,7 +426,11 @@ class ContextAssembler:
                 continue
 
             if isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith("[系统:"):
-                if message.content.startswith((CONTEXT_COMPACTION_MESSAGE_PREFIX, RUNTIME_STATE_MESSAGE_PREFIX)):
+                if message.content.startswith(RUNTIME_STATE_MESSAGE_PREFIX):
+                    continue
+                if message.content.startswith(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX):
+                    continue
+                if message.content.startswith(CONTEXT_COMPACTION_MESSAGE_PREFIX):
                     projected_messages.append(message)
                     continue
                 projected_messages.append(clone_message_with_content(message, summarize_system_message(message.content)))
@@ -978,6 +983,15 @@ def build_runtime_state_message(runtime_state_text: str) -> HumanMessage:
 
 def is_runtime_state_message(message: BaseMessage) -> bool:
     return isinstance(message, HumanMessage) and isinstance(message.content, str) and message.content.startswith(RUNTIME_STATE_MESSAGE_PREFIX)
+
+
+def is_adventure_node_frame_message(message: Any) -> bool:
+    if isinstance(message, HumanMessage):
+        return isinstance(message.content, str) and message.content.startswith(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX)
+    if isinstance(message, dict):
+        content = message_content_to_text(message.get("content", ""))
+        return content.startswith(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX)
+    return False
 
 
 def is_internal_system_human_message(message: HumanMessage) -> bool:

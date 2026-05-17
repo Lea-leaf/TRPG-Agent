@@ -81,7 +81,7 @@ export function useChatMessages(initialDebugMode: boolean = false) {
 
   const addAssistantMessage = (content: string, isStreamingChunk: boolean = false) => {
  
-    if (!content.trim() && !isStreamingChunk) return
+    if (!content.trim()) return
     
     if (isStreamingChunk && currentStreamingMessageId) {
       const index = messages.value.findIndex(m => m.id === currentStreamingMessageId)

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+from app.utils.storage_paths import resolve_memory_db_path
 
 
 _CHECKPOINTER: AsyncSqliteSaver | None = None
@@ -23,10 +24,7 @@ async def get_checkpointer(db_path: str) -> AsyncSqliteSaver:
         if _CHECKPOINTER is not None:
             return _CHECKPOINTER
 
-        db_file = Path(db_path)
-        if not db_file.is_absolute():
-            db_file = Path.cwd() / db_file
-        db_file.parent.mkdir(parents=True, exist_ok=True)
+        db_file = resolve_memory_db_path(db_path)
 
         conn = await aiosqlite.connect(str(db_file))
         await conn.execute("PRAGMA journal_mode = WAL")
@@ -52,4 +50,3 @@ async def close_checkpointer() -> None:
 
         await _CHECKPOINTER.conn.close()
         _CHECKPOINTER = None
-

@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from app.graph.constants import COMBAT_AGENT_MODE, NARRATIVE_AGENT_MODE
 from app.memory.context_assembler import (
+    ADVENTURE_NODE_FRAME_MESSAGE_PREFIX,
     AdventureNodeRetrievalContextProvider,
     ContextAssembler,
     build_runtime_state_message,
@@ -334,6 +335,21 @@ class ContextAssemblerTests(unittest.TestCase):
         self.assertIsInstance(assembled.model_input_messages[-2], AIMessage)
         self.assertIsInstance(assembled.model_input_messages[-1], ToolMessage)
         self.assertIn("[工具:attack_action]", assembled.model_input_messages[-1].content)
+
+    def test_model_input_filters_adventure_node_frames_from_main_agent(self):
+        assembler = ContextAssembler()
+        state = {
+            "messages": [
+                HumanMessage(content="旧输入"),
+                HumanMessage(content=f"{ADVENTURE_NODE_FRAME_MESSAGE_PREFIX}\n{{\"node_id\":\"goblin_ambush\"}}"),
+                HumanMessage(content="继续"),
+            ]
+        }
+
+        assembled = assembler.assemble(state, NARRATIVE_AGENT_MODE, base_system_prompt="rules")
+
+        contents = [str(message.content) for message in assembled.model_input_messages]
+        self.assertEqual(["旧输入", "继续"], contents)
 
     def test_adventure_node_tool_projection_keeps_structured_material(self):
         tool_message = ToolMessage(

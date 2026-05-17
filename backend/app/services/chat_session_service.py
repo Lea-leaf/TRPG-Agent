@@ -19,11 +19,17 @@ from app.adventures.runtime import (
     AdventureRuntimeUpdate,
     adjudicate_and_apply_adventure_progress,
     adjudicate_and_apply_pre_turn_adventure_progress,
+    build_adventure_node_frame_message,
 )
 from app.config.settings import settings
 from app.graph.builder import build_graph
 from app.memory.checkpointer import close_checkpointer, get_checkpointer
-from app.memory.context_assembler import is_runtime_state_message
+from app.memory.context_assembler import (
+    ADVENTURE_NODE_FRAME_MESSAGE_PREFIX,
+    is_adventure_node_frame_message,
+    is_internal_system_human_message,
+    is_runtime_state_message,
+)
 from app.services.session_store import purge_chat_session_data, touch_chat_session
 from app.services.tools._helpers import compute_ac
 from app.utils.agent_trace import (
@@ -218,7 +224,7 @@ class ChatSessionService:
         """只拼接本轮真正对用户可见的 AI 文本回复。"""
         reply_parts: list[str] = []
         for msg in new_messages:
-            if is_runtime_state_message(msg):
+            if isinstance(msg, HumanMessage) and is_internal_system_human_message(msg):
                 continue
             if isinstance(msg, AIMessage) and msg.content:
                 if isinstance(msg.content, str):
@@ -329,13 +335,16 @@ class ChatSessionService:
             return
 
         existing_state = await self._graph.aget_state(config)
+        adventure = self._current_or_default_adventure(existing_state)
+        state_update = {
+            "session_id": session_id,
+            "episodic_context": [],
+            "adventure": adventure,
+        }
+        state_update.update(self._adventure_node_frame_update(existing_state, adventure))
         await self._graph.aupdate_state(
             config,
-            {
-                "session_id": session_id,
-                "episodic_context": [],
-                "adventure": self._current_or_default_adventure(existing_state),
-            },
+            state_update,
         )
 
     def _current_or_default_adventure(self, state: Any) -> dict[str, Any]:
@@ -377,6 +386,7 @@ class ChatSessionService:
         state_update = dict(update.state_update)
         if update.adventure:
             state_update["adventure"] = update.adventure
+            state_update.update(self._adventure_node_frame_update(state, update.adventure))
         if state_update:
             await self._graph.aupdate_state(config, state_update)
         return update
@@ -414,9 +424,34 @@ class ChatSessionService:
         state_update = dict(update.state_update)
         if update.adventure:
             state_update["adventure"] = update.adventure
+            state_update.update(self._adventure_node_frame_update(state, update.adventure))
         if state_update:
             await self._graph.aupdate_state(config, state_update)
         return update
+
+    def _adventure_node_frame_update(self, state: Any, adventure: dict[str, Any]) -> dict[str, Any]:
+        """节点事实是低频大块上下文；切换节点时追加帧，避免每轮替换破坏 KC 前缀。"""
+        active_node_id = str(adventure.get("active_node_id", "") or "")
+        if not active_node_id:
+            return {}
+        messages = list(state.values.get("messages", [])) if state and hasattr(state, "values") else []
+        if self._latest_adventure_node_frame_id(messages) == active_node_id:
+            return {}
+        return {"messages": [build_adventure_node_frame_message(active_node_id)]}
+
+    def _latest_adventure_node_frame_id(self, messages: list[Any]) -> str:
+        """只看最近一个节点帧；回访同节点时允许在新位置再次追加。"""
+        for message in reversed(messages):
+            if not is_adventure_node_frame_message(message):
+                continue
+            content = str(getattr(message, "content", ""))
+            raw = content.removeprefix(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX).strip()
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                return ""
+            return str(payload.get("node_id", "") or "")
+        return ""
 
     def _get_adventure_director(self) -> AdventureDirector:
         """懒加载后台 director，避免每轮重复初始化 LLM 客户端。"""
@@ -560,7 +595,9 @@ class ChatSessionService:
                     if isinstance(msg, AIMessage) and msg.content:
                         # 战斗流里很多给玩家看的旁白和工具调用会落在同一条 AIMessage 上，不能因为带 tool_calls 就吞掉文本。
                         content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                        yield self._sse_event("assistant_message", {"content": content})
+                        # 只过滤模型工具调用时吐出的纯空白占位，避免前端生成空气泡。
+                        if content.strip():
+                            yield self._sse_event("assistant_message", {"content": content})
 
                     elif isinstance(msg, ToolMessage):
                         if self._is_hidden_tool_message(msg):
@@ -592,7 +629,7 @@ class ChatSessionService:
                             yield self._sse_event("tool_message", payload)
 
                     elif isinstance(msg, HumanMessage) and isinstance(msg.content, str) and msg.content.startswith("[系统:"):
-                        if is_runtime_state_message(msg):
+                        if is_runtime_state_message(msg) or is_adventure_node_frame_message(msg):
                             continue
                         attack_roll = self._extract_attack_roll_payload(msg)
                         if attack_roll:
@@ -735,6 +772,12 @@ async def delete_chat_session(session_id: str) -> dict[str, int]:
     if _CHAT_SESSION_SERVICE is not None:
         return await _CHAT_SESSION_SERVICE.delete_session(session_id)
     return await purge_chat_session_data(session_id)
+
+
+def reset_cached_adventure_director() -> None:
+    """模型配置热切换后，丢弃持有旧 LLM 客户端的后台裁定器。"""
+    if _CHAT_SESSION_SERVICE is not None:
+        _CHAT_SESSION_SERVICE._default_adventure_director = None
 
 
 async def close_chat_session_service() -> None:

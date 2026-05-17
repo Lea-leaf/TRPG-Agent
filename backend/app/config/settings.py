@@ -51,6 +51,30 @@ class Settings(BaseSettings):
         default="deepseek-v4-flash",
         validation_alias=AliasChoices("TRPG_MEMORY_SUMMARY_MODEL"),
     )
+    memory_summary_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "TRPG_MEMORY_SUMMARY_API_KEY",
+            "TRPG_LLM_API_KEY",
+            "OPENAI_API_KEY",
+        ),
+    )
+    memory_summary_base_url: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "TRPG_MEMORY_SUMMARY_BASE_URL",
+            "TRPG_LLM_BASE_URL",
+            "OPENAI_BASE_URL",
+        ),
+    )
+    memory_summary_thinking_mode: Optional[Literal["enabled", "disabled"]] = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "TRPG_MEMORY_SUMMARY_THINKING_MODE",
+            "TRPG_LLM_THINKING_MODE",
+            "OPENAI_THINKING_MODE",
+        ),
+    )
     memory_summary_temperature: float = 0.2
     memory_summary_timeout_seconds: float = Field(
         default=20.0,
@@ -78,6 +102,14 @@ class Settings(BaseSettings):
             "OPENAI_EMBEDDING_BASE_URL",
         ),
     )
+    embedding_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("TRPG_EMBEDDING_TIMEOUT_SECONDS"),
+    )
+    embedding_max_retries: int = Field(
+        default=1,
+        validation_alias=AliasChoices("TRPG_EMBEDDING_MAX_RETRIES"),
+    )
     rerank_model: str = Field(
         default="BAAI/bge-reranker-v2-m3",
         validation_alias=AliasChoices("TRPG_RERANK_MODEL", "OPENAI_RERANK_MODEL"),
@@ -100,13 +132,17 @@ class Settings(BaseSettings):
             "OPENAI_EMBEDDING_BASE_URL",
         ),
     )
-    rag_db_dir: str = Field(
-        default="data/rag_pdf_db",
-        validation_alias=AliasChoices("TRPG_RAG_DB_DIR", "RAG_DB_DIR"),
+    rerank_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices("TRPG_RERANK_TIMEOUT_SECONDS"),
     )
-    rag_source_pdf_path: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("TRPG_RAG_SOURCE_PDF_PATH", "RAG_SOURCE_PDF_PATH"),
+    rag_profile: Literal["core_cn"] = Field(
+        default="core_cn",
+        validation_alias=AliasChoices("TRPG_RAG_PROFILE", "RAG_PROFILE"),
+    )
+    rag_core_cn_db_dir: str = Field(
+        default="data/rag_core_cn_db",
+        validation_alias=AliasChoices("TRPG_RAG_CORE_CN_DB_DIR", "RAG_CORE_CN_DB_DIR"),
     )
     memory_db_path: str = Field(
         default="data/context_memory.sqlite3",

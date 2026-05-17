@@ -38,6 +38,11 @@
           </div>
         </header>
 
+        <ActionAvailabilityNotice
+          :reasons="actionAvailabilityReasons"
+          :text="actionAvailabilityText"
+        />
+
         <div class="message-list" ref="messageListRef" @scroll="handleScroll">
           <ChatMessage
             v-for="msg in messages"
@@ -96,6 +101,8 @@
         :scene-units="sceneUnitsState"
         :dead-units="deadUnitsState"
         :send-tactical-move-request="sendTextMessage"
+        @selected-unit-change="handleSelectedUnitChange"
+        @action-notice="handleActionNotice"
       />
     </div>
 
@@ -116,14 +123,18 @@
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Plus, Trash2 } from 'lucide-vue-next'
+import ActionAvailabilityNotice from '../components/Chat/ActionAvailabilityNotice.vue'
 import ChatMessage from '../components/Chat/ChatMessage.vue'
 import ChatInput from '../components/Chat/ChatInput.vue'
 import ActionPanel from '../components/Chat/ActionPanel.vue'
 import CharacterSidebar from '../components/Chat/SideCharacterPanel/CharacterSidebar.vue'
+import { useActionAvailabilityNotice } from '../composables/useActionAvailabilityNotice'
 import { useChatSession } from '../composables/useChatSession'
 import { useChatMessages } from '../composables/useChatMessages'
 import { useChatSender } from '../composables/useChatSender'
+import type { AvailabilitySelectionUnit } from '../Services_/actionAvailabilityService'
 import { chatService } from '../Services_/chatService'
+import { defaultLeftRailState, publishLeftRailState } from '../Services_/leftRailService'
 import { createSession, deleteSession as deleteSessionApi } from '../Services_/sessionService'
 import { APP_SETTINGS_UPDATED_EVENT, loadAppSettings, type AppSettings } from '../Services_/SettingsPageService'
 
@@ -137,6 +148,11 @@ const rightWidth = ref(25)
 const showToggleBtn = ref(false)
 const isDragging = ref(false)
 const appSettings = ref(loadAppSettings())
+
+// 顶部可用性提示只依赖页面壳级状态，不直接读取地图组件内部实现。
+const selectedUnit = ref<AvailabilitySelectionUnit | null>(null)
+const manualActionNoticeText = ref('')
+let manualActionNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
 // 聊天逻辑
 const { sessionId, updateSessionId, clearSessionId } = useChatSession()
@@ -177,14 +193,10 @@ const {
 provide('debugMode', debugMode)
 provide('skipOutputAnimation', computed(() => appSettings.value.skipOutputAnimation))
 
-// 战斗开始时优先切到血量概览，结束后回到角色页
-watch(combatState, (hasCombat) => {
+// 右侧侧栏始终保持角色信息视图，左侧是否切到战斗时间线由页面壳统一决定。
+watch(combatState, () => {
   if (characterSidebarRef.value) {
-    if (hasCombat) {
-      characterSidebarRef.value.setViewMode('hp')
-    } else {
-      characterSidebarRef.value.setViewMode('character')
-    }
+    characterSidebarRef.value.setViewMode('character')
   }
 }, { immediate: true })
 
@@ -210,6 +222,25 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   startLoading,
   stopLoading
 )
+
+// 把顶部提示条的判断完全收口到 composable，聊天页只做挂载和数据透传。
+const {
+  reasons: actionAvailabilityReasons,
+  noticeText: derivedActionAvailabilityText,
+} = useActionAvailabilityNotice(
+  playerState,
+  combatState,
+  spaceState,
+  selectedUnit,
+)
+
+const actionAvailabilityText = computed(() => manualActionNoticeText.value || derivedActionAvailabilityText.value)
+const isCombatActive = computed(() => {
+  const combat = combatState.value
+  if (!combat || typeof combat !== 'object') return false
+  const participants = combat.participants
+  return !!(participants && typeof participants === 'object' && Object.keys(participants).length > 0)
+})
 
 const showNextTurnBtn = computed(() => {
   if (!combatState.value || pendingAction.value) return false
@@ -245,6 +276,30 @@ const scrollToBottom = () => {
 
 // 监听消息变化自动滚动
 watch(messages, scrollToBottom, { deep: true })
+
+watch(
+  [isCombatActive, playerState, combatState, spaceState, selectedUnit],
+  ([combatActive, player, combat, space, target]) => {
+    if (combatActive) {
+      publishLeftRailState({
+        mode: 'combat',
+        combatVisible: true,
+        combat: {
+          player,
+          combat,
+          space,
+          selectedUnit: target,
+          sendCombatActionRequest: sendTextMessage,
+          onActionNotice: handleActionNotice,
+        },
+      })
+      return
+    }
+
+    publishLeftRailState(defaultLeftRailState())
+  },
+  { immediate: true, deep: true },
+)
 
 const hydrateCurrentSession = async () => {
   if (!sessionId.value) return
@@ -315,6 +370,8 @@ onUnmounted(() => {
   document.removeEventListener('mousemove', handleMouseMove)
   window.removeEventListener('storage', handleSettingsStorage)
   window.removeEventListener(APP_SETTINGS_UPDATED_EVENT, handleSettingsUpdated as EventListener)
+  if (manualActionNoticeTimer) clearTimeout(manualActionNoticeTimer)
+  publishLeftRailState(defaultLeftRailState())
 })
 
 const handleSettingsStorage = (event: StorageEvent) => {
@@ -337,6 +394,20 @@ const applySettings = (settings: AppSettings) => {
 
 const togglePanel = () => {
   rightWidth.value = rightWidth.value === 0 ? 25 : 0
+}
+
+// 地图侧栏只上抛“当前选中的单位”语义，页面用它驱动可用性提示，不反向耦合地图细节。
+const handleSelectedUnitChange = (unit: AvailabilitySelectionUnit | null) => {
+  selectedUnit.value = unit
+}
+
+const handleActionNotice = (text: string) => {
+  manualActionNoticeText.value = text
+  if (manualActionNoticeTimer) clearTimeout(manualActionNoticeTimer)
+  manualActionNoticeTimer = setTimeout(() => {
+    manualActionNoticeText.value = ''
+    manualActionNoticeTimer = null
+  }, 2600)
 }
 
 const startDrag = (e: MouseEvent) => {

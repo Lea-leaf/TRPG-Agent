@@ -22,7 +22,12 @@ from app.adventures.navigation import (
 )
 from app.adventures.rewards import sync_pending_node_rewards
 from app.adventures.store import get_adventure_store
-from app.memory.context_assembler import is_internal_system_human_message, message_content_to_text
+from app.memory.context_assembler import (
+    ADVENTURE_NODE_FRAME_MESSAGE_PREFIX,
+    is_adventure_node_frame_message,
+    is_internal_system_human_message,
+    message_content_to_text,
+)
 from app.services.llm_service import LLMService
 from app.utils.agent_trace import (
     fail_adventure_director_trace,
@@ -48,7 +53,7 @@ DIRECTOR_SYSTEM_PROMPT = (
     "只有玩家行动、工具结果或主持回复明确支持时，才输出对应 id。"
     "post_turn 时，同时检查主持回复是否臆造了当前节点或工具结果未支持的地点、NPC、派系、任务、救援目标、奖励或主线结论。"
     "pre_turn 时，只处理玩家已经明确点名目的地、回访目标或出口意图的移动；"
-    "若玩家最新输入同时明确确认当前节点已经发生的事实，可以输出 current_node.events 或 current_node.clues 中的 id。"
+    "若玩家最新输入同时明确确认当前节点已经发生的事实，可以输出当前冒险节点帧 current_node.events 或 current_node.clues 中的 id。"
     "pre_turn 不做越界警告，也不要从旧对话里补写玩家本轮没有确认的事实。"
     "pre_turn 遇到拥有多个出口的节点时，'继续'、'继续前进'、'走吧'、'往前走'、'出发'这类泛化行动必须输出 null，"
     "除非玩家同时明确说出去凡达林、追踪地精踪迹、进入洞口、返回遇袭地点等具体目标。"
@@ -191,18 +196,19 @@ class LLMAdventureDirector:
             current_node_id=node.id,
             query=intent_query,
         )
+        director_messages = _messages_with_active_node_frame(messages, node.id)
         payload = {
             "director_contract": {
                 "transition_rule": {
-                    "advance": "current_node.exits 中的硬出口；只允许沿当前出口推进到 next_node_id。",
+                    "advance": "当前冒险节点帧 current_node.exits 中的硬出口；只允许沿当前出口推进到 next_node_id。",
                     "switch": "语义上已经抵达但当前节点没有直接出口时，允许切换到 candidate_nodes 中的目标节点。",
                     "revisit": "玩家明确回头、补回或重访先前离开的节点时，允许切换到 returnable_nodes 中的目标节点。",
                 },
                 "output_schema": {
-                    "completed_event_ids": ["只允许 current_node.events 中的 id"],
-                    "discovered_clue_ids": ["只允许 current_node.clues 中的 id"],
-                    "exit_option_id": "只允许 current_node.exits 中的 id，无法判断则 null",
-                    "target_node_id": "只允许 current_node、candidate_nodes 或 returnable_nodes 中的 id，无法判断则 null",
+                    "completed_event_ids": ["只允许当前冒险节点帧 current_node.events 中的 id"],
+                    "discovered_clue_ids": ["只允许当前冒险节点帧 current_node.clues 中的 id"],
+                    "exit_option_id": "只允许当前冒险节点帧 current_node.exits 中的 id，无法判断则 null",
+                    "target_node_id": "只允许 active_node_id、candidate_nodes 或 returnable_nodes 中的 id，无法判断则 null",
                     "transition_kind": "advance、switch 或 revisit；exit_option_id 有效时通常用 advance，否则根据语义目标用 switch 或 revisit",
                     "needs_player_choice": "可选；目标节点已确定但抵达后仍需玩家选择下一步时为 true，不阻止节点提交",
                     "confidence": "0 到 1",
@@ -214,8 +220,8 @@ class LLMAdventureDirector:
                 },
                 "known_module_aliases": _known_module_aliases(),
             },
-            "message_history": _director_message_history(messages),
-            "current_node": _director_current_node_view(node),
+            "message_history": _director_message_history(director_messages),
+            "active_node_pointer": _director_active_node_pointer(node),
             "route_memory": _director_route_memory(adventure, node.id),
             "returnable_nodes": _director_returnable_nodes(adventure, node.id),
             "candidate_nodes": candidate_nodes,
@@ -527,6 +533,9 @@ def _director_message_role(message: Any) -> str:
 
 
 def _message_brief(message: Any) -> dict[str, Any]:
+    if is_adventure_node_frame_message(message):
+        return _director_node_frame_brief(message)
+
     if isinstance(message, dict):
         content = message_content_to_text(message.get("content", ""))
         brief: dict[str, Any] = {"role": _director_message_role(message), "content": content[:3000]}
@@ -576,10 +585,70 @@ def _director_message_history(messages: list[Any]) -> list[dict[str, Any]]:
     """director 吃稳定 append-only 转录；旧消息不要携带运行时随机 id。"""
     history: list[dict[str, Any]] = []
     for message in messages:
-        if _is_internal_system_history_message(message):
+        if _is_internal_system_history_message(message) and not is_adventure_node_frame_message(message):
             continue
         history.append(_message_brief(message))
     return history
+
+
+def _messages_with_active_node_frame(messages: list[Any], active_node_id: str) -> list[Any]:
+    """兜底补齐当前节点帧；正常路径由会话服务持久追加，避免每轮重造。"""
+    if _latest_adventure_node_frame_id(messages) == active_node_id:
+        return messages
+    return [*messages, build_adventure_node_frame_message(active_node_id)]
+
+
+def _latest_adventure_node_frame_id(messages: list[Any]) -> str:
+    """只认最后一个节点帧；回访同节点会在新位置再追加。"""
+    for message in reversed(messages):
+        if not is_adventure_node_frame_message(message):
+            continue
+        content = _message_content_text(message)
+        raw = content.removeprefix(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX).strip()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return ""
+        return str(payload.get("node_id", "") or "")
+    return ""
+
+
+def build_adventure_node_frame_message(node_id: str) -> HumanMessage:
+    """把低频节点事实写成 append-only 内部帧；切节点时追加，不在历史中原地替换。"""
+    node = get_adventure_store().get_node(node_id)
+    payload = {
+        "frame_type": "adventure_node",
+        "node_id": node.id,
+        "current_node": _director_current_node_view(node),
+    }
+    return HumanMessage(
+        content=f"{ADVENTURE_NODE_FRAME_MESSAGE_PREFIX}\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def _director_node_frame_brief(message: Any) -> dict[str, Any]:
+    """Director 将节点帧当作 ledger 事件读取，避免误认为玩家发言。"""
+    content = _message_content_text(message)
+    raw = content.removeprefix(ADVENTURE_NODE_FRAME_MESSAGE_PREFIX).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"role": "system:adventure_node_frame", "content": raw[:3000]}
+    return {
+        "role": "system:adventure_node_frame",
+        "frame_type": "adventure_node",
+        "node_id": str(payload.get("node_id", "")),
+        "current_node": payload.get("current_node"),
+    }
+
+
+def _director_active_node_pointer(node: Any) -> dict[str, Any]:
+    """尾部小指针声明当前有效节点；旧节点帧只作为路径历史。"""
+    return {
+        "active_node_id": node.id,
+        "active_node_frame_role": "system:adventure_node_frame",
+        "rule": "只有最后一个 node_id 等于 active_node_id 的冒险节点帧是当前节点事实；更早节点帧只作历史和回访参考。",
+    }
 
 
 def _director_current_node_view(node: Any) -> dict[str, Any]:

@@ -872,6 +872,48 @@ def test_combat_assistant_node_invokes_llm_with_monster_turn_directive_and_comba
     assert "start_combat" not in {tool.name for tool in llm_call["tools"]}
 
 
+def test_assistant_invocation_filters_stale_runtime_frames_but_appends_current_one():
+    class _FakeLLMService:
+        def __init__(self):
+            self.calls = []
+
+        def invoke_with_tools(self, messages, tools, system_prompt, mode):
+            self.calls.append({
+                "messages": messages,
+                "tools": tools,
+                "system_prompt": system_prompt,
+                "mode": mode,
+            })
+            return AIMessage(content="继续。", tool_calls=[])
+
+    fake_service = _FakeLLMService()
+    state = {
+        "phase": "combat",
+        "combat": _combat_state("player_hero"),
+        "player": _player_state(),
+        "messages": [
+            HumanMessage(content="上一轮行动"),
+            HumanMessage(content="[系统:运行状态帧]\n旧帧，不应再进模型输入。"),
+            AIMessage(content="上一轮回应", tool_calls=[]),
+            HumanMessage(content="继续"),
+        ],
+    }
+
+    with patch("app.graph.nodes._get_llm_service", return_value=fake_service):
+        result = combat_assistant_node(state)
+
+    llm_messages = fake_service.calls[0]["messages"]
+    stale_frames = [
+        message
+        for message in llm_messages[:-1]
+        if isinstance(message, HumanMessage) and str(message.content).startswith("[系统:运行状态帧]")
+    ]
+    assert stale_frames == []
+    assert str(llm_messages[-1].content).startswith("[系统:运行状态帧]")
+    assert result["messages"][0].content.startswith("[系统:运行状态帧]")
+    assert result["messages"][1].content == "继续。"
+
+
 def test_combat_resolution_node_does_not_interrupt_on_player_down():
     state = {
         "phase": "combat",

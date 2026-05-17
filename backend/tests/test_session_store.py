@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from os import chdir
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -11,9 +12,22 @@ from app.services.session_store import (
     touch_chat_session,
 )
 from app.utils.agent_trace import resolve_trace_file
+from app.utils.storage_paths import BACKEND_ROOT, resolve_memory_db_path
 
 
 class SessionStoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_relative_memory_db_path_is_resolved_from_backend_root(self):
+        old_cwd = Path.cwd()
+        with TemporaryDirectory() as temp_dir:
+            try:
+                chdir(temp_dir)
+
+                resolved = resolve_memory_db_path("data/test-context.sqlite3")
+            finally:
+                chdir(old_cwd)
+
+        self.assertEqual(BACKEND_ROOT / "data" / "test-context.sqlite3", resolved)
+
     async def test_session_metadata_is_created_and_updated(self):
         with TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "memory.sqlite3"
