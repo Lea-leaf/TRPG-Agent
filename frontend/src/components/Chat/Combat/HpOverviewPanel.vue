@@ -348,14 +348,14 @@ function toNumber(value: unknown): number {
 
 .hp-overview-item {
   width: 100%;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px;
   border: none;
   border-radius: 0;
-  background:
-    linear-gradient(180deg, rgba(24, 21, 19, 0.95) 0%, rgba(18, 16, 15, 0.95) 100%);
+  background: rgba(18, 16, 15, 0.95);
   color: inherit;
   text-align: left;
   transition:
@@ -363,8 +363,26 @@ function toNumber(value: unknown): number {
     background 0.26s ease,
     box-shadow 0.26s ease;
   box-shadow:
-    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    inset 1px 0 0 rgba(255, 244, 219, 0.04);
+}
+
+/* 中文注释：左侧高光改为独立光带，避免 blur 阴影把亮度污染到上下边界。 */
+.hp-overview-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  opacity: 0.6;
+  background: linear-gradient(90deg, rgba(255, 244, 219, 0.3) 0%, rgba(255, 244, 219, 0.1) 14%, rgba(255, 244, 219, 0.03) 62%, rgba(255, 244, 219, 0) 100%);
+  pointer-events: none;
+  transform-origin: left center;
+  animation: neutralGlow 2.4s ease-in-out infinite;
+  transition:
+    opacity 0.26s ease,
+    transform 0.26s ease,
+    background 0.26s ease;
 }
 
 .hp-overview-item + .hp-overview-item {
@@ -373,14 +391,12 @@ function toNumber(value: unknown): number {
 
 .hp-overview-item:first-child {
   box-shadow:
-    inset 0 1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    inset 1px 0 0 rgba(255, 244, 219, 0.05);
 }
 
 .hp-overview-item:last-child {
   box-shadow:
-    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+    inset 1px 0 0 rgba(255, 244, 219, 0.04);
 }
 
 .hp-overview-item:disabled {
@@ -393,36 +409,42 @@ function toNumber(value: unknown): number {
 
 .hp-overview-item.is-clickable:hover {
   transform: translateX(2px);
-  background:
-    linear-gradient(180deg, rgba(24, 21, 19, 0.96) 0%, rgba(18, 16, 15, 0.96) 100%);
+  background: rgba(18, 16, 15, 0.96);
   box-shadow:
-    inset 0 12px 18px -16px rgba(0, 0, 0, 0.28),
-    inset 0 -14px 18px -18px rgba(0, 0, 0, 0.2),
-    0 0 18px rgba(209, 178, 110, 0.08);
+    inset 1px 0 0 rgba(255, 244, 219, 0.08);
+}
+
+.hp-overview-item.is-clickable:hover::before {
+  opacity: 0.5;
+  transform: scaleX(1.04);
 }
 
 .hp-overview-item.is-active {
-  background:
-    linear-gradient(180deg, rgba(24, 21, 19, 0.96) 0%, rgba(18, 16, 15, 0.96) 100%);
+  background: rgba(18, 16, 15, 0.96);
   box-shadow:
-    inset 0 12px 18px -16px rgba(0, 0, 0, 0.3),
-    inset 0 -14px 18px -18px rgba(0, 0, 0, 0.22);
+    inset 1px 0 0 rgba(255, 244, 219, 0.08);
 }
 
 .hp-overview-item.is-enemy-turn {
   box-shadow:
-    inset 18px 0 30px -18px rgba(239, 68, 68, 0.5),
-    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
-  animation: hostilePulse 1.8s ease-in-out infinite;
+    inset 1px 0 0 rgba(255, 232, 232, 0.12);
+}
+
+.hp-overview-item.is-enemy-turn::before {
+  opacity: 0.92;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.64) 0%, rgba(239, 68, 68, 0.28) 18%, rgba(239, 68, 68, 0.08) 62%, rgba(239, 68, 68, 0) 100%);
+  animation: hostileGlow 1.8s ease-in-out infinite;
 }
 
 .hp-overview-item.is-player-turn {
   box-shadow:
-    inset 18px 0 30px -18px rgba(245, 199, 103, 0.5),
-    inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-    inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
-  animation: allyPulse 1.8s ease-in-out infinite;
+    inset 1px 0 0 rgba(255, 244, 219, 0.14);
+}
+
+.hp-overview-item.is-player-turn::before {
+  opacity: 0.92;
+  background: linear-gradient(90deg, rgba(245, 199, 103, 0.66) 0%, rgba(245, 199, 103, 0.28) 18%, rgba(245, 199, 103, 0.08) 62%, rgba(245, 199, 103, 0) 100%);
+  animation: allyGlow 1.8s ease-in-out infinite;
 }
 
 .item-meta {
@@ -518,33 +540,36 @@ function toNumber(value: unknown): number {
   padding: 20px 0;
 }
 
-@keyframes hostilePulse {
+@keyframes neutralGlow {
   0%, 100% {
-    box-shadow:
-      inset 18px 0 26px -18px rgba(239, 68, 68, 0.42),
-      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    opacity: 0.6;
+    transform: scaleX(1);
   }
   50% {
-    box-shadow:
-      inset 22px 0 34px -18px rgba(239, 68, 68, 0.58),
-      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    opacity: 0.72;
+    transform: scaleX(1.04);
   }
 }
 
-@keyframes allyPulse {
+@keyframes hostileGlow {
   0%, 100% {
-    box-shadow:
-      inset 18px 0 26px -18px rgba(245, 199, 103, 0.42),
-      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    opacity: 0.82;
+    transform: scaleX(1);
   }
   50% {
-    box-shadow:
-      inset 22px 0 34px -18px rgba(245, 199, 103, 0.58),
-      inset 0 10px 14px -14px rgba(0, 0, 0, 0.28),
-      inset 0 -12px 16px -16px rgba(0, 0, 0, 0.2);
+    opacity: 1;
+    transform: scaleX(1.18);
+  }
+}
+
+@keyframes allyGlow {
+  0%, 100% {
+    opacity: 0.82;
+    transform: scaleX(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1.18);
   }
 }
 
