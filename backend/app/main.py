@@ -4,6 +4,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.utils.asyncio_policy import configure_windows_selector_event_loop_policy
+
+configure_windows_selector_event_loop_policy()
+
 from app.api.chat import router as chat_router
 from app.api.model_config import router as model_config_router
 from app.api.sessions import router as sessions_router

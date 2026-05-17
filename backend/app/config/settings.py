@@ -144,6 +144,15 @@ class Settings(BaseSettings):
         default="data/rag_core_cn_db",
         validation_alias=AliasChoices("TRPG_RAG_CORE_CN_DB_DIR", "RAG_CORE_CN_DB_DIR"),
     )
+    # 本地和正式运行统一使用 PostgreSQL；SQLite 仅作为旧归档读取和显式 fallback。
+    database_backend: Literal["sqlite", "postgres"] = Field(
+        default="postgres",
+        validation_alias=AliasChoices("TRPG_DATABASE_BACKEND", "DATABASE_BACKEND"),
+    )
+    database_url: Optional[str] = Field(
+        default="postgresql://trpg:trpg@localhost:5432/trpg_agent",
+        validation_alias=AliasChoices("TRPG_DATABASE_URL", "DATABASE_URL"),
+    )
     memory_db_path: str = Field(
         default="data/context_memory.sqlite3",
         validation_alias=AliasChoices("TRPG_MEMORY_DB_PATH", "MEMORY_DB_PATH"),

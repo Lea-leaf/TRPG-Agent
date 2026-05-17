@@ -43,6 +43,7 @@ node_modules/
 
 # 本地测试与 Codex 临时缓存，不属于运行状态或调试 trace。
 .codex_tmp/
+backend/.codex*/
 .pytest_cache/
 .pytest-tmp/
 pytest-cache-files-*/
@@ -56,6 +57,7 @@ backend/data/context_memory.sqlite3-wal
 backend/data/model_profiles.json
 AGENTS.md
 data/context_memory.sqlite3
+migration_baselines/
 # Local runtime logs. Keep trace directories available for explicit debug exports.
 /logs/
 !backend/logs/
