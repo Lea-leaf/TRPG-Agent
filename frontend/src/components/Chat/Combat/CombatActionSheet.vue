@@ -97,9 +97,11 @@ const props = withDefaults(defineProps<{
   actorName: string
   groups: CombatActionMenuGroup[]
   selectedTargetName?: string
+  preferredTarget?: CombatTargetOption | null
   targetOptions?: CombatTargetOption[]
 }>(), {
   selectedTargetName: '',
+  preferredTarget: null,
   targetOptions: () => [],
 })
 
@@ -128,6 +130,12 @@ watch(
 const handleItemClick = (item: CombatActionMenuItem) => {
   if (item.disabledReason) {
     emit('blocked', item.disabledReason)
+    return
+  }
+
+  // 中文注释：若本次弹窗来自地图双击敌人，则敌方目标已明确，点击攻击动作后直接提交。
+  if (props.preferredTarget && item.targetMode === 'enemy') {
+    emit('submit', item)
     return
   }
 

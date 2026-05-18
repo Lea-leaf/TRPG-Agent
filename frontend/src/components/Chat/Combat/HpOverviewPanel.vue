@@ -59,8 +59,9 @@
       :actor-name="playerDisplayName"
       :groups="actionGroups"
       :selected-target-name="selectedTargetName"
+      :preferred-target="preferredActionTarget"
       :target-options="targetOptions"
-      @close="actionSheetOpen = false"
+      @close="closeActionSheet"
       @submit="handleActionSubmit"
       @submit-with-target="handleTargetedActionSubmit"
       @blocked="handleActionBlocked"
@@ -109,6 +110,7 @@ const props = defineProps<{
   combat?: Record<string, any> | null
   space?: Record<string, any> | null
   selectedUnit?: AvailabilitySelectionUnit | null
+  actionSheetRequestId?: number
   sendCombatActionRequest?: ((message: string) => Promise<void>) | null
 }>()
 const emit = defineEmits<{
@@ -116,7 +118,9 @@ const emit = defineEmits<{
 }>()
 
 const actionSheetOpen = ref(false)
+const preferredActionTarget = ref<CombatTargetOption | null>(null)
 const previousCurrentActorId = ref('')
+const lastHandledActionSheetRequestId = ref(0)
 
 const playerUnitId = computed(() => {
   if (!props.externalPlayer) return ''
@@ -228,18 +232,42 @@ const targetOptions = computed<CombatTargetOption[]>(() => {
     }))
 })
 
+const selectedEnemyTarget = computed<CombatTargetOption | null>(() => {
+  const selected = props.selectedUnit
+  if (!selected || selected.side !== 'enemy' || selected.isDead) return null
+  return targetOptions.value.find((unit) => unit.id === selected.id) ?? null
+})
+
 watch(
   currentActorId,
   (actorId) => {
     if (!actorId || actorId === previousCurrentActorId.value) return
     previousCurrentActorId.value = actorId
+    if (actorId !== playerUnitId.value) {
+      preferredActionTarget.value = null
+    }
     actionSheetOpen.value = actorId === playerUnitId.value
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.actionSheetRequestId ?? 0,
+  (requestId) => {
+    if (!requestId || requestId === lastHandledActionSheetRequestId.value) return
+    lastHandledActionSheetRequestId.value = requestId
+    if (!canOpenPlayerActions.value || !selectedEnemyTarget.value) return
+
+    // 中文注释：地图双击敌人时，把该敌人锁成这次弹窗的优先目标，点击攻击动作后直接提交。
+    preferredActionTarget.value = selectedEnemyTarget.value
+    actionSheetOpen.value = true
   },
   { immediate: true },
 )
 
 const handleUnitClick = (unit: HpOverviewUnit) => {
   if (!unit.isPlayerUnit || !canOpenPlayerActions.value) return
+  preferredActionTarget.value = null
   actionSheetOpen.value = true
 }
 
@@ -252,7 +280,7 @@ const handleActionSubmit = async (item: CombatActionMenuItem) => {
     return
   }
 
-  actionSheetOpen.value = false
+  closeActionSheet()
   await props.sendCombatActionRequest(item.command)
 }
 
@@ -267,7 +295,7 @@ const handleTargetedActionSubmit = async (
     return
   }
 
-  actionSheetOpen.value = false
+  closeActionSheet()
   await props.sendCombatActionRequest(
     buildCombatActionCommand(payload.item.commandPrefix, payload.item.targetMode, payload.target),
   )
@@ -283,8 +311,13 @@ const handleEndTurn = async () => {
     return
   }
 
-  actionSheetOpen.value = false
+  closeActionSheet()
   await props.sendCombatActionRequest('我结束回合')
+}
+
+const closeActionSheet = () => {
+  actionSheetOpen.value = false
+  preferredActionTarget.value = null
 }
 
 const emitActionNotice = (text: string) => {

@@ -26,6 +26,7 @@
       :combat="leftRailState.combat?.combat ?? null"
       :space="leftRailState.combat?.space ?? null"
       :selected-unit="leftRailState.combat?.selectedUnit ?? null"
+      :action-sheet-request-id="leftRailState.combat?.actionSheetRequestId ?? 0"
       :send-combat-action-request="leftRailState.combat?.sendCombatActionRequest ?? null"
       :is-collapsed="isCollapsed"
       @action-notice="forwardActionNotice"

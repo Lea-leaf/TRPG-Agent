@@ -6,6 +6,7 @@ export interface CombatLeftRailState {
   combat: Record<string, any> | null
   space: Record<string, any> | null
   selectedUnit: AvailabilitySelectionUnit | null
+  actionSheetRequestId?: number
   sendCombatActionRequest?: ((message: string) => Promise<void>) | null
   onActionNotice?: ((text: string) => void) | null
 }

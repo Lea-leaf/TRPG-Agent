@@ -5,6 +5,7 @@
       :combat="combat"
       :space="space"
       :selected-unit="selectedUnit"
+      :action-sheet-request-id="actionSheetRequestId"
       :send-combat-action-request="sendCombatActionRequest"
       @action-notice="handleActionNotice"
     />
@@ -21,6 +22,7 @@ const props = defineProps<{
   combat: Record<string, any> | null
   space: Record<string, any> | null
   selectedUnit: AvailabilitySelectionUnit | null
+  actionSheetRequestId?: number
   sendCombatActionRequest?: ((message: string) => Promise<void>) | null
   isCollapsed?: boolean
 }>()

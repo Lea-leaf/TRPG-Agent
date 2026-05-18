@@ -100,8 +100,9 @@
         :space="spaceState"
         :scene-units="sceneUnitsState"
         :dead-units="deadUnitsState"
-        :send-tactical-move-request="sendTextMessage"
+        :send-tactical-move-request="sendTacticalMoveRequest"
         @selected-unit-change="handleSelectedUnitChange"
+        @request-action-sheet="handleRequestActionSheet"
         @action-notice="handleActionNotice"
       />
     </div>
@@ -134,7 +135,7 @@ import { useChatMessages } from '../composables/useChatMessages'
 import { useChatSender } from '../composables/useChatSender'
 import type { AvailabilitySelectionUnit } from '../Services_/actionAvailabilityService'
 import { chatService } from '../Services_/chatService'
-import { defaultLeftRailState, publishLeftRailState } from '../Services_/leftRailService'
+import { defaultLeftRailState, overrideLeftRailMode, publishLeftRailState } from '../Services_/leftRailService'
 import { createSession, deleteSession as deleteSessionApi } from '../Services_/sessionService'
 import { APP_SETTINGS_UPDATED_EVENT, loadAppSettings, type AppSettings } from '../Services_/SettingsPageService'
 
@@ -151,6 +152,7 @@ const appSettings = ref(loadAppSettings())
 
 // 顶部可用性提示只依赖页面壳级状态，不直接读取地图组件内部实现。
 const selectedUnit = ref<AvailabilitySelectionUnit | null>(null)
+const combatActionSheetRequestId = ref(0)
 const manualActionNoticeText = ref('')
 let manualActionNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -223,6 +225,9 @@ const { sendTextMessage, confirmDiceRoll, respondToPlayerDeath, respondToReactio
   stopLoading
 )
 
+// 中文注释：战术移动仍然复用文本消息通道，但这类结构化请求不应显示在聊天列表里。
+const sendTacticalMoveRequest = (message: string) => sendTextMessage(message, { silent: true })
+
 // 把顶部提示条的判断完全收口到 composable，聊天页只做挂载和数据透传。
 const {
   reasons: actionAvailabilityReasons,
@@ -278,8 +283,8 @@ const scrollToBottom = () => {
 watch(messages, scrollToBottom, { deep: true })
 
 watch(
-  [isCombatActive, playerState, combatState, spaceState, selectedUnit],
-  ([combatActive, player, combat, space, target]) => {
+  [isCombatActive, playerState, combatState, spaceState, selectedUnit, combatActionSheetRequestId],
+  ([combatActive, player, combat, space, target, requestId]) => {
     if (combatActive) {
       publishLeftRailState({
         mode: 'combat',
@@ -289,6 +294,7 @@ watch(
           combat,
           space,
           selectedUnit: target,
+          actionSheetRequestId: requestId,
           sendCombatActionRequest: sendTextMessage,
           onActionNotice: handleActionNotice,
         },
@@ -399,6 +405,13 @@ const togglePanel = () => {
 // 地图侧栏只上抛“当前选中的单位”语义，页面用它驱动可用性提示，不反向耦合地图细节。
 const handleSelectedUnitChange = (unit: AvailabilitySelectionUnit | null) => {
   selectedUnit.value = unit
+}
+
+// 中文注释：双击敌人时只增加一次“打开动作面板”的触发信号，避免把行为文本塞进聊天消息。
+const handleRequestActionSheet = (unit: AvailabilitySelectionUnit) => {
+  selectedUnit.value = unit
+  combatActionSheetRequestId.value += 1
+  overrideLeftRailMode('combat')
 }
 
 const handleActionNotice = (text: string) => {
